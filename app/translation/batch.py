@@ -4,7 +4,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from app.translation.prompts import system_prompt
+from app.translation.prompts import get_translation_prompt
 
 
 def save_batch_state(temp_dir, batch_id, input_file_id, timestamp, job_metadata, paths):

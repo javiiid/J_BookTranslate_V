@@ -99,6 +99,8 @@ def ensure_temp_structure(job_id):
 
         "progress_log":
             job_dir / "progress.log",
+        "system_prompt_file":
+            job_dir / "system_prompt.txt",
     }
 
     return paths

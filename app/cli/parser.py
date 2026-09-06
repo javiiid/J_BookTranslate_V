@@ -97,4 +97,9 @@ def parse_args():
         )
     )
 
+    parser.add_argument(
+    "--prompt",
+    help="Custom translation prompt"
+    )
+
     return parser.parse_args()

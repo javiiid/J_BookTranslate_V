@@ -88,7 +88,43 @@ def save_chunks(paths, all_chunks, chapter_map):
     with open(paths['chunks_file'], 'w', encoding='utf-8') as f:
         json.dump(chunks_data, f, indent=2)
 
+def save_system_prompt(paths, prompt):
+    """Save the system prompt used by this translation job."""
 
+    with open(
+        paths["system_prompt_file"],
+        "w",
+        encoding="utf-8",
+    ) as f:
+        f.write(prompt)
+
+        f.flush()
+        os.fsync(f.fileno())
+
+
+def load_system_prompt(paths):
+    """Load the system prompt stored for this job."""
+
+    prompt_file = paths["system_prompt_file"]
+
+    if not prompt_file.exists():
+        raise FileNotFoundError(
+            f"System prompt file not found: {prompt_file}"
+        )
+
+    with open(
+        prompt_file,
+        "r",
+        encoding="utf-8",
+    ) as f:
+        prompt = f.read().strip()
+
+    if not prompt:
+        raise ValueError(
+            f"System prompt is empty: {prompt_file}"
+        )
+
+    return prompt
 
 def save_translations(paths, translations):
     """Save translations to translations.json with fsync for durability."""
