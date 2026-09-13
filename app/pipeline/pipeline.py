@@ -19,6 +19,7 @@ Responsibilities
 """
 
 import signal
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -198,13 +199,21 @@ def _translate_epub(
     resume_job_id,
     debug,
     translation_prompt,
+    stop_event=None,
+    on_job_started=None,
 ):
     """
     Execute the complete EPUB translation pipeline.
     """
 
-    original_sigint_handler = signal.getsignal(
-        signal.SIGINT
+    # Python only permits signal handlers in the interpreter's main thread.
+    # The CLI runs there, while the local web UI deliberately runs jobs in a
+    # worker thread so its request handler remains responsive.
+    can_manage_signals = threading.current_thread() is threading.main_thread()
+    original_sigint_handler = (
+        signal.getsignal(signal.SIGINT)
+        if can_manage_signals
+        else None
     )
 
     interrupted = False
@@ -316,6 +325,9 @@ def _translate_epub(
         # LOG
         # ====================================================
 
+        if on_job_started:
+            on_job_started(job_id, paths)
+
         log_progress(
             paths,
             (
@@ -330,10 +342,11 @@ def _translate_epub(
         # SIGNAL HANDLER
         # ====================================================
 
-        signal.signal(
-            signal.SIGINT,
-            handle_interrupt,
-        )
+        if can_manage_signals:
+            signal.signal(
+                signal.SIGINT,
+                handle_interrupt,
+            )
 
         # ====================================================
         # LOAD EXISTING STATE
@@ -482,6 +495,7 @@ def _translate_epub(
                 chapter_map=chapter_map,
                 filetype="epub",
                 translation_prompt=translation_prompt,
+                stop_event=stop_event,
             )
         )
 
@@ -613,10 +627,11 @@ def _translate_epub(
         # RESTORE SIGNAL HANDLER
         # ====================================================
 
-        signal.signal(
-            signal.SIGINT,
-            original_sigint_handler,
-        )
+        if can_manage_signals:
+            signal.signal(
+                signal.SIGINT,
+                original_sigint_handler,
+            )
 
         # ====================================================
         # DO NOT CLEAN INTERRUPTED JOB
@@ -951,6 +966,8 @@ def _translate_pdf(
     model,
     debug,
     translation_prompt,
+    stop_event=None,
+    on_job_started=None,
 ):
     """
     Execute the PDF processing pipeline.
@@ -988,6 +1005,9 @@ def _translate_pdf(
             model,
             resumed=False,
         )
+
+        if on_job_started:
+            on_job_started(job_id, paths)
 
         # ====================================================
         # BATCHCHECK
@@ -1091,6 +1111,7 @@ def _translate_pdf(
                 chapter_map=chapter_map,
                 filetype="pdf",
                 translation_prompt=translation_prompt,
+                stop_event=stop_event,
             )
         )
 
@@ -1221,6 +1242,8 @@ def translate(
     debug=False,
     filetype="epub",
     translation_prompt=None,
+    stop_event=None,
+    on_job_started=None,
 ):
     """
     Main translation dispatcher.
@@ -1426,6 +1449,8 @@ def translate(
             resume_job_id=resume_job_id,
             debug=debug,
             translation_prompt=translation_prompt,
+            stop_event=stop_event,
+            on_job_started=on_job_started,
         )
 
     # ========================================================
@@ -1444,6 +1469,8 @@ def translate(
             model=model,
             debug=debug,
             translation_prompt=translation_prompt,
+            stop_event=stop_event,
+            on_job_started=on_job_started,
         )
 
     # ========================================================

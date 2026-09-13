@@ -47,6 +47,7 @@ from app.core.retry import (
     RetryError,
     get_status_code,
 )
+from app.core.exceptions import TranslationStopped
 
 
 # ============================================================
@@ -1115,6 +1116,7 @@ def _process_fast_resume(
     test_translations: dict[str, Any] | None,
     filetype: str,
     system_prompt_text: str | None,
+    stop_event: Any = None,
 ) -> tuple[dict[str, Any], None, None]:
     """
     Process chunks sequentially.
@@ -1212,6 +1214,12 @@ def _process_fast_resume(
         untranslated_chunks,
         start=1,
     ):
+
+        # Let an in-flight request finish and save, then stop before the
+        # following chunk. This keeps a web-stopped job safely resumable.
+        if stop_event is not None and stop_event.is_set():
+            print("Stop requested. Completed translations are preserved.")
+            raise TranslationStopped
 
         current_number = (
             completed_count
@@ -1481,6 +1489,7 @@ def process_translations(
     filetype: str = "epub",
     translation_prompt=None,
     system_prompt_text: str | None = None,
+    stop_event: Any = None,
 ) -> tuple[dict[str, Any], Any, Any]:
     """
     Main translation workflow dispatcher.
@@ -1597,6 +1606,7 @@ def process_translations(
             test_translations=test_translations,
             filetype=filetype,
             system_prompt_text=system_prompt_text,
+            stop_event=stop_event,
         )
 
     # ========================================================
