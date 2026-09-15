@@ -49,6 +49,7 @@ from app.core.paths import (
 )
 
 from app.core.logging import log_progress
+from app.core.validation import ensure_disk_space, validate_book
 
 from app.core.exceptions import handle_interrupt
 
@@ -1305,6 +1306,12 @@ def translate(
     output_path = Path(
         output_path
     )
+
+    # Validate the document and available resources before creating a job or
+    # making an API request. This catches corrupt archives and disk exhaustion
+    # early, while leaving resumable state untouched.
+    validate_book(input_path)
+    ensure_disk_space(output_path, required_bytes=max(input_path.stat().st_size * 3, 100 * 1024 * 1024))
 
     # ========================================================
     # VALIDATE INPUT

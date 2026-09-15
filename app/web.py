@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 import io
+import hashlib
 import json
+import mimetypes
 import shutil
 import threading
 import traceback
 import uuid
+import zipfile
 from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -15,20 +18,32 @@ from email.parser import BytesParser
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from openai import OpenAI
 from app.core.config import read_config
 from app.core.models import DEFAULT_MODEL
 from app.core.paths import ensure_dir
+from app.core.validation import ensure_disk_space, validate_book
 from app.pipeline.pipeline import translate
 from app.translation.prompts import get_default_prompt
+from app.storage.database import db
+from app.reader.service import chapters as reader_chapters, chapter as reader_chapter
+from app.reader.page import reader_page
+from app.library.view import library_page
+from app.glossary.service import get_glossary, save_glossary
+from app.glossary.automatic import sync_book
+from app.jobs.state import _atomic_json
+from app.jobs.dashboard import install_jobs_dashboard
+from app.jobs.workspace import install_workspace
 
 UTC = timezone.utc
 UPLOAD_DIR = ensure_dir("data") / "uploads"
 WEB_OUTPUT_DIR = ensure_dir("output") / "web"
+JOB_META_DIR = ensure_dir("data") / "jobs"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 WEB_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+JOB_META_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def now() -> str:
@@ -43,22 +58,123 @@ class Job:
     filetype: str
     file_size: int
     options: dict[str, str]
+    source_language: str
+    target_language: str
+    model: str
+    mode: str
     status: str = "queued"
     created_at: str = field(default_factory=now)
     started_at: str | None = None
     last_activity: str = field(default_factory=now)
+    updated_at: str = field(default_factory=now)
     pipeline_job_id: str | None = None
     paths: dict | None = None
     log: io.StringIO = field(default_factory=io.StringIO)
     stop_event: threading.Event = field(default_factory=threading.Event)
     output_path: Path | None = None
     error: str | None = None
+    cancel_requested: bool = False
     progress: dict[str, int] = field(default_factory=lambda: {"completed": 0, "total": 0})
 
 
 JOBS: dict[str, Job] = {}
 JOBS_LOCK = threading.RLock()
 RUN_LOCK = threading.Lock()
+
+
+def _persist_job(job: Job) -> None:
+    """Persist web-job metadata so a server restart can recover it."""
+    JOB_META_DIR.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "id": job.id, "filename": job.filename, "input_path": str(job.input_path),
+        "filetype": job.filetype, "file_size": job.file_size, "options": job.options,
+        "source_language": job.source_language, "target_language": job.target_language,
+        "model": job.model, "mode": job.mode, "status": job.status,
+        "created_at": job.created_at, "started_at": job.started_at,
+        "updated_at": job.updated_at, "pipeline_job_id": job.pipeline_job_id,
+        "paths": job.paths, "output_path": str(job.output_path) if job.output_path else None,
+        "error": job.error, "progress": job.progress,
+    }
+    target = JOB_META_DIR / f"{job.id}.json"
+    temporary = target.with_suffix(f".{uuid.uuid4().hex}.tmp")
+    try:
+        with temporary.open("w", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=False, indent=2)
+            handle.flush()
+        temporary.replace(target)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+    try:
+        db.upsert_job(payload)
+    except Exception:
+        # SQLite is an observability/index layer; pipeline state remains the
+        # authoritative recovery source if the index is temporarily locked.
+        pass
+
+
+def _library_book_for_job(job: Job) -> int | None:
+    row = db.fetch_one("SELECT book_id FROM files WHERE job_id=? ORDER BY id LIMIT 1", (job.id,))
+    return int(row["book_id"]) if row and row.get("book_id") else None
+
+
+def _ensure_library_source(job: Job) -> int:
+    existing = _library_book_for_job(job)
+    if existing:
+        return existing
+    timestamp = now()
+    title = Path(job.filename).stem.replace("_", " ").strip() or job.filename
+    book_id = db.execute("INSERT INTO library_books(title, created_at, updated_at) VALUES (?, ?, ?)", (title, timestamp, timestamp))
+    db.execute("INSERT INTO files(job_id, book_id, path, kind, display_name, extension, mime_type, language, size_bytes, is_readable, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (job.id, book_id, str(job.input_path), "original", job.filename, job.filetype, mimetypes.guess_type(job.filename)[0] or "application/octet-stream", job.source_language, job.file_size, int(job.filetype == "epub"), timestamp))
+    return int(book_id)
+
+
+def _register_library_output(job: Job) -> None:
+    if not job.output_path or not job.output_path.is_file():
+        return
+    book_id = _ensure_library_source(job)
+    digest = hashlib.sha256()
+    with job.output_path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    timestamp = now()
+    db.execute("UPDATE library_books SET updated_at=? WHERE id=?", (timestamp, book_id))
+    db.execute("INSERT INTO files(job_id, book_id, path, kind, display_name, extension, mime_type, language, size_bytes, checksum, is_readable, created_at) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM files WHERE job_id=? AND kind=?)", (job.id, book_id, str(job.output_path), "translated", job.output_path.name, job.filetype, mimetypes.guess_type(job.output_path.name)[0] or "application/octet-stream", job.target_language, job.output_path.stat().st_size, digest.hexdigest(), int(job.filetype == "epub"), timestamp, job.id, "translated"))
+
+
+def restore_jobs() -> None:
+    """Restore jobs from metadata and mark interrupted work resumable."""
+    recover = []
+    for metadata_path in JOB_META_DIR.glob("*.json"):
+        try:
+            data = json.loads(metadata_path.read_text(encoding="utf-8"))
+            input_path = Path(data["input_path"])
+            if not input_path.exists():
+                continue
+            job = Job(data["id"], data["filename"], input_path, data["filetype"], data["file_size"],
+                data.get("options", {}), data["source_language"], data["target_language"],
+                data["model"], data["mode"], data.get("status", "failed"), data.get("created_at", now()),
+                data.get("started_at"), data.get("updated_at", now()), data.get("updated_at", now()),
+                data.get("pipeline_job_id"), data.get("paths"), io.StringIO(), threading.Event(),
+                Path(data["output_path"]) if data.get("output_path") else None, data.get("error"), False,
+                data.get("progress", {"completed": 0, "total": 0}))
+            was_active = job.status in {"queued", "running"}
+            if was_active:
+                job.status = "paused" if job.pipeline_job_id else "failed"
+                job.error = None if job.pipeline_job_id else "Job stopped before a resumable state was created."
+            JOBS[job.id] = job
+            try:
+                _ensure_library_source(job)
+                if job.status == "completed":
+                    _register_library_output(job)
+            except Exception:
+                pass
+            if was_active and job.pipeline_job_id and job.filetype == "epub":
+                recover.append(job)
+        except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
+            continue
+    for job in recover:
+        threading.Thread(target=_run_job, args=(job,), kwargs={"resume": True}, daemon=True).start()
 
 
 def _safe_filename(name: str) -> str:
@@ -82,6 +198,11 @@ def _update_progress(job: Job) -> None:
     if not job.paths:
         return
     try:
+        sync_book(db, job.paths)
+    except Exception:
+        pass
+    try:
+        previous = (job.progress["completed"], job.progress["total"])
         chunks = Path(job.paths["chunks_file"])
         translations = Path(job.paths["translations_file"])
         if chunks.exists():
@@ -90,17 +211,22 @@ def _update_progress(job: Job) -> None:
         if translations.exists():
             with translations.open(encoding="utf-8") as file:
                 job.progress["completed"] = len(json.load(file))
-        job.last_activity = now()
+        if previous != (job.progress["completed"], job.progress["total"]):
+            job.last_activity = job.updated_at = now()
     except (OSError, json.JSONDecodeError, KeyError, TypeError):
         pass
 
 
 def _on_pipeline_started(job: Job, pipeline_job_id: str, paths: dict) -> None:
+    snapshot_path = Path(paths['job_dir']) / 'glossary.json'
+    if not snapshot_path.exists():
+        _atomic_json(snapshot_path, json.loads(job.options.get('glossary_snapshot', '{}')))
     with JOBS_LOCK:
         job.pipeline_job_id = pipeline_job_id
         job.paths = {key: str(value) for key, value in paths.items()}
         job.started_at = job.started_at or now()
-        job.last_activity = now()
+        job.last_activity = job.updated_at = now()
+        _persist_job(job)
 
 
 def _run_job(job: Job, *, resume: bool = False) -> None:
@@ -109,6 +235,8 @@ def _run_job(job: Job, *, resume: bool = False) -> None:
         try:
             job.status = "running"
             job.started_at = job.started_at or now()
+            job.last_activity = job.updated_at = now()
+            _persist_job(job)
             config = read_config().get("openai", {})
             api_key, base_url = config.get("api_key"), config.get("base_url")
             if not api_key or not base_url:
@@ -117,7 +245,7 @@ def _run_job(job: Job, *, resume: bool = False) -> None:
             output_name = f"{job.input_path.stem}_{job.options['to_lang'].lower()}_{job.options['model']}.{job.filetype}"
             job.output_path = WEB_OUTPUT_DIR / f"{job.id}_{output_name}"
             prompt = job.options["prompt"] or get_default_prompt(job.options["from_lang"], job.options["to_lang"], job.filetype)
-            mode = "resume" if resume else (job.options["mode"] or None)
+            mode = "resume" if resume else job.mode
             print(f"Starting web job {job.id}")
             translate(client=client, input_path=job.input_path, output_path=job.output_path,
                 from_lang=job.options["from_lang"], to_lang=job.options["to_lang"], mode=mode,
@@ -126,12 +254,18 @@ def _run_job(job: Job, *, resume: bool = False) -> None:
                 translation_prompt=prompt, stop_event=job.stop_event,
                 on_job_started=lambda pipeline_id, paths: _on_pipeline_started(job, pipeline_id, paths))
             _update_progress(job)
-            job.status = "stopped" if job.stop_event.is_set() else ("completed" if job.output_path.exists() else "finished")
-            job.last_activity = now()
-            if job.status == "stopped":
-                print("Job stopped safely. Use Resume to continue from saved progress.")
-        except Exception as exc:
-            job.status, job.error, job.last_activity = "failed", _friendly_error(exc), now()
+            job.status = "cancelled" if job.cancel_requested else ("paused" if job.stop_event.is_set() else ("completed" if job.output_path.exists() else "failed"))
+            if job.status == "completed":
+                _register_library_output(job)
+            job.last_activity = job.updated_at = now()
+            _persist_job(job)
+            if job.status == "paused":
+                print("Job paused safely. Use Resume to continue from saved progress.")
+        except BaseException as exc:
+            _update_progress(job)
+            job.status, job.error = "failed", _friendly_error(exc)
+            job.last_activity = job.updated_at = now()
+            _persist_job(job)
             traceback.print_exc()
 
 
@@ -139,14 +273,101 @@ def _job_payload(job: Job) -> dict:
     _update_progress(job)
     total, completed = job.progress["total"], job.progress["completed"]
     result = {"id": job.id, "filename": job.filename, "filetype": job.filetype.upper(), "file_size": job.file_size,
-        "status": job.status, "created_at": job.created_at, "started_at": job.started_at, "last_activity": job.last_activity,
+        "source_language": job.source_language, "target_language": job.target_language, "model": job.model, "mode": job.mode,
+        "status": job.status, "created_at": job.created_at, "started_at": job.started_at, "updated_at": job.updated_at, "last_activity": job.updated_at, "output_path": str(job.output_path) if job.output_path else None,
         "progress": {"completed": completed, "total": total, "percent": round(completed * 100 / total) if total else 0},
         "log": job.log.getvalue(), "error": job.error,
-        "can_stop": job.status == "running" and job.options.get("mode") != "batch",
-        "can_resume": job.status in {"stopped", "failed", "finished"} and bool(job.pipeline_job_id) and job.filetype == "epub"}
+        "can_stop": job.status == "running" and job.mode != "batch",
+        "can_cancel": job.status in {"queued", "running", "paused"},
+        "can_resume": job.status in {"paused", "failed"} and bool(job.pipeline_job_id) and job.filetype == "epub"}
     if job.status == "completed" and job.output_path:
         result["download"] = f"/downloads/{job.id}"
+        if job.filetype == "epub":
+            result["reader"] = f"/reader/{job.id}"
     return result
+
+
+def dashboard_summary() -> dict:
+    """Return the lightweight aggregate used by the future dashboard sidebar."""
+    with JOBS_LOCK:
+        jobs = list(JOBS.values())
+    counts = {
+        "active_jobs": sum(job.status in {"queued", "running"} for job in jobs),
+        "paused_jobs": sum(job.status == "paused" for job in jobs),
+        "completed_jobs": sum(job.status == "completed" for job in jobs),
+        "failed_jobs": sum(job.status == "failed" for job in jobs),
+        "total_books": len({str(job.input_path) for job in jobs}),
+    }
+    config = read_config().get("openai", {})
+    api_status = "ready" if config.get("api_key") and config.get("base_url") else "not_configured"
+    storage_free = shutil.disk_usage(ensure_dir("data")).free
+    # Token usage is not persisted by the provider layer yet; returning zero
+    # is explicit and avoids presenting an invented cost to the user.
+    return {
+        **counts,
+        "storage_free": storage_free,
+        "api_status": api_status,
+        "estimated_cost": 0.0,
+    }
+
+
+READING_DEFAULTS = {
+    "study_night_mode": False,
+    "reading_font_size": 18,
+    "reading_line_height": 1.9,
+    "reading_width": 760,
+    "reading_direction": "auto",
+    "reading_last_location": None,
+}
+
+
+def reading_settings() -> dict:
+    values = dict(READING_DEFAULTS)
+    for row in db.fetch_all("SELECT key, value_json FROM settings WHERE key LIKE 'reading_%' OR key='study_night_mode'"):
+        try:
+            values[row["key"]] = json.loads(row["value_json"])
+        except (TypeError, json.JSONDecodeError):
+            continue
+    return values
+
+
+def library_summary(query: str = "") -> dict:
+    params = parse_qs(query)
+    search = params.get("q", [""])[0].strip().lower()
+    status_filter = params.get("status", [""])[0].strip().lower()
+    type_filter = params.get("type", [""])[0].strip().lower()
+    archived_mode = status_filter == "archived"
+    books = db.fetch_all(f"SELECT * FROM library_books WHERE archived={1 if archived_mode else 0} ORDER BY updated_at DESC")
+    items = []
+    for book in books:
+        if search and search not in book["title"].lower():
+            continue
+        files = db.fetch_all(f"SELECT * FROM files WHERE book_id=? AND archived={1 if archived_mode else 0} ORDER BY CASE kind WHEN 'translated' THEN 0 ELSE 1 END, id", (book["id"],))
+        variants = []
+        statuses = []
+        for file in files:
+            if type_filter and file.get("extension", "").lower() != type_filter.lstrip("."):
+                continue
+            job = db.fetch_one("SELECT status, progress_completed, progress_total, source_language, target_language, model, error FROM jobs WHERE id=?", (file.get("job_id"),)) if file.get("job_id") else None
+            status = (job or {}).get("status") or ("completed" if file["kind"] in {"original", "translated"} else "unknown")
+            statuses.append(status)
+            variant = {**file, "status": status, "progress": {"completed": (job or {}).get("progress_completed", 0), "total": (job or {}).get("progress_total", 0)}, "error": (job or {}).get("error")}
+            if file.get("job_id") and file["kind"] == "translated":
+                variant["download"] = f"/downloads/{file['job_id']}"
+                if file.get("extension", "").lower() == "epub":
+                    variant["reader"] = f"/reader/{file['job_id']}"
+            variants.append(variant)
+        if not variants:
+            continue
+        overall = "archived" if archived_mode else ("completed" if any(s == "completed" for s in statuses) else ("running" if any(s in {"queued", "running"} for s in statuses) else ("failed" if any(s == "failed" for s in statuses) else "available")))
+        if status_filter and status_filter not in statuses and status_filter != overall:
+            continue
+        items.append({"id": book["id"], "title": book["title"], "author": book.get("author", ""), "cover_path": book.get("cover_path"), "created_at": book["created_at"], "updated_at": book["updated_at"], "status": overall, "variants": variants, "size_bytes": sum(int(item.get("size_bytes", 0)) for item in variants), "translated": any(item["kind"] == "translated" for item in variants), "readable": any(item.get("reader") for item in variants)})
+    total = len(items)
+    try: page, limit = max(1, int(params.get("page", [1])[0])), max(1, min(100, int(params.get("limit", [24])[0])))
+    except ValueError: page, limit = 1, 24
+    start = (page - 1) * limit
+    return {"items": items[start:start + limit], "total": total, "page": page, "limit": limit, "storage": {"used": sum(item["size_bytes"] for item in items), "free": shutil.disk_usage(ensure_dir("data")).free}}
 
 
 PAGE = r'''<!doctype html><html lang="fa" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>J Book Translate</title><style>
@@ -156,6 +377,28 @@ const $=s=>document.querySelector(s),form=$('#translate-form'),submit=$('#submit
 </script></body></html>'''.replace("__DEFAULT_MODEL__", DEFAULT_MODEL)
 
 
+SIDEBAR_HTML = r'''<style>
+.app-sidebar{position:fixed;z-index:10;right:18px;top:18px;bottom:18px;width:250px;padding:18px 14px;background:rgba(255,255,255,.94);border:1px solid #e2e8f2;border-radius:20px;box-shadow:0 18px 55px rgba(38,57,93,.1);display:flex;flex-direction:column;gap:18px}.shell{margin-right:292px;max-width:calc(1180px - 292px)}.side-brand{display:flex;align-items:center;gap:10px;padding:4px 7px 15px;border-bottom:1px solid #e9edf4}.side-brand-mark{width:36px;height:36px;border-radius:11px;display:grid;place-items:center;color:#fff;background:linear-gradient(140deg,#356df6,#7257e8);font-size:18px}.side-brand strong{font-size:14px}.side-brand small{display:block;color:#78859a;font-size:10px;margin-top:2px}.side-nav{display:grid;gap:5px}.side-nav button{width:100%;border:0;background:transparent;color:#69778d;text-align:right;padding:10px 11px;border-radius:9px;font:600 12px Vazirmatn,Segoe UI,sans-serif;cursor:pointer}.side-nav button:hover,.side-nav button.active{background:#edf3ff;color:#2e62dc}.side-nav button span{display:inline-block;width:23px;color:#7890bd;font-size:15px;vertical-align:-2px}.side-section{color:#a0aabd;font-size:10px;font-weight:700;padding:8px 11px 1px}.side-summary{margin-top:auto;padding:13px;border-radius:13px;background:linear-gradient(145deg,#f4f7ff,#f4fbfa);border:1px solid #e8eef8}.side-summary-title{font-size:11px;font-weight:700;margin-bottom:9px}.side-stat{display:flex;justify-content:space-between;padding:5px 0;color:#6c7890;font-size:11px}.side-stat strong{color:#263852}.side-api{display:flex;align-items:center;gap:6px;margin-top:8px;color:#07805e;font-size:10px}.side-dot{width:7px;height:7px;border-radius:50%;background:#aeb8c7}.side-dot.ready{background:#09a174;box-shadow:0 0 0 3px #09a1741a}.side-dot.error{background:#e24a4a}.dashboard-cards{display:grid;grid-template-columns:repeat(4,1fr);gap:11px;margin-bottom:18px}.dashboard-card{padding:14px;background:#fff;border:1px solid #e5ebf4;border-radius:14px;box-shadow:0 8px 20px rgba(38,57,93,.04)}.dashboard-card label{font-size:11px;color:#7c899c;margin:0 0 7px}.dashboard-card strong{font-size:21px;color:#263b5d}.dashboard-card.blue{border-top:3px solid #356df6}.dashboard-card.orange{border-top:3px solid #e8a137}.dashboard-card.green{border-top:3px solid #08966c}.dashboard-card.red{border-top:3px solid #e24a4a}.summary-strip{display:flex;gap:12px;flex-wrap:wrap;padding:11px 14px;margin-bottom:16px;background:#f8faff;border:1px solid #e8eef7;border-radius:12px;color:#68778d;font-size:11px}.summary-strip b{color:#2e62dc}.sidebar-toast{position:fixed;right:285px;bottom:25px;background:#142033;color:#fff;border-radius:10px;padding:10px 14px;font-size:12px;display:none;z-index:20}@media(max-width:850px){.app-sidebar{position:relative;right:auto;top:auto;bottom:auto;width:auto;margin:0 13px 0;padding:12px;border-radius:15px}.shell{margin-right:auto;max-width:1180px}.side-brand{display:none}.side-nav{display:flex;overflow:auto}.side-nav button{white-space:nowrap;width:auto}.side-section,.side-summary{display:none}.dashboard-cards{grid-template-columns:repeat(2,1fr)}}@media(max-width:480px){.dashboard-cards{grid-template-columns:1fr 1fr}.dashboard-card strong{font-size:17px}}
+</style><aside class="app-sidebar" aria-label="ناوبری اصلی"><div class="side-brand"><div class="side-brand-mark">文</div><div><strong>J Book Translate</strong><small>Translation Studio</small></div></div><nav class="side-nav"><button class="active" data-scroll="dashboard-summary"><span>⌂</span>داشبورد</button><button data-scroll="translate-form"><span>＋</span>ترجمهٔ جدید</button><button data-scroll="job"><span>◷</span>Jobهای فعال</button></nav><div class="side-section">مدیریت محتوا</div><nav class="side-nav"><button data-toast="کتابخانه در مرحلهٔ بعد فعال می‌شود"><span>▣</span>کتابخانه</button><button data-toast="Glossary در مرحلهٔ بعد فعال می‌شود"><span>⌘</span>Glossary</button><button data-toast="Analytics در مرحلهٔ بعد فعال می‌شود"><span>◒</span>آمار و هزینه</button></nav><div class="side-summary"><div class="side-summary-title">خلاصهٔ سیستم</div><div class="side-stat"><span>فضای آزاد</span><strong id="sb-storage">—</strong></div><div class="side-stat"><span>هزینهٔ تقریبی</span><strong id="sb-cost">—</strong></div><div class="side-api"><i class="side-dot" id="sb-api-dot"></i><span id="sb-api">در حال بررسی provider…</span></div></div></aside><div class="sidebar-toast" id="sidebar-toast"></div><script>
+(function(){const root=document.querySelector('.dashboard'),nav=document.querySelectorAll('.side-nav button[data-scroll]'),toast=document.querySelector('#sidebar-toast');if(root){root.id='dashboard-summary';const cards=document.createElement('div');cards.className='dashboard-cards';cards.innerHTML='<div class="dashboard-card blue"><label>ترجمه‌های فعال</label><strong id="sb-active">۰</strong></div><div class="dashboard-card orange"><label>متوقف‌شده</label><strong id="sb-paused">۰</strong></div><div class="dashboard-card green"><label>تکمیل‌شده</label><strong id="sb-completed">۰</strong></div><div class="dashboard-card red"><label>دارای خطا</label><strong id="sb-failed">۰</strong></div>';root.prepend(cards);const strip=document.createElement('div');strip.className='summary-strip';strip.innerHTML='<span>کتاب‌ها: <b id="sb-books">۰</b></span><span>فضای آزاد: <b id="sb-storage-main">—</b></span><span>Provider: <b id="sb-provider-main">—</b></span><span>هزینه: <b id="sb-cost-main">—</b></span>';root.prepend(strip)}const fa=n=>new Intl.NumberFormat('fa-IR').format(n||0),formatBytes=n=>n>=1073741824?(n/1073741824).toFixed(1)+' GB':(n/1048576).toFixed(0)+' MB';async function refresh(){try{const response=await fetch('/api/dashboard/summary');if(!response.ok)throw Error();const d=await response.json();document.querySelector('#sb-active').textContent=fa(d.active_jobs);document.querySelector('#sb-paused').textContent=fa(d.paused_jobs);document.querySelector('#sb-completed').textContent=fa(d.completed_jobs);document.querySelector('#sb-failed').textContent=fa(d.failed_jobs);document.querySelector('#sb-books').textContent=fa(d.total_books);document.querySelector('#sb-storage').textContent=formatBytes(d.storage_free);document.querySelector('#sb-storage-main').textContent=formatBytes(d.storage_free);document.querySelector('#sb-cost').textContent='$'+Number(d.estimated_cost||0).toFixed(2);document.querySelector('#sb-cost-main').textContent='$'+Number(d.estimated_cost||0).toFixed(2);document.querySelector('#sb-provider-main').textContent=d.api_status==='ready'?'آماده':'تنظیم نشده';document.querySelector('#sb-api').textContent=d.api_status==='ready'?'Provider آماده است':'Provider تنظیم نشده';document.querySelector('#sb-api-dot').className='side-dot '+(d.api_status==='ready'?'ready':'error')}catch{document.querySelector('#sb-api').textContent='خطا در دریافت وضعیت';document.querySelector('#sb-api-dot').className='side-dot error'}}nav.forEach(button=>button.addEventListener('click',()=>{nav.forEach(item=>item.classList.remove('active'));button.classList.add('active');document.getElementById(button.dataset.scroll)?.scrollIntoView({behavior:'smooth',block:'start'})}));document.querySelectorAll('[data-toast]').forEach(button=>button.addEventListener('click',()=>{toast.textContent=button.dataset.toast;toast.style.display='block';setTimeout(()=>toast.style.display='none',2400)}));refresh();setInterval(refresh,5000)})();
+</script>'''
+PAGE = PAGE.replace("</body>", SIDEBAR_HTML + r'''<style>
+@keyframes intro-rise{from{opacity:0;transform:translateY(14px) scale(.985)}to{opacity:1;transform:none}}@keyframes intro-glow{0%,100%{box-shadow:0 0 0 rgba(83,111,167,0)}50%{box-shadow:0 0 34px rgba(83,111,167,.13)}}body.app-intro .top{animation:intro-rise .55s ease both}body.app-intro .form-card{animation:intro-rise .6s .08s ease both}body.app-intro .side .card{animation:intro-rise .55s ease both}body.app-intro .side .card:nth-child(2){animation-delay:.14s}body.app-intro .job{animation:intro-rise .5s ease both}.theme-toggle{display:inline-flex;align-items:center;gap:6px;margin-inline-start:7px;padding:6px 10px!important;border:1px solid var(--line)!important;background:var(--surface)!important;color:var(--ink)!important;border-radius:999px!important;font-size:11px!important}.theme-toggle .theme-icon{font-size:14px}.theme-toggle:hover{transform:none!important;filter:brightness(.96)}body.app-dark{--bg:#17191d;--surface:#22252b;--ink:#d8d2c8;--muted:#aaa69f;--line:#343941;--shadow:0 18px 55px rgba(0,0,0,.22);background:radial-gradient(circle at 8% 0,#242c3d 0,transparent 32%),radial-gradient(circle at 96% 11%,#2b263d 0,transparent 27%),var(--bg)}body.app-dark .card,body.app-dark .app-sidebar{background:rgba(34,37,43,.96);border-color:#343941;box-shadow:var(--shadow)}body.app-dark input,body.app-dark select,body.app-dark textarea{background:#1d2025;color:var(--ink);border-color:#3b424d}body.app-dark .drop{background:linear-gradient(135deg,#252b35,#20252c);border-color:#546b92}body.app-dark .file-info{background:#1c302a;color:#a8dfca}body.app-dark .dashboard-card,body.app-dark .summary-strip,body.app-dark .stat{background:#1d2025;border-color:#343941}body.app-dark .side-nav button{color:#aaaeb8}body.app-dark .side-nav button:hover,body.app-dark .side-nav button.active{background:#29344b;color:#b8caff}body.app-dark .api-pill{background:#22252b;border-color:#343941;color:#aaa69f}body.app-dark .intro,body.app-dark .fact,body.app-dark .small{color:#aaa69f}body.app-dark .logs pre{background:#101216}body.app-dark .secondary{background:#29344b;color:#c1d0ff}body.app-dark .danger{background:#3b2427;color:#ffb7b7}
+</style><script>(function(){const body=document.body;body.classList.add('app-intro');const key='jbook-study-dark';const saved=localStorage.getItem(key)==='1';if(saved)body.classList.add('app-dark');const pill=document.querySelector('.api-pill');if(!pill)return;const button=document.createElement('button');button.type='button';button.className='theme-toggle';button.innerHTML='<span class="theme-icon">◐</span><span class="theme-label"></span>';pill.appendChild(button);const sync=()=>{const dark=body.classList.contains('app-dark');button.querySelector('.theme-icon').textContent=dark?'☀':'◐';button.querySelector('.theme-label').textContent=dark?'حالت روشن':'حالت شب';button.setAttribute('aria-pressed',dark)};button.onclick=()=>{body.classList.toggle('app-dark');localStorage.setItem(key,body.classList.contains('app-dark')?'1':'0');sync()};sync();setTimeout(()=>body.classList.remove('app-intro'),1400)})();</script><script>(function(){const routes={'کتابخانه':'/api/library','Glossary':'/api/glossaries','آمار و هزینه':'/api/analytics/overview'};document.querySelectorAll('[data-toast]').forEach(b=>b.addEventListener('click',async()=>{const key=Object.keys(routes).find(k=>b.textContent.includes(k));if(!key)return;try{const d=await (await fetch(routes[key])).json();const t=document.querySelector('#sidebar-toast');t.textContent=key+' · '+(d.items?('تعداد: '+d.items.length):'داده دریافت شد');t.style.display='block';setTimeout(()=>t.style.display='none',3000)}catch{}}));const dl=document.querySelector('#download');if(dl){const reader=document.createElement('a');reader.id='reader-link';reader.className='download';reader.textContent='مطالعه در مرورگر';reader.hidden=true;dl.parentElement.appendChild(reader);const sync=()=>{reader.hidden=dl.hidden||!dl.href;reader.href=dl.href.replace('/downloads/','/reader/')};new MutationObserver(sync).observe(dl,{attributes:true});sync()}})();</script>''' + "</body>")
+
+
+PAGE = PAGE.replace("</head>", "<style>body.app-dark .side-summary{background:linear-gradient(145deg,#20252d,#202c2b)!important;border-color:#3b4650!important;color:#d8d2c8}body.app-dark .side-summary .side-stat{color:#a9b0bb;border-bottom-color:#343941}body.app-dark .side-summary .side-stat strong{color:#e0d9cd}body.app-dark .side-summary .side-api{color:#83d0b3}body.app-dark .side-summary-title{color:#ece5d9}</style></head>")
+PAGE = PAGE.replace("</body>", "<script>document.addEventListener('click',function(event){const button=event.target.closest('[data-toast]');if(button&&button.textContent.includes('کتابخانه')){event.preventDefault();event.stopImmediatePropagation();location.href='/library'}},true);</script></body>")
+
+
+PAGE = PAGE.replace('<button class="primary" id="submit"', '''<label class="check"><input type="checkbox" name="auto_glossary" value="true" checked>ساخت خودکار واژه‌نامه حین ترجمه</label><p id="auto-glossary-note">برای هر قطعه یک درخواست API اضافی مصرف می‌شود. اصطلاحات در Library ← واژه‌نامه قابل مشاهده‌اند. در Batch این قابلیت فعال نیست.</p><button class="primary" id="submit"''', 1)
+PAGE = PAGE.replace('</body>', '''<script>(()=>{const mode=document.querySelector('[name="mode"]'),auto=document.querySelector('[name="auto_glossary"]');function sync(){auto.disabled=mode.value==='batch'}mode.addEventListener('change',sync);sync()})();</script></body>''', 1)
+
+
+PAGE = install_jobs_dashboard(PAGE)
+PAGE = install_workspace(PAGE)
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, format: str, *args: object) -> None: return
     def _json(self, payload: dict, status: int = 200) -> None:
@@ -163,10 +406,102 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(status); self.send_header("Content-Type", "application/json; charset=utf-8"); self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data)
     def _job(self, job_id: str) -> Job | None:
         with JOBS_LOCK: return JOBS.get(job_id)
+    def _request_json(self) -> dict:
+        length = int(self.headers.get("Content-Length", "0"))
+        if length > 2 * 1024 * 1024:
+            raise ValueError("JSON request is too large.")
+        payload = json.loads(self.rfile.read(length) or b"{}")
+        if not isinstance(payload, dict):
+            raise ValueError("JSON body must be an object.")
+        return payload
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
+        if parsed.path.startswith('/api/library/') and parsed.path.endswith('/glossary'):
+            query = parse_qs(parsed.query)
+            try:
+                with JOBS_LOCK:
+                    book_jobs = [job for job in JOBS.values() if job.paths]
+                for job in book_jobs:
+                    _update_progress(job)
+                self._json(get_glossary(db, int(parsed.path.split('/')[3]), query.get('from', ['EN'])[0], query.get('to', ['FA'])[0]))
+            except LookupError as exc: self._json({'error': str(exc)}, 404)
+            except ValueError as exc: self._json({'error': str(exc)}, 400)
+            return
         if parsed.path == "/":
             data = PAGE.encode("utf-8"); self.send_response(HTTPStatus.OK); self.send_header("Content-Type", "text/html; charset=utf-8"); self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data); return
+        if parsed.path == "/library":
+            data = library_page().encode("utf-8"); self.send_response(HTTPStatus.OK); self.send_header("Content-Type", "text/html; charset=utf-8"); self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data); return
+        if parsed.path == "/api/reader/settings":
+            self._json({"value": reading_settings()}); return
+        if parsed.path.startswith("/api/reader/") and parsed.path.endswith("/chapters"):
+            job = self._job(parsed.path.split("/")[3])
+            if not job or job.filetype != "epub" or not job.output_path or not job.output_path.is_file():
+                self._json({"error": "Translated EPUB is not available yet."}, 404); return
+            try: self._json({"book": job.filename, "items": reader_chapters(job.output_path)})
+            except (OSError, ValueError, zipfile.BadZipFile) as exc: self._json({"error": str(exc)}, 422)
+            return
+        if parsed.path.startswith("/api/reader/") and "/chapters/" in parsed.path:
+            pieces = parsed.path.split("/")
+            job = self._job(pieces[3])
+            if not job or job.filetype != "epub" or not job.output_path or not job.output_path.is_file(): self._json({"error": "Translated EPUB is not available yet."}, 404); return
+            try: self._json(reader_chapter(job.output_path, int(pieces[5])))
+            except (IndexError, ValueError, OSError, zipfile.BadZipFile) as exc: self._json({"error": str(exc)}, 404)
+            return
+        if parsed.path.startswith("/reader/"):
+            job = self._job(parsed.path.rsplit("/", 1)[-1])
+            if not job or job.filetype != "epub" or not job.output_path or not job.output_path.is_file(): self.send_error(404); return
+            data = reader_page(job.id).encode("utf-8"); self.send_response(HTTPStatus.OK); self.send_header("Content-Type", "text/html; charset=utf-8"); self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data); return
+        if parsed.path == "/api/dashboard/summary":
+            self._json(dashboard_summary()); return
+        if parsed.path == "/api/jobs":
+            status_filter = dict(item.split("=", 1) for item in parsed.query.split("&") if "=" in item).get("status") if parsed.query else None
+            with JOBS_LOCK:
+                jobs = [_job_payload(job) for job in JOBS.values() if not status_filter or job.status == status_filter]
+            self._json({"items": jobs, "total": len(jobs)}); return
+        if parsed.path == "/api/languages":
+            self._json({"items": [{"code": code, "name": name} for code, name in [("EN", "English"), ("FA", "فارسی"), ("DE", "Deutsch"), ("FR", "Français"), ("AR", "العربية")]]}); return
+        if parsed.path == "/api/models":
+            self._json({"items": [{"id": DEFAULT_MODEL, "provider": "configured", "available": True}]}); return
+        if parsed.path == "/api/profiles":
+            self._json({"items": db.fetch_all("SELECT id, name, temperature, preserve_html, preserve_quotes, glossary_id, created_at, updated_at FROM translation_profiles ORDER BY name")}); return
+        if parsed.path == "/api/providers":
+            config = read_config().get("openai", {})
+            self._json({"items": [{"name": "configured", "base_url": config.get("base_url", ""), "enabled": bool(config.get("api_key"))}]}); return
+        if parsed.path.startswith("/api/providers/") and parsed.path.endswith("/models"):
+            self._json({"items": [{"id": DEFAULT_MODEL, "available": True}]}); return
+        if parsed.path == "/api/glossaries":
+            self._json({"items": db.fetch_all("SELECT g.*, COUNT(t.id) AS term_count FROM glossaries g LEFT JOIN glossary_terms t ON t.glossary_id=g.id GROUP BY g.id ORDER BY g.name")}); return
+        if parsed.path == "/api/memory/search":
+            self._json({"items": db.fetch_all("SELECT * FROM translation_memory ORDER BY last_used_at DESC LIMIT 100")}); return
+        if parsed.path == "/api/memory/export":
+            self._json({"items": db.fetch_all("SELECT * FROM translation_memory ORDER BY id")}); return
+        if parsed.path == "/api/library":
+            self._json(library_summary(parsed.query)); return
+        if parsed.path.startswith("/api/library/") and parsed.path.endswith("/files"):
+            book_id = parsed.path.split("/")[3]
+            book = db.fetch_one("SELECT * FROM library_books WHERE id=?", (book_id,))
+            if not book: self._json({"error": "Book not found."}, 404); return
+            self._json({"book": book, "items": db.fetch_all("SELECT * FROM files WHERE book_id=? ORDER BY id", (book_id,))}); return
+        if parsed.path.startswith("/api/library/") and parsed.path.count("/") == 3:
+            book_id = parsed.path.rsplit("/", 1)[-1]
+            result = next((item for item in library_summary()["items"] if str(item["id"]) == book_id), None)
+            if not result: self._json({"error": "Book not found."}, 404); return
+            self._json(result); return
+        if parsed.path == "/api/analytics/overview":
+            self._json(db.fetch_one("SELECT COUNT(*) AS jobs, COALESCE(SUM(progress_completed),0) AS completed_chunks, COALESCE(SUM(input_tokens),0) AS input_tokens, COALESCE(SUM(output_tokens),0) AS output_tokens, COALESCE(SUM(estimated_cost),0) AS estimated_cost, COALESCE(SUM(retry_count),0) AS retries FROM jobs") or {}); return
+        if parsed.path == "/api/settings":
+            settings = db.fetch_all("SELECT key, value_json, updated_at FROM settings ORDER BY key")
+            self._json({"items": [{**item, "value": json.loads(item.pop("value_json"))} for item in settings]}); return
+        if parsed.path == "/api/logs":
+            level = next((item.split("=", 1)[1] for item in parsed.query.split("&") if item.startswith("level=")), None)
+            if level:
+                self._json({"items": db.fetch_all("SELECT * FROM job_events WHERE level=? ORDER BY timestamp DESC LIMIT 200", (level.upper(),))})
+            else:
+                self._json({"items": db.fetch_all("SELECT * FROM job_events ORDER BY timestamp DESC LIMIT 200")})
+            return
+        if parsed.path.startswith("/api/jobs/") and parsed.path.endswith("/logs"):
+            job_id = parsed.path.split("/")[-2]
+            self._json({"items": db.fetch_all("SELECT * FROM job_events WHERE job_id=? ORDER BY timestamp ASC", (job_id,))}); return
         if parsed.path == "/api/health":
             try:
                 config = read_config().get("openai", {})
@@ -188,19 +523,104 @@ class Handler(BaseHTTPRequestHandler):
         self.send_error(404)
     def do_POST(self) -> None:
         path=urlparse(self.path).path
+        if path.startswith('/api/library/') and path.endswith('/translate'):
+            try:
+                body = self._request_json()
+                book_id = int(path.split('/')[3])
+                snapshot = get_glossary(db, book_id, body.get('from_lang', 'EN'), body.get('to_lang', 'FA'))
+                auto_extract = body.get('auto_glossary', True)
+                if type(auto_extract) is not bool:
+                    raise ValueError('گزینهٔ واژه‌نامهٔ خودکار باید روشن یا خاموش باشد.')
+                snapshot['auto_extract'] = auto_extract
+                source = db.fetch_one("SELECT * FROM files WHERE book_id=? AND kind='original' ORDER BY id LIMIT 1", (book_id,))
+                if not source or not Path(source['path']).is_file():
+                    raise ValueError('فایل اصلی کتاب در دسترس نیست.')
+                model = body.get('model', DEFAULT_MODEL)
+                if not isinstance(model, str) or not model.strip() or len(model) > 150 or any(char in model for char in '/\\:'):
+                    raise ValueError('مدل نامعتبر است.')
+                options = dict(from_lang=snapshot['source_language'], to_lang=snapshot['target_language'], model=model.strip(), mode='fast', prompt='', glossary_snapshot=json.dumps(snapshot, ensure_ascii=False))
+                with JOBS_LOCK:
+                    if any(item.status in {'queued', 'running'} for item in JOBS.values()):
+                        self._json({'error': 'یک ترجمه در حال اجراست.'}, 409); return
+                    job = Job(uuid.uuid4().hex[:12], source['display_name'] or Path(source['path']).name, Path(source['path']), source['extension'], source['size_bytes'], options, options['from_lang'], options['to_lang'], options['model'], 'fast')
+                    _persist_job(job)
+                    db.execute('INSERT INTO files(job_id,book_id,path,kind,display_name,extension,size_bytes,created_at) VALUES (?,?,?,?,?,?,?,?)', (job.id, book_id, source['path'], 'original', job.filename, job.filetype, job.file_size, now()))
+                    JOBS[job.id] = job
+                threading.Thread(target=_run_job, args=(job,), daemon=True).start()
+                self._json({'id': job.id}, 201)
+            except LookupError as exc: self._json({'error': str(exc)}, 404)
+            except (ValueError, TypeError) as exc: self._json({'error': str(exc)}, 400)
+            return
+        # Resource creation and import endpoints
+        if path == "/api/glossaries":
+            try: body = self._request_json()
+            except (ValueError, json.JSONDecodeError) as exc: self._json({"error": str(exc)}, 400); return
+            name = str(body.get("name", "")).strip()
+            if not name: self._json({"error": "Glossary name is required."}, 400); return
+            try:
+                gid = db.execute("INSERT INTO glossaries(name, description, created_at, updated_at) VALUES (?, ?, ?, ?)", (name, str(body.get("description", "")), now(), now()))
+            except Exception as exc: self._json({"error": "Glossary already exists or is invalid."}, 409); return
+            self._json({"id": gid, "name": name}, 201); return
+        if path == "/api/memory":
+            try: body = self._request_json()
+            except (ValueError, json.JSONDecodeError) as exc: self._json({"error": str(exc)}, 400); return
+            required = ["source_text", "translated_text", "source_language", "target_language"]
+            if any(not str(body.get(k, "")).strip() for k in required): self._json({"error": "source_text, translated_text and languages are required."}, 400); return
+            db.execute("INSERT INTO translation_memory(source_text, translated_text, source_language, target_language, source, confidence, last_used_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(source_text, source_language, target_language) DO UPDATE SET translated_text=excluded.translated_text, confidence=excluded.confidence, last_used_at=excluded.last_used_at", tuple(str(body.get(k, "")) for k in required) + (str(body.get("source", "manual")), float(body.get("confidence", 1)), now()))
+            self._json({"ok": True}, 201); return
+        if path == "/api/memory/import":
+            try: body = self._request_json(); entries = body.get("items", body.get("entries", []))
+            except (ValueError, json.JSONDecodeError) as exc: self._json({"error": str(exc)}, 400); return
+            count = 0
+            for item in entries if isinstance(entries, list) else []:
+                try:
+                    db.execute("INSERT INTO translation_memory(source_text, translated_text, source_language, target_language, source, confidence, last_used_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(source_text, source_language, target_language) DO UPDATE SET translated_text=excluded.translated_text, last_used_at=excluded.last_used_at", (item["source_text"], item["translated_text"], item.get("source_language", "EN"), item.get("target_language", "FA"), item.get("source", "import"), float(item.get("confidence", 1)), now())); count += 1
+                except (KeyError, TypeError, ValueError): continue
+            self._json({"imported": count}); return
+        if path == "/api/profiles":
+            try: body = self._request_json()
+            except (ValueError, json.JSONDecodeError) as exc: self._json({"error": str(exc)}, 400); return
+            name, prompt = str(body.get("name", "")).strip(), str(body.get("system_prompt", "")).strip()
+            if not name or not prompt: self._json({"error": "name and system_prompt are required."}, 400); return
+            try:
+                pid = db.execute("INSERT INTO translation_profiles(name, system_prompt, temperature, preserve_html, preserve_quotes, glossary_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (name, prompt, float(body.get("temperature", .2)), int(bool(body.get("preserve_html", True))), int(bool(body.get("preserve_quotes", True))), body.get("glossary_id"), now(), now()))
+            except Exception: self._json({"error": "Profile already exists or is invalid."}, 409); return
+            self._json({"id": pid, "name": name}, 201); return
+        if path == "/api/jobs/estimate":
+            try: body = self._request_json(); size = int(body.get("file_size", 0)); model = body.get("model", DEFAULT_MODEL)
+            except (ValueError, json.JSONDecodeError) as exc: self._json({"error": str(exc)}, 400); return
+            chunks = max(1, (size + 12000 - 1) // 12000); self._json({"chunks": chunks, "estimated_seconds": chunks * 4, "estimated_cost": 0.0, "model": model}); return
+        if path.startswith("/api/providers/") and path.endswith("/test"):
+            self._json({"ok": bool(read_config().get("openai", {}).get("api_key")), "status": "ready" if read_config().get("openai", {}).get("api_key") else "not_configured"}); return
+        if path.startswith("/api/glossaries/") and path.endswith("/import"):
+            gid = path.split("/")[-2]
+            try: body = self._request_json(); terms = body.get("terms", body.get("items", []))
+            except (ValueError, json.JSONDecodeError) as exc: self._json({"error": str(exc)}, 400); return
+            count = 0
+            for term in terms if isinstance(terms, list) else []:
+                if not term.get("source_term") or not term.get("target_term"): continue
+                db.execute("INSERT INTO glossary_terms(glossary_id, source_term, target_term, notes) VALUES (?, ?, ?, ?) ON CONFLICT(glossary_id, source_term) DO UPDATE SET target_term=excluded.target_term, notes=excluded.notes", (gid, term["source_term"], term["target_term"], term.get("notes", ""))); count += 1
+            self._json({"imported": count}); return
+        if path.startswith("/api/library/") and path.endswith("/archive"):
+            book_id = path.split("/")[-2]
+            db.execute("UPDATE library_books SET archived=1, updated_at=? WHERE id=?", (now(), book_id)); db.execute("UPDATE files SET archived=1 WHERE book_id=?", (book_id,)); self._json({"ok": True}); return
         if path.startswith("/api/jobs/") and path.endswith("/stop"):
             job=self._job(path.split("/")[-2])
             if not job or job.status!="running": self._json({"error":"این کار قابل توقف نیست."},400); return
             if job.options.get("mode")=="batch": self._json({"error":"Batch پس از ارسال به سرویس متوقف نمی‌شود."},400); return
-            job.status="stopping"; job.stop_event.set(); job.last_activity=now(); self._json({"ok":True}); return
+            job.stop_event.set(); job.last_activity=job.updated_at=now(); _persist_job(job); self._json({"ok":True}); return
+        if path.startswith("/api/jobs/") and path.endswith("/cancel"):
+            job=self._job(path.split("/")[-2])
+            if not job or job.status not in {"queued", "running", "paused"}: self._json({"error":"این کار قابل لغو نیست."},400); return
+            job.cancel_requested=True; job.stop_event.set(); job.status="cancelled" if job.status=="queued" else job.status; job.last_activity=job.updated_at=now(); _persist_job(job); self._json({"ok":True}); return
         if path.startswith("/api/jobs/") and path.endswith("/resume"):
             job=self._job(path.split("/")[-2])
-            if not job or job.filetype!="epub" or not job.pipeline_job_id or job.status not in {"stopped","failed","finished"}: self._json({"error":"این کار قابل ادامه نیست."},400); return
+            if not job or job.filetype!="epub" or not job.pipeline_job_id or job.status not in {"paused","failed"}: self._json({"error":"این کار قابل ادامه نیست."},400); return
             if RUN_LOCK.locked(): self._json({"error":"یک ترجمهٔ دیگر در حال اجراست."},409); return
-            job.stop_event=threading.Event(); job.status="queued"; job.error=None; job.last_activity=now(); threading.Thread(target=_run_job,args=(job,),kwargs={"resume":True},daemon=True).start(); self._json({"ok":True},202); return
+            job.stop_event=threading.Event(); job.cancel_requested=False; job.status="queued"; job.error=None; job.last_activity=job.updated_at=now(); _persist_job(job); threading.Thread(target=_run_job,args=(job,),kwargs={"resume":True},daemon=True).start(); self._json({"ok":True},202); return
         if path!="/api/jobs": self.send_error(404); return
         with JOBS_LOCK:
-            if any(item.status in {"queued","running","stopping"} for item in JOBS.values()): self._json({"error":"تا پایان یا توقف ترجمهٔ فعلی، شروع هم‌زمان غیرفعال است."},409); return
+            if any(item.status in {"queued","running"} for item in JOBS.values()): self._json({"error":"تا پایان یا توقف ترجمهٔ فعلی، شروع هم‌زمان غیرفعال است."},409); return
         content_type=self.headers.get("Content-Type","")
         if "multipart/form-data" not in content_type: self._json({"error":"فرم آپلود نامعتبر است."},400); return
         try:
@@ -216,14 +636,97 @@ class Handler(BaseHTTPRequestHandler):
         except (ValueError,OSError) as exc: self._json({"error":str(exc)},400); return
         filename=_safe_filename(upload_name); suffix=Path(filename).suffix.lower()
         if not filename or suffix not in {".epub",".pdf"}: self._json({"error":"فقط فایل EPUB یا PDF قابل پذیرش است."},400); return
-        job_id=uuid.uuid4().hex[:12]; input_path=UPLOAD_DIR/f"{job_id}_{filename}"; input_path.write_bytes(upload_data)
-        options={key:fields.get(key,"").strip() for key in ("from_lang","to_lang","model","mode","prompt","debug")}; options["from_lang"]=options["from_lang"] or "EN"; options["to_lang"]=options["to_lang"] or "FA"; options["model"]=options["model"] or DEFAULT_MODEL
-        job=Job(job_id,filename,input_path,suffix.lstrip("."),len(upload_data),options)
+        job_id=uuid.uuid4().hex[:12]; input_path=UPLOAD_DIR/f"{job_id}_{filename}"
+        try:
+            ensure_disk_space(UPLOAD_DIR, required_bytes=len(upload_data) * 3)
+            input_path.write_bytes(upload_data)
+            validate_book(input_path)
+        except (OSError, ValueError) as exc:
+            if input_path.exists(): input_path.unlink()
+            self._json({"error":str(exc)},400); return
+        options={key:fields.get(key,"").strip() for key in ("from_lang","to_lang","model","mode","prompt","debug")}; options["from_lang"]=options["from_lang"] or "EN"; options["to_lang"]=options["to_lang"] or "FA"; options["model"]=options["model"] or DEFAULT_MODEL; options["mode"]=options["mode"] or "fast"
+        job=Job(job_id,filename,input_path,suffix.lstrip("."),len(upload_data),options,options["from_lang"],options["to_lang"],options["model"],options["mode"])
         with JOBS_LOCK: JOBS[job_id]=job
+        _persist_job(job)
+        try:
+            book_id = _ensure_library_source(job)
+            snapshot = get_glossary(db, book_id, options['from_lang'], options['to_lang'])
+            snapshot['auto_extract'] = fields.get('auto_glossary', 'false') == 'true' and options['mode'] not in {'batch', 'resumebatch', 'batchcheck', 'test'}
+            options['glossary_snapshot'] = json.dumps(snapshot, ensure_ascii=False)
+            _persist_job(job)
+        except Exception:
+            # The translation Job remains authoritative if the library index is unavailable.
+            pass
         threading.Thread(target=_run_job,args=(job,),daemon=True).start(); self._json({"id":job_id},201)
+
+    def do_PUT(self) -> None:
+        path = urlparse(self.path).path
+        if path.startswith('/api/library/') and path.endswith('/glossary'):
+            try:
+                self._json(save_glossary(db, int(path.split('/')[3]), self._request_json()))
+            except LookupError as exc: self._json({'error': str(exc)}, 404)
+            except (ValueError, TypeError) as exc: self._json({'error': str(exc)}, 400)
+            return
+        try: body = self._request_json()
+        except (ValueError, json.JSONDecodeError) as exc: self._json({"error": str(exc)}, 400); return
+        if path == "/api/reader/settings":
+            allowed = set(READING_DEFAULTS)
+            clean = {key: value for key, value in body.items() if key in allowed}
+            if "reading_font_size" in clean: clean["reading_font_size"] = max(14, min(30, int(clean["reading_font_size"])))
+            if "reading_line_height" in clean: clean["reading_line_height"] = max(1.4, min(2.6, float(clean["reading_line_height"])))
+            if "reading_width" in clean: clean["reading_width"] = max(560, min(1000, int(clean["reading_width"])))
+            if "reading_direction" in clean and clean["reading_direction"] not in {"auto", "rtl", "ltr"}: clean["reading_direction"] = "auto"
+            for key, value in clean.items(): db.execute("INSERT INTO settings(key, value_json, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json, updated_at=excluded.updated_at", (key, json.dumps(value, ensure_ascii=False), now()))
+            self._json({"ok": True, "value": reading_settings()}); return
+        if path == "/api/settings":
+            for key, value in body.items(): db.execute("INSERT INTO settings(key, value_json, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json, updated_at=excluded.updated_at", (str(key), json.dumps(value, ensure_ascii=False), now()))
+            self._json({"ok": True}); return
+        if path.startswith("/api/library/") and path.count("/") == 3:
+            book_id = path.rsplit("/", 1)[-1]
+            title = str(body.get("title", "")).strip()
+            if not title: self._json({"error": "Title is required."}, 400); return
+            db.execute("UPDATE library_books SET title=?, author=COALESCE(?, author), description=COALESCE(?, description), updated_at=? WHERE id=?", (title, body.get("author"), body.get("description"), now(), book_id)); self._json({"ok": True}); return
+        parts = path.strip("/").split("/")
+        if len(parts) == 3 and parts[0:2] == ["api", "glossaries"]:
+            gid = parts[2]; db.execute("UPDATE glossaries SET name=COALESCE(NULLIF(?, ''), name), description=COALESCE(?, description), updated_at=? WHERE id=?", (str(body.get("name", "")), body.get("description"), now(), gid)); self._json({"ok": True}); return
+        if len(parts) == 3 and parts[0:2] == ["api", "profiles"]:
+            pid = parts[2]; db.execute("UPDATE translation_profiles SET name=COALESCE(NULLIF(?, ''), name), system_prompt=COALESCE(NULLIF(?, ''), system_prompt), temperature=COALESCE(?, temperature), preserve_html=COALESCE(?, preserve_html), preserve_quotes=COALESCE(?, preserve_quotes), glossary_id=?, updated_at=? WHERE id=?", (str(body.get("name", "")), str(body.get("system_prompt", "")), body.get("temperature"), body.get("preserve_html"), body.get("preserve_quotes"), body.get("glossary_id"), now(), pid)); self._json({"ok": True}); return
+        if len(parts) == 3 and parts[0:2] == ["api", "providers"]:
+            provider_id = parts[2]; db.execute("UPDATE providers SET name=COALESCE(NULLIF(?, ''), name), base_url=COALESCE(NULLIF(?, ''), base_url), default_model=COALESCE(?, default_model), enabled=COALESCE(?, enabled), updated_at=? WHERE id=?", (str(body.get("name", "")), str(body.get("base_url", "")), body.get("default_model"), body.get("enabled"), now(), provider_id)); self._json({"ok": True}); return
+        self.send_error(404)
+
+    def do_DELETE(self) -> None:
+        path = urlparse(self.path).path
+        parts = path.strip("/").split("/")
+        if len(parts) == 3 and parts[0:2] == ["api", "jobs"]:
+            job = self._job(parts[2])
+            if not job: self._json({"error": "Job not found."}, 404); return
+            if job.status in {"queued", "running"}: self._json({"error": "Stop or cancel the job before deleting it."}, 409); return
+            with JOBS_LOCK: JOBS.pop(job.id, None)
+            meta = JOB_META_DIR / f"{job.id}.json"
+            if meta.exists(): meta.unlink()
+            db.execute("DELETE FROM jobs WHERE id=?", (job.id,)); self._json({"ok": True}); return
+        if len(parts) == 3 and parts[0:2] == ["api", "library"]:
+            book_id = parts[2]
+            files = db.fetch_all("SELECT path FROM files WHERE book_id=?", (book_id,))
+            active = db.fetch_one("SELECT j.id FROM jobs j JOIN files f ON f.job_id=j.id WHERE f.book_id=? AND j.status IN ('queued','running') LIMIT 1", (book_id,))
+            if active: self._json({"error": "این کتاب در حال ترجمه است و فعلاً قابل حذف نیست."}, 409); return
+            db.execute("DELETE FROM files WHERE book_id=?", (book_id,)); db.execute("DELETE FROM library_books WHERE id=?", (book_id,))
+            # Keep deletion scoped to files belonging to this library book.
+            for item in files:
+                file_path = Path(item["path"])
+                if file_path.is_file() and (UPLOAD_DIR in file_path.parents or WEB_OUTPUT_DIR in file_path.parents):
+                    try: file_path.unlink()
+                    except OSError: pass
+            self._json({"ok": True}); return
+        table_map = {"glossaries": "glossaries", "memory": "translation_memory", "profiles": "translation_profiles"}
+        if len(parts) == 3 and parts[0] == "api" and parts[1] in table_map:
+            db.execute(f"DELETE FROM {table_map[parts[1]]} WHERE id=?", (parts[2],)); self._json({"ok": True}); return
+        self.send_error(404)
 
 
 def main() -> None:
+    restore_jobs()
     print("J Book Translate UI: http://127.0.0.1:8765")
     ThreadingHTTPServer(("127.0.0.1",8765),Handler).serve_forever()
 

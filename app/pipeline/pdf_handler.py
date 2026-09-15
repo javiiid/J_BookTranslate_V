@@ -1,4 +1,6 @@
 ﻿import base64
+import html
+import shutil
 from pathlib import Path
 import fitz  # PyMuPDF
 from openai import OpenAI
@@ -56,14 +58,41 @@ class PDFHandler:
         if lines[-1].strip() == "```":
             lines = lines[:-1]
         sanitized_content = '\n'.join(lines)
+        # Model HTML frequently contains empty/dangling anchors. PyMuPDF
+        # tries to turn those into PDF links and raises ``No destination``.
+        # Keep the readable text while dropping only anchor wrappers.
+        sanitized_content = re.sub(r'<a\b[^>]*>', '', sanitized_content, flags=re.IGNORECASE)
+        sanitized_content = re.sub(r'</a\s*>', '', sanitized_content, flags=re.IGNORECASE)
         return PDFHandler.remove_line_height_styles(sanitized_content)
 
     @staticmethod
+    def insert_htmlbox_safe(page, rect, html_content):
+        """Render HTML and fall back to plain text for malformed provider HTML."""
+        try:
+            return page.insert_htmlbox(rect, html_content)
+        except RuntimeError as exc:
+            if "destination" not in str(exc).lower() and "target_id" not in str(exc).lower():
+                raise
+            stripped = re.sub(r'</?a\b[^>]*>', '', html_content, flags=re.IGNORECASE)
+            try:
+                return page.insert_htmlbox(rect, stripped)
+            except RuntimeError:
+                text = html.unescape(re.sub(r'<[^>]+>', ' ', stripped))
+                return page.insert_textbox(rect, text, fontsize=10, fontname="helv")
+
+    @staticmethod
     def compress_pdf(input_pdf_path, output_pdf_path):
-        """Compress PDF using Ghostscript with font consolidation"""
+        """Compress with Ghostscript when available, otherwise keep PDF usable."""
+        input_pdf_path = Path(input_pdf_path)
+        output_pdf_path = Path(output_pdf_path)
+        ghostscript = shutil.which("gs") or shutil.which("gswin64c") or shutil.which("gswin32c")
+        if not ghostscript:
+            shutil.copy2(input_pdf_path, output_pdf_path)
+            print("Ghostscript not found; using the uncompressed PDF output.")
+            return output_pdf_path
         try:
             subprocess.run([
-                'gs',
+                ghostscript,
                 '-sDEVICE=pdfwrite',
                 '-dCompatibilityLevel=1.4',
                 '-dPDFSETTINGS=/screen',
@@ -77,8 +106,12 @@ class PDFHandler:
                 input_pdf_path
             ], check=True)
             print(f"Compressed PDF saved to {output_pdf_path.name}")
-        except subprocess.CalledProcessError as e:
-            print(f"Error compressing PDF: {e}")
+        except (subprocess.CalledProcessError, OSError) as e:
+            # Compression is optional. Preserve the successfully rendered PDF
+            # instead of failing the entire translation job.
+            shutil.copy2(input_pdf_path, output_pdf_path)
+            print(f"PDF compression skipped ({e}); using the uncompressed PDF output.")
+        return output_pdf_path
 
     @staticmethod
     def save_translated_pdf(translations, output_pdf_path):
@@ -95,7 +128,7 @@ class PDFHandler:
             html_content = translations[chunk_id]
             page = doc.new_page(width=page_width, height=page_height)
             # Insert HTML content into the page with a bounding box
-            page.insert_htmlbox(fitz.Rect(margin, margin, page_width - margin, page_height - margin), html_content)
+            PDFHandler.insert_htmlbox_safe(page, fitz.Rect(margin, margin, page_width - margin, page_height - margin), html_content)
         
         # Save the uncompressed PDF to a temporary file
         doc.save(temp_pdf_path)
@@ -130,7 +163,7 @@ class PDFHandler:
                 html_content = translations[chunk_id]
                 page = doc.new_page(width=page_width, height=page_height)
                 # Insert HTML content into the page with a bounding box
-                page.insert_htmlbox(fitz.Rect(margin, margin, page_width - margin, page_height - margin), html_content)
+                PDFHandler.insert_htmlbox_safe(page, fitz.Rect(margin, margin, page_width - margin, page_height - margin), html_content)
 
         # Save the uncompressed PDF to a temporary file
         doc.save(temp_pdf_path)

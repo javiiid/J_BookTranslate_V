@@ -1,209 +1,173 @@
-﻿import json
+"""Durable, locked and atomic job-state storage."""
+
+from __future__ import annotations
+
+import json
 import os
-from pathlib import Path
+import time
+import uuid
+from contextlib import contextmanager
 from datetime import datetime, timezone
+from pathlib import Path
 
 from app.core.paths import ensure_dir, ensure_temp_structure
 
+UTC = timezone.utc
+LOCK_TIMEOUT_SECONDS = 30
+STALE_LOCK_SECONDS = 300
+
+
+@contextmanager
+def state_lock(paths):
+    job_dir = paths.get("job_dir") or Path(paths["translations_file"]).parent
+    lock_path = Path(job_dir) / ".state.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    started = time.monotonic()
+    descriptor = None
+    while descriptor is None:
+        try:
+            descriptor = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.write(descriptor, str(os.getpid()).encode("ascii"))
+        except FileExistsError:
+            try:
+                if time.time() - lock_path.stat().st_mtime > STALE_LOCK_SECONDS:
+                    lock_path.unlink()
+                    continue
+            except FileNotFoundError:
+                continue
+            if time.monotonic() - started >= LOCK_TIMEOUT_SECONDS:
+                raise TimeoutError(f"Timed out waiting for state lock: {lock_path}")
+            time.sleep(0.05)
+    try:
+        yield
+    finally:
+        os.close(descriptor)
+        try:
+            lock_path.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def _atomic_json(path: Path, value) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_name(f".{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
+    try:
+        with temp_path.open("w", encoding="utf-8") as handle:
+            json.dump(value, handle, indent=2, ensure_ascii=False)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_path, path)
+    finally:
+        if temp_path.exists():
+            temp_path.unlink()
+
+
+def deduplicate_chunks(chunks):
+    seen = set()
+    unique = []
+    for chunk_id, text in chunks or []:
+        key = str(chunk_id)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append((chunk_id, text))
+    return unique
+
 
 def save_job_state(paths, chunks_total, chunks_completed, translations):
-    """Save current job state and translations"""
-    state = {
-        'chunks_total': chunks_total,
-        'chunks_completed': chunks_completed,
-        'last_updated': datetime.now(UTC).isoformat()
-    }
-    
-    try:
-        # Save state with fsync for durability
-        with open(paths['state_file'], 'w', encoding='utf-8') as f:
-            json.dump(state, f, indent=2)
-            f.flush()
-            os.fsync(f.fileno())
-        
-        # Save translations separately with fsync
-        with open(paths['translations_file'], 'w', encoding='utf-8') as f:
-            json.dump(translations, f, indent=2)
-            f.flush()
-            os.fsync(f.fileno())
-            
-    except Exception as e:
-        print(f"Warning: Could not save state: {e} [save_job_state]")
-        # Continue processing but warn user
-        print("Warning: Progress may not be resumable if the script is interrupted [save_job_state]")
+    with state_lock(paths):
+        _atomic_json(paths["state_file"], {
+            "chunks_total": chunks_total,
+            "chunks_completed": chunks_completed,
+            "last_updated": datetime.now(UTC).isoformat(),
+        })
+        _atomic_json(paths["translations_file"], {str(k): v for k, v in translations.items()})
+
 
 def load_job_state(paths):
-    """Load existing state and translations, making job_state.json optional"""
-    state = {}
     try:
-        # Load chunks.json (required)
-        print(f"Loading chunks from: {paths['chunks_file']} [load_job_state]")
-        if not paths['chunks_file'].exists():
-            print(f"No chunks file found at: {paths['chunks_file']} [load_job_state]")
-            return None
-            
-        with open(paths['chunks_file'], 'r', encoding='utf-8') as f:
-            chunks_data = json.load(f)
-            # Explicitly reconstruct chunks as list of tuples (id, text)
-            state['chunks'] = [(id, text) for id, text in chunks_data['chunks']]
-            # Properly reconstruct chapter_map from the stored format
-            state['chapter_map'] = {
-                chunk_id: (data['item'], data['pos']) 
-                for chunk_id, data in chunks_data['chapter_map'].items()
+        with state_lock(paths):
+            if not paths["chunks_file"].exists():
+                return None
+            with paths["chunks_file"].open("r", encoding="utf-8") as handle:
+                chunks_data = json.load(handle)
+            raw_chunks = deduplicate_chunks(chunks_data.get("chunks", []))
+            state = {
+                "chunks": raw_chunks,
+                "chapter_map": {
+                    chunk_id: (data["item"], data["pos"])
+                    for chunk_id, data in chunks_data.get("chapter_map", {}).items()
+                },
+                "chunks_total": len(raw_chunks),
+                "translations": {},
+                "chunks_completed": 0,
             }
-
-        # Add total chunks count
-        state['chunks_total'] = len(state['chunks'])
-            
-        # Load translations.json (optional)
-        print(f"Loading translations from: {paths['translations_file']} [load_job_state]")
-        if paths['translations_file'].exists():
-            with open(paths['translations_file'], 'r', encoding='utf-8') as f:
-                state['translations'] = json.load(f)
-                state['chunks_completed'] = len(state['translations'])
-        else:
-            state['translations'] = {}
-            state['chunks_completed'] = 0
-
-        # Extract timestamp from job_id directory name if exists
-        if paths['job_dir'].exists():
-            timestamp = paths['job_dir'].name.split('_')[-1]
-            state['last_updated'] = f"{timestamp[:8]}T{timestamp[9:11]}:{timestamp[11:13]}:{timestamp[13:15]}.000000+00:00"
-                
-    except Exception as e:
-        print(f"Warning: Could not load state files: {e} [load_job_state]")
-        print(f"Attempted to load from paths: [load_job_state]")
-        for key, path in paths.items():
-            print(f"  {key}: {path} (exists: {path.exists()}) [load_job_state]")
+            if paths["translations_file"].exists():
+                with paths["translations_file"].open("r", encoding="utf-8") as handle:
+                    state["translations"] = {str(k): v for k, v in json.load(handle).items()}
+                state["chunks_completed"] = len(state["translations"])
+            state["last_updated"] = datetime.fromtimestamp(paths["job_dir"].stat().st_mtime, UTC).isoformat()
+            return state
+    except (OSError, json.JSONDecodeError, KeyError, TypeError):
         return None
-        
-    return state
+
 
 def save_chunks(paths, all_chunks, chapter_map):
-    """Save initial chunks and chapter mapping"""
-    chunks_data = {
-        'chunks': [(id, text) for id, text in all_chunks],
-        'chapter_map': {id: {'item': str(item), 'pos': pos} for id, (item, pos) in chapter_map.items()}
-    }
-    with open(paths['chunks_file'], 'w', encoding='utf-8') as f:
-        json.dump(chunks_data, f, indent=2)
+    with state_lock(paths):
+        chunks = deduplicate_chunks(all_chunks)
+        chunk_ids = {str(chunk_id) for chunk_id, _ in chunks}
+        clean_map = {chunk_id: value for chunk_id, value in chapter_map.items() if str(chunk_id) in chunk_ids}
+        _atomic_json(paths["chunks_file"], {
+            "chunks": [(chunk_id, text) for chunk_id, text in chunks],
+            "chapter_map": {chunk_id: {"item": str(item), "pos": pos} for chunk_id, (item, pos) in clean_map.items()},
+        })
+
 
 def save_system_prompt(paths, prompt):
-    """Save the system prompt used by this translation job."""
-
-    with open(
-        paths["system_prompt_file"],
-        "w",
-        encoding="utf-8",
-    ) as f:
-        f.write(prompt)
-
-        f.flush()
-        os.fsync(f.fileno())
+    with state_lock(paths):
+        path = paths["system_prompt_file"]
+        temp_path = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+        with temp_path.open("w", encoding="utf-8") as handle:
+            handle.write(prompt); handle.flush(); os.fsync(handle.fileno())
+        os.replace(temp_path, path)
 
 
 def load_system_prompt(paths):
-    """Load the system prompt stored for this job."""
-
-    prompt_file = paths["system_prompt_file"]
-
-    if not prompt_file.exists():
-        raise FileNotFoundError(
-            f"System prompt file not found: {prompt_file}"
-        )
-
-    with open(
-        prompt_file,
-        "r",
-        encoding="utf-8",
-    ) as f:
-        prompt = f.read().strip()
-
+    path = paths["system_prompt_file"]
+    if not path.exists():
+        raise FileNotFoundError(f"System prompt file not found: {path}")
+    prompt = path.read_text(encoding="utf-8").strip()
     if not prompt:
-        raise ValueError(
-            f"System prompt is empty: {prompt_file}"
-        )
-
+        raise ValueError(f"System prompt is empty: {path}")
     return prompt
 
+
 def save_translations(paths, translations):
-    """Save translations to translations.json with fsync for durability."""
-    # Ensure all keys in translations are strings
-    translations = {str(k): v for k, v in translations.items()}
-    with open(paths['translations_file'], 'w', encoding='utf-8') as f:
-        json.dump(translations, f, indent=2)
-        f.flush()
-        os.fsync(f.fileno())
+    with state_lock(paths):
+        _atomic_json(paths["translations_file"], {str(k): v for k, v in translations.items()})
+
 
 def find_resumable_jobs(input_epub_path, from_lang, to_lang, model):
-    """Find all resumable jobs for the given parameters without requiring job_state.json"""
     temp_dir = ensure_dir("temp")
-    resumable_jobs = []
-    
-    # Look for job directories
     prefix = f"{Path(input_epub_path).stem}_{from_lang}_{to_lang}_{model}_"
+    jobs = []
+    if not temp_dir.exists():
+        return jobs
     for job_dir in temp_dir.iterdir():
-        if not job_dir.is_dir():
+        if not job_dir.is_dir() or not job_dir.name.startswith(prefix):
             continue
-            
         try:
-            # Check if this is a job directory for our input file
-            if not job_dir.name.startswith(prefix):
-                print(f"Skipping directory {job_dir.name}: doesn't match pattern {prefix}* [find_resumable_jobs]")
-                continue
-
             paths = ensure_temp_structure(job_dir.name)
-            
-            # Only require chunks.json and optionally translations.json
-            if not paths['chunks_file'].exists():
-                print(f"Skipping directory {job_dir.name}: missing chunks.json [find_resumable_jobs]")
+            state = load_job_state(paths)
+            if not state:
                 continue
-                
-            # Count total chunks
-            with open(paths['chunks_file'], 'r', encoding='utf-8') as f:
-                chunks_data = json.load(f)
-                chunks_total = len(chunks_data['chunks'])
-            
-            # Count completed translations
-            chunks_completed = 0
-            if paths['translations_file'].exists():
-                with open(paths['translations_file'], 'r', encoding='utf-8') as f:
-                    translations = json.load(f)
-                    chunks_completed = len(translations)
-            else:
-                print(f"Note: Directory {job_dir.name} has no translations.json yet [find_resumable_jobs]")
-            
-            if chunks_completed >= chunks_total:
-                print(f"Found completed job in {job_dir.name}: {chunks_completed}/{chunks_total} chunks [find_resumable_jobs]")
-            else:
-                print(f"Found resumable job in {job_dir.name}: {chunks_completed}/{chunks_total} chunks completed [find_resumable_jobs]")
-            
-            # Extract and properly format timestamp from directory name
-            date_part = job_dir.name.split('_')[-2]  # Format: YYYYMMDD
-            time_part = job_dir.name.split('_')[-1]  # Format: HHMMSS
-            
-            # Parse each component
-            year = date_part[:4]
-            month = date_part[4:6]
-            day = date_part[6:8]
-            hour = time_part[:2]
-            minute = time_part[2:4]
-            second = time_part[4:6]
-            
-            raw_timestamp = f"{date_part}_{time_part}"
-            padded_timestamp = f"{year}-{month}-{day}T{hour}:{minute}:{second}.000000+00:00"
-            
-            state = {
-                'chunks_total': chunks_total,
-                'chunks_completed': chunks_completed,
-                'last_updated': padded_timestamp
-            }
-                
-            resumable_jobs.append((job_dir.name, raw_timestamp, state))
-                
-        except Exception as e:
-            print(f"Warning: Could not process directory {job_dir.name}: {e} [find_resumable_jobs]")
+            timestamp = job_dir.name.rsplit("_", 2)[-2:]
+            raw_timestamp = "_".join(timestamp)
+            jobs.append((job_dir.name, raw_timestamp, {
+                "chunks_total": state["chunks_total"],
+                "chunks_completed": state["chunks_completed"],
+                "last_updated": state["last_updated"],
+            }))
+        except (OSError, ValueError, json.JSONDecodeError):
             continue
-    
-    return sorted(resumable_jobs, key=lambda x: x[2]['last_updated'], reverse=True)
-
+    return sorted(jobs, key=lambda item: item[2]["last_updated"], reverse=True)

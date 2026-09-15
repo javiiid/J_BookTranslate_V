@@ -448,15 +448,19 @@ def replace_pdf_pages(
         # Ù‚Ø±Ø§Ø± Ø¯Ø§Ø¯Ù† HTML
         # ----------------------------------------------------
 
-        page.insert_htmlbox(
-            fitz.Rect(
-                margin,
-                margin,
-                page_width - margin,
-                page_height - margin
-            ),
-            translated_html
-        )
+        try:
+            page.insert_htmlbox(
+                fitz.Rect(margin, margin, page_width - margin, page_height - margin),
+                translated_html,
+            )
+        except RuntimeError as exc:
+            if "destination" not in str(exc).lower() and "target_id" not in str(exc).lower():
+                raise
+            safe_html = re.sub(r'</?a\b[^>]*>', '', translated_html, flags=re.IGNORECASE)
+            page.insert_htmlbox(
+                fitz.Rect(margin, margin, page_width - margin, page_height - margin),
+                safe_html,
+            )
 
     # --------------------------------------------------------
     # Ø°Ø®ÛŒØ±Ù‡ PDF Ø§ØµÙ„Ø§Ø­â€ŒØ´Ø¯Ù‡

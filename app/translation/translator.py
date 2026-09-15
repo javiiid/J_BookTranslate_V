@@ -31,6 +31,8 @@ from pathlib import Path
 from typing import Any
 
 from app.translation.prompts import get_translation_prompt
+from app.glossary.service import load_snapshot, glossary_prompt, check_translation
+from app.glossary.automatic import learn_chunk
 
 from app.translation.batch import (
     batch_translate_chunks,
@@ -39,6 +41,7 @@ from app.translation.batch import (
 )
 
 from app.jobs.state import save_translations
+from app.jobs.state import deduplicate_chunks
 
 from app.core.paths import ensure_dir
 
@@ -481,6 +484,7 @@ def translate_chunk(
     test_translations: dict[str, Any] | None = None,
     filetype: str = "epub",
     system_prompt_text: str | None = None,
+    glossary_snapshot=None,
 ) -> str:
     """
     Translate one chunk.
@@ -546,6 +550,8 @@ def translate_chunk(
         filetype=filetype,
         system_prompt_text=system_prompt_text,
     )
+
+    system_message = glossary_prompt(system_message, text, glossary_snapshot or {})
 
     # ========================================================
     # API OPERATION
@@ -1172,6 +1178,14 @@ def _process_fast_resume(
     # EVERYTHING COMPLETE
     # ========================================================
 
+    if test_translations is None and load_snapshot(paths).get('auto_extract'):
+        for completed_id, completed_source in all_chunks:
+            if stop_event is not None and stop_event.is_set():
+                raise TranslationStopped
+            if str(completed_id) in translations:
+                learn_chunk(client, paths, completed_id, completed_source,
+                            translations[str(completed_id)], model, stop_event)
+
     if untranslated_count == 0:
 
         print("\n" + "=" * 60)
@@ -1246,6 +1260,7 @@ def _process_fast_resume(
 
         try:
 
+            glossary_snapshot = load_snapshot(paths)
             translated_text = translate_chunk(
                 client=client,
                 text=chunk_text,
@@ -1256,6 +1271,7 @@ def _process_fast_resume(
                 test_translations=test_translations,
                 filetype=filetype,
                 system_prompt_text=system_prompt_text,
+                glossary_snapshot=glossary_snapshot,
             )
 
             # ------------------------------------------------
@@ -1265,6 +1281,8 @@ def _process_fast_resume(
             translated_text = _clean_translation(
                 translated_text
             )
+            for term in check_translation(chunk_text, translated_text, glossary_snapshot):
+                print(f"Glossary review needed in chunk {chunk_id}: {term['source_term']} -> {term['target_term']}")
 
             if not translated_text:
 
@@ -1285,6 +1303,9 @@ def _process_fast_resume(
                 paths,
                 translations,
             )
+
+            if test_translations is None:
+                learn_chunk(client, paths, chunk_id, chunk_text, translated_text, model, stop_event)
 
             print(
                 f"✓ Chunk {chunk_id} "
@@ -1562,6 +1583,10 @@ def process_translations(
     if all_chunks is None:
 
         all_chunks = []
+
+    # A malformed source or repeated reconstruction entry must not cause the
+    # same chunk ID to be sent to the provider more than once.
+    all_chunks = deduplicate_chunks(all_chunks)
 
     # ========================================================
     # BATCH CHECK

@@ -3,8 +3,13 @@ import re
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from app.core.paths import ensure_dir
+
+UTC = timezone.utc
 
 from app.translation.prompts import get_translation_prompt
+from app.translation.prompts import get_default_prompt
+from app.glossary.service import load_snapshot, glossary_prompt
 
 
 def save_batch_state(temp_dir, batch_id, input_file_id, timestamp, job_metadata, paths):
@@ -61,7 +66,7 @@ def batch_translate_chunks(client, chunks, from_lang, to_lang, mode=None, model=
                     "messages": [
                         {
                             "role": "system",
-                            "content": system_prompt(from_lang, to_lang, filetype)
+                            "content": glossary_prompt(get_default_prompt(from_lang, to_lang, filetype), chunk_text, load_snapshot(paths) if paths else {})
                         },
                         {
                             "role": "user",
@@ -82,7 +87,7 @@ def batch_translate_chunks(client, chunks, from_lang, to_lang, mode=None, model=
     input_file_id = batch_file.id
     
     # Delete batch input file after uploading, unless debug flag is set
-    if not DEBUG:
+    if not keep_temp:
         try:
             batch_file_path.unlink()
             print(f"Deleted batch input file: {batch_file_path} [batch_translate_chunks]")
@@ -171,7 +176,7 @@ def batch_translate_chunks(client, chunks, from_lang, to_lang, mode=None, model=
                     "messages": [
                         {
                             "role": "system",
-                            "content": system_prompt(from_lang, to_lang, filetype)
+                            "content": glossary_prompt(get_default_prompt(from_lang, to_lang, filetype), chunk_text, load_snapshot(paths) if paths else {})
                         },
                         {
                             "role": "user",
@@ -192,7 +197,7 @@ def batch_translate_chunks(client, chunks, from_lang, to_lang, mode=None, model=
     input_file_id = batch_file.id
     
     # Delete batch input file after uploading, unless debug flag is set
-    if not DEBUG:
+    if not keep_temp:
         try:
             batch_file_path.unlink()
             print(f"Deleted batch input file: {batch_file_path} [batch_translate_chunks]")
@@ -284,7 +289,7 @@ def check_batch_status(client, debug=False):
             print(f"\nBatch {status.status} with 0 completed requests [check_batch_status]")
             
         # Only clean up batch state file if debug mode is not set
-        if not DEBUG:
+        if not debug:
             try:
                 if state_file.exists():
                     state_file.unlink()
