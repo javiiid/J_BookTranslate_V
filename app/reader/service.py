@@ -1,6 +1,7 @@
 """Safe extraction of readable chapters from translated EPUB archives."""
 from __future__ import annotations
 
+import json
 import posixpath
 import re
 import zipfile
@@ -98,3 +99,44 @@ def chapter(epub_path: str | Path, chapter_id: int) -> dict:
     with zipfile.ZipFile(Path(epub_path)) as archive:
         content = archive.read(item["path"]).decode("utf-8", errors="replace")
     return {"id": item["id"], "title": item["title"], "html": sanitize_html(content)}
+
+
+def chapter_blocks(paths: dict, epub_path: str | Path, chapter_id: int) -> list[dict]:
+    """Pair original chunks with their translations for one EPUB chapter."""
+    items = chapters(epub_path)
+    if chapter_id < 0 or chapter_id >= len(items):
+        raise IndexError("Chapter not found.")
+
+    chunks_path = Path(paths["chunks_file"])
+    translations_path = Path(paths["translations_file"])
+    chunks_data = json.loads(chunks_path.read_text(encoding="utf-8"))
+    translations = (
+        json.loads(translations_path.read_text(encoding="utf-8"))
+        if translations_path.is_file()
+        else {}
+    )
+
+    chapter_path = posixpath.normpath(items[chapter_id]["path"])
+    chapter_map = chunks_data.get("chapter_map", {})
+    blocks = []
+    for chunk_id, original in chunks_data.get("chunks", []):
+        chunk_id = str(chunk_id)
+        mapping = chapter_map.get(chunk_id, {})
+        mapped_path = posixpath.normpath(str(mapping.get("item", "")).replace("\\", "/"))
+        same_chapter = (
+            mapped_path == chapter_path
+            or chapter_path.endswith(f"/{mapped_path}")
+            or mapped_path.endswith(f"/{chapter_path}")
+        )
+        if not same_chapter:
+            continue
+        blocks.append({
+            "id": chunk_id,
+            "position": int(mapping.get("pos", len(blocks))),
+            "original": str(original),
+            "translation": str(translations.get(chunk_id, "")),
+            "original_html": sanitize_html(str(original)),
+            "translation_html": sanitize_html(str(translations.get(chunk_id, ""))),
+        })
+
+    return sorted(blocks, key=lambda item: item["position"])

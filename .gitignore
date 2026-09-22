@@ -112,6 +112,8 @@ dist/
 # ============================================================
 
 .pytest_cache/
+.test-tmp/
+app.zip
 .coverage
 .coverage.*
 htmlcov/

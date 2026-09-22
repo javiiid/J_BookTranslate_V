@@ -74,7 +74,7 @@ def read_config():
             "  base_url: 'https://api.gapgpt.app/v1'\n"
             "\n"
             "translation:\n"
-            "  default_model: 'gpt-5.6-terra'\n"
+            "  default_model: 'gpt-5.6-luna'\n"
             "  default_from_lang: 'EN'\n"
             "  default_to_lang: 'FA'\n"
             "  default_mode: 'fast'\n"

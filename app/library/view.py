@@ -1,43 +1,16 @@
 """Small presentation adapter for the Library page."""
 from __future__ import annotations
 
-import base64
-from functools import lru_cache
-from pathlib import Path
-
+from app.core.fonts import embedded_vazirmatn_font_faces
 from .page import _library_page_base
 from .glossary import glossary_panel
-
-
-@lru_cache(maxsize=1)
-def _embedded_vazirmatn_font_faces() -> str:
-    """Return the local Vazirmatn font files as inline CSS font faces."""
-    fonts = (
-        ("Vazirmatn-Regular.woff2", 400),
-        ("Vazirmatn-Medium.woff2", 500),
-        ("Vazirmatn-SemiBold.woff2", 600),
-        ("Vazirmatn-Bold.woff2", 700),
-        ("Vazirmatn-Black.woff2", 800),
-    )
-    font_dir = Path(__file__).parent
-    faces = []
-
-    for filename, weight in fonts:
-        encoded = base64.b64encode((font_dir / filename).read_bytes()).decode("ascii")
-        faces.append(
-            "@font-face{font-family:Vazirmatn;font-style:normal;"
-            f"font-weight:{weight};src:url(data:font/woff2;base64,{encoded}) "
-            "format('woff2');font-display:swap}"
-        )
-
-    return "<style>" + "".join(faces) + "</style>"
 
 
 def library_page() -> str:
     page = _library_page_base()
     page = page.replace('<button data-detail="${b.id}">', '<button data-glossary="${b.id}">واژه‌نامه</button><button data-detail="${b.id}">', 1)
     page = page.replace('</body>', glossary_panel() + '</body>', 1)
-    page = page.replace("</head>", _embedded_vazirmatn_font_faces() + "</head>", 1)
+    page = page.replace("</head>", embedded_vazirmatn_font_faces() + "</head>", 1)
     page = page.replace(
         '<option value="available">',
         '<option value="archived">آرشیوشده</option><option value="available">',

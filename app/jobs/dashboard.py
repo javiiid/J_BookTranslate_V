@@ -39,7 +39,19 @@ function controls(){
 }
 function showSelected(){
  const selected=items.find(item=>item.id===jobId);
- if(selected){jobBox.style.display='block';originalRender(selected);$('#chip').textContent=statuses[selected.status]||selected.status;$('#job-meta').textContent=[selected.filetype,selected.source_language,selected.target_language,selected.model].filter(Boolean).join(' · ');$('#progress-label').textContent=selected.progress.total?fa(selected.progress.completed)+' از '+fa(selected.progress.total)+' بخش ترجمه شده':'در حال آماده‌سازی کتاب…';$('#progress').parentElement.setAttribute('role','progressbar');$('#progress').parentElement.setAttribute('aria-valuenow',String(selected.progress.percent));$('#progress').parentElement.setAttribute('aria-valuemin','0');$('#progress').parentElement.setAttribute('aria-valuemax','100');$('#progress').parentElement.setAttribute('aria-label','پیشرفت ترجمه')}
+ if(selected){
+  jobBox.style.display='block';
+  originalRender(selected);
+  $('#chip').textContent=statuses[selected.status]||selected.status;
+  $('#job-meta').textContent=[selected.filetype,selected.source_language,selected.target_language,selected.model].filter(Boolean).join(' · ');
+  $('#progress-label').textContent=selected.progress.total?fa(selected.progress.completed)+' از '+fa(selected.progress.total)+' بخش ترجمه شده':'در حال آماده‌سازی کتاب…';
+  const bar=$('#progress');
+  bar.setAttribute('role','progressbar');
+  bar.setAttribute('aria-valuenow',String(selected.progress.percent));
+  bar.setAttribute('aria-valuemin','0');
+  bar.setAttribute('aria-valuemax','100');
+  bar.setAttribute('aria-label','پیشرفت ترجمه');
+ }
  else{jobBox.style.display='none'}
  controls();
 }
@@ -54,6 +66,8 @@ function draw(){
  for(const item of sorted){
   const button=document.createElement('button');button.type='button';button.className='job-list-item';
   button.setAttribute('aria-pressed',String(item.id===jobId));
+  button.textContent=item.filename;
+  button.replaceChildren();
   const title=document.createElement('strong');title.className='job-list-title';title.textContent=item.filename;
   const meta=document.createElement('span');meta.className='job-list-meta';meta.textContent=(statuses[item.status]||item.status)+' · '+fa(item.progress.percent)+'٪';
   const track=document.createElement('span');track.className='job-list-track';const fill=document.createElement('span');fill.style.width=Math.max(0,Math.min(100,item.progress.percent))+'%';track.append(fill);

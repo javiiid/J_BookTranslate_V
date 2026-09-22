@@ -2,14 +2,18 @@
 # Model Configuration
 # ============================================================
 
-DEFAULT_MODEL = "gpt-5.6-terra"
+DEFAULT_MODEL = "gpt-5.6-luna"
 
 
 SUPPORTED_MODELS = {
-    "gpt-5.6-terra": {
+    "gpt-5.6-luna": {
         "provider": "openai-compatible",
         "description": "Primary translation model",
-    }
+    },
+    "gemini-3.1-flash-lite": {
+        "provider": "openai-compatible",
+        "description": "Fast, lower-cost translation model",
+    },
 }
 
 

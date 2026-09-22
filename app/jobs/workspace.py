@@ -1,11 +1,11 @@
 """Responsive, task-focused dashboard presentation."""
 
-from app.library.view import _embedded_vazirmatn_font_faces
+from app.core.fonts import embedded_vazirmatn_font_faces
 
 
 def install_workspace(page):
     page = page.replace("@import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;600;700;800&display=swap');", '')
-    return page.replace('</head>', _embedded_vazirmatn_font_faces() + STYLE + '</head>', 1).replace('</body>', SCRIPT + '</body>', 1)
+    return page.replace('</head>', embedded_vazirmatn_font_faces() + STYLE + '</head>', 1).replace('</body>', SCRIPT + '</body>', 1)
 
 
 STYLE = '''<style>
