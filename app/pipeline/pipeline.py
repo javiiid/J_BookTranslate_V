@@ -53,6 +53,11 @@ from app.core.validation import ensure_disk_space, validate_book
 
 from app.core.exceptions import handle_interrupt
 
+from app.output.formats import generate_outputs
+from app.output.markers import strip_markers
+from app.output.segments import build_segments
+from app.pipeline.quality_scorer import make_scorer
+
 
 UTC = timezone.utc
 
@@ -200,8 +205,10 @@ def _translate_epub(
     resume_job_id,
     debug,
     translation_prompt,
+    output_formats=None,
     stop_event=None,
     on_job_started=None,
+    style_preset=None,
 ):
     """
     Execute the complete EPUB translation pipeline.
@@ -219,6 +226,8 @@ def _translate_epub(
 
     interrupted = False
     success = False
+
+    manifest_outputs = None
 
     input_file_id = None
     status = None
@@ -497,6 +506,7 @@ def _translate_epub(
                 filetype="epub",
                 translation_prompt=translation_prompt,
                 stop_event=stop_event,
+                style_preset=style_preset,
             )
         )
 
@@ -572,6 +582,79 @@ def _translate_epub(
             )
 
             return
+
+        # ============================================================
+        # EXTRA OUTPUT FORMATS
+        # ============================================================
+
+        if output_formats:
+
+            print()
+            print(
+                "Generating additional output "
+                "formats... [translate]"
+            )
+
+            output_result = generate_outputs(
+                build_segments(
+                    all_chunks,
+                    translations,
+                    chapter_map,
+                    filetype="epub",
+                ),
+                requested=output_formats,
+                output_dir=output_path.parent,
+                base_name=output_path.stem,
+                filetype="epub",
+                title=input_path.stem,
+                scorer=make_scorer(
+                    output_formats,
+                    client=client,
+                    model=model,
+                    source_lang=from_lang,
+                    target_lang=to_lang,
+                    filetype="epub",
+                    all_chunks=all_chunks,
+                    translations=translations,
+                    paths=paths,
+                    stop_event=stop_event,
+                ),
+            )
+
+            translations = {
+                chunk_id: strip_markers(value)
+                for chunk_id, value
+                in translations.items()
+            }
+
+            manifest_outputs = output_result
+
+            for name, item_path in sorted(
+                output_result["generated"].items()
+            ):
+
+                print(
+                    f"  {name:<18}: {item_path} "
+                    f"[translate]"
+                )
+
+            if output_result["flagged"]:
+
+                print(
+                    f"  QA: {output_result['flagged']} "
+                    "flagged segment(s). [translate]"
+                )
+
+            if output_result.get("quality"):
+
+                print(
+                    f"  Quality: "
+                    f"{output_result['quality']['flagged_count']} "
+                    f"of "
+                    f"{output_result['quality']['total_chunks']} "
+                    f"chunks flagged "
+                    f"[translate]"
+                )
 
         # ====================================================
         # REASSEMBLE EPUB
@@ -682,6 +765,7 @@ def _translate_epub(
             )
 
 
+    return manifest_outputs
 # ============================================================
 # EPUB BATCH CHECK
 # ============================================================
@@ -694,6 +778,7 @@ def _check_epub_batch(
     to_lang,
     model,
     debug,
+    output_formats=None,
 ):
     """
     Check the status of an existing EPUB batch job.
@@ -872,6 +957,67 @@ def _check_epub_batch(
         translations,
     )
 
+        # ============================================================
+        # EXTRA OUTPUT FORMATS
+        # ============================================================
+
+    if output_formats:
+
+        print()
+        print(
+            "Generating additional output "
+            "formats... [translate]"
+        )
+
+        state_loaded = load_job_state(paths) or {}
+
+        output_result = generate_outputs(
+            build_segments(
+                state_loaded.get("chunks", []),
+                translations,
+                chapter_map,
+                filetype="epub",
+            ),
+            requested=output_formats,
+            output_dir=output_path.parent,
+            base_name=output_path.stem,
+            filetype="epub",
+            title=input_path.stem,
+            scorer=make_scorer(
+                output_formats,
+                client=client,
+                model=model,
+                source_lang=from_lang,
+                target_lang=to_lang,
+                filetype="epub",
+                all_chunks=state_loaded.get("chunks", []),
+                translations=translations,
+                paths=paths,
+            ),
+        )
+
+        translations = {
+            chunk_id: strip_markers(value)
+            for chunk_id, value
+            in translations.items()
+        }
+
+        for name, item_path in sorted(
+            output_result["generated"].items()
+        ):
+
+            print(
+                f"  {name:<18}: {item_path} "
+                f"[translate]"
+            )
+
+        if output_result["flagged"]:
+
+            print(
+                f"  QA: {output_result['flagged']} "
+                "flagged segment(s). [translate]"
+            )
+
     # ========================================================
     # REASSEMBLE
     # ========================================================
@@ -967,8 +1113,10 @@ def _translate_pdf(
     model,
     debug,
     translation_prompt,
+    output_formats=None,
     stop_event=None,
     on_job_started=None,
+    style_preset=None,
 ):
     """
     Execute the PDF processing pipeline.
@@ -984,6 +1132,9 @@ def _translate_pdf(
     from app.pipeline.pdf_handler import PDFHandler
 
     success = False
+
+    manifest_outputs = None
+
     paths = None
     input_file_id = None
     status = None
@@ -1113,6 +1264,7 @@ def _translate_pdf(
                 filetype="pdf",
                 translation_prompt=translation_prompt,
                 stop_event=stop_event,
+                style_preset=style_preset,
             )
         )
 
@@ -1139,6 +1291,79 @@ def _translate_pdf(
             )
 
             return
+
+        # ============================================================
+        # EXTRA OUTPUT FORMATS
+        # ============================================================
+
+        if output_formats:
+
+            print()
+            print(
+                "Generating additional output "
+                "formats... [translate]"
+            )
+
+            output_result = generate_outputs(
+                build_segments(
+                    all_chunks,
+                    translations,
+                    chapter_map,
+                    filetype="pdf",
+                ),
+                requested=output_formats,
+                output_dir=output_path.parent,
+                base_name=output_path.stem,
+                filetype="pdf",
+                title=input_path.stem,
+                scorer=make_scorer(
+                    output_formats,
+                    client=client,
+                    model=model,
+                    source_lang=from_lang,
+                    target_lang=to_lang,
+                    filetype="pdf",
+                    all_chunks=all_chunks,
+                    translations=translations,
+                    paths=paths,
+                    stop_event=stop_event,
+                ),
+            )
+
+            translations = {
+                chunk_id: strip_markers(value)
+                for chunk_id, value
+                in translations.items()
+            }
+
+            manifest_outputs = output_result
+
+            for name, item_path in sorted(
+                output_result["generated"].items()
+            ):
+
+                print(
+                    f"  {name:<18}: {item_path} "
+                    f"[translate]"
+                )
+
+            if output_result["flagged"]:
+
+                print(
+                    f"  QA: {output_result['flagged']} "
+                    "flagged segment(s). [translate]"
+                )
+
+            if output_result.get("quality"):
+
+                print(
+                    f"  Quality: "
+                    f"{output_result['quality']['flagged_count']} "
+                    f"of "
+                    f"{output_result['quality']['total_chunks']} "
+                    f"chunks flagged "
+                    f"[translate]"
+                )
 
         # ====================================================
         # CREATE PDF
@@ -1226,6 +1451,7 @@ def _translate_pdf(
             )
 
 
+    return manifest_outputs
 # ============================================================
 # MAIN TRANSLATE FUNCTION
 # ============================================================
@@ -1243,8 +1469,10 @@ def translate(
     debug=False,
     filetype="epub",
     translation_prompt=None,
+    output_formats=None,
     stop_event=None,
     on_job_started=None,
+    style_preset=None,
 ):
     """
     Main translation dispatcher.
@@ -1438,6 +1666,7 @@ def translate(
                 to_lang=to_lang,
                 model=model,
                 debug=debug,
+                output_formats=output_formats,
             )
 
         # ----------------------------------------------------
@@ -1456,8 +1685,10 @@ def translate(
             resume_job_id=resume_job_id,
             debug=debug,
             translation_prompt=translation_prompt,
+            output_formats=output_formats,
             stop_event=stop_event,
             on_job_started=on_job_started,
+        style_preset=style_preset,
         )
 
     # ========================================================
@@ -1476,8 +1707,10 @@ def translate(
             model=model,
             debug=debug,
             translation_prompt=translation_prompt,
+            output_formats=output_formats,
             stop_event=stop_event,
             on_job_started=on_job_started,
+        style_preset=style_preset,
         )
 
     # ========================================================

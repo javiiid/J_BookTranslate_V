@@ -98,8 +98,31 @@ def parse_args():
     )
 
     parser.add_argument(
-    "--prompt",
-    help="Custom translation prompt"
+        "--prompt",
+        help="Custom translation prompt"
+        )
+
+    # ========================================================
+    # STYLE PRESET
+    # ========================================================
+
+    parser.add_argument(
+        "--style",
+        choices=["literary", "technical", "conversational", "formal"],
+        default="literary",
+        help="Translation style preset (default: literary)"
+        )
+
+    parser.add_argument(
+        "--outputs",
+        default=None,
+        help=(
+            "Additional output formats to generate after translation, "
+            "comma-separated (e.g. json_segments,txt_bilingual,docx) "
+            "or 'all'. Supported: json_segments, txt_bilingual, "
+            "markdown, docx, translated_pdf, bilingual_pdf, "
+            "translated_epub, srt, quality_report."
+        )
     )
 
     return parser.parse_args()

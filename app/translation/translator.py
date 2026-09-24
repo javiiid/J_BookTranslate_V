@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import re
+from concurrent.futures import FIRST_COMPLETED, CancelledError, ThreadPoolExecutor, wait
 from pathlib import Path
 from typing import Any
 
@@ -44,6 +45,7 @@ from app.jobs.state import save_translations
 from app.jobs.state import deduplicate_chunks
 
 from app.core.paths import ensure_dir
+from app.core.config import get_translation_config
 
 from app.core.retry import (
     retry_operation,
@@ -485,6 +487,7 @@ def translate_chunk(
     filetype: str = "epub",
     system_prompt_text: str | None = None,
     glossary_snapshot=None,
+    style_preset: str | None = None,
 ) -> str:
     """
     Translate one chunk.
@@ -553,6 +556,13 @@ def translate_chunk(
 
     system_message = glossary_prompt(system_message, text, glossary_snapshot or {})
 
+    # ── style preset ────────────────────────────────
+
+    from app.presets.manager import build_preset_system_message
+    system_message = build_preset_system_message(
+        system_message, style_preset,
+    )
+
     # ========================================================
     # API OPERATION
     # ========================================================
@@ -567,6 +577,9 @@ def translate_chunk(
             "[translate_chunk]"
         )
 
+        from app.presets.manager import get_preset_params
+        preset_params = get_preset_params(style_preset)
+
         response = client.chat.completions.create(
             model=model,
             messages=[
@@ -579,7 +592,14 @@ def translate_chunk(
                     "content": text,
                 },
             ],
-            temperature=0.2,
+            temperature=preset_params.get("temperature", 0.2),
+            top_p=preset_params.get("top_p", 1.0),
+            presence_penalty=preset_params.get(
+                "presence_penalty", 0.0,
+            ),
+            frequency_penalty=preset_params.get(
+                "frequency_penalty", 0.0,
+            ),
         )
 
         return _extract_translation_from_response(
@@ -1110,7 +1130,7 @@ def _run_batch_translation(
 # FAST / RESUME
 # ============================================================
 
-def _process_fast_resume(
+def _process_fast_resume_sequential(
     client: Any,
     all_chunks: list[tuple[Any, str]],
     translations: dict[str, Any],
@@ -1123,6 +1143,7 @@ def _process_fast_resume(
     filetype: str,
     system_prompt_text: str | None,
     stop_event: Any = None,
+    style_preset: str | None = None,
 ) -> tuple[dict[str, Any], None, None]:
     """
     Process chunks sequentially.
@@ -1272,6 +1293,7 @@ def _process_fast_resume(
                 filetype=filetype,
                 system_prompt_text=system_prompt_text,
                 glossary_snapshot=glossary_snapshot,
+                style_preset=style_preset,
             )
 
             # ------------------------------------------------
@@ -1400,6 +1422,167 @@ def _process_fast_resume(
     )
 
 
+def _translation_concurrency() -> int:
+    """Return a conservative, user-configurable parallel request limit."""
+    try:
+        value = int(get_translation_config().get("max_concurrency", 3))
+    except (OSError, TypeError, ValueError):
+        value = 3
+    return max(1, min(value, 12))
+
+
+def _process_fast_resume(
+    client: Any,
+    all_chunks: list[tuple[Any, str]],
+    translations: dict[str, Any],
+    mode: str,
+    from_lang: str,
+    to_lang: str,
+    paths: Any,
+    model: str,
+    test_translations: dict[str, Any] | None,
+    filetype: str,
+    system_prompt_text: str | None,
+    stop_event: Any = None,
+    style_preset: str | None = None,
+) -> tuple[dict[str, Any], None, None]:
+    """Translate chunks concurrently while persisting each completed result."""
+    max_workers = _translation_concurrency()
+    glossary_state = load_snapshot(paths)
+    if (
+        max_workers == 1
+        or mode == "resume"
+        or test_translations is not None
+        or glossary_state.get("auto_extract")
+    ):
+        if glossary_state.get("auto_extract") and max_workers > 1 and mode != "resume":
+            print(
+                "Automatic glossary learning requires ordered chunks; "
+                "using sequential translation for terminology consistency."
+            )
+        return _process_fast_resume_sequential(
+            client, all_chunks, translations, mode, from_lang, to_lang,
+            paths, model, test_translations, filetype, system_prompt_text,
+            stop_event, style_preset,
+        )
+
+    total_chunks = len(all_chunks)
+    translations = _normalize_translations(translations)
+    untranslated_chunks = _get_untranslated_chunks(all_chunks, translations)
+    if glossary_state.get("auto_extract"):
+        for chunk_id, chunk_text in all_chunks:
+            if stop_event is not None and stop_event.is_set():
+                raise TranslationStopped
+            if str(chunk_id) in translations:
+                learn_chunk(
+                    client, paths, chunk_id, chunk_text,
+                    translations[str(chunk_id)], model, stop_event,
+                )
+
+    if not untranslated_chunks:
+        return translations, None, None
+
+    print(
+        f"Translating {len(untranslated_chunks)} chunks with "
+        f"{max_workers} concurrent API requests [_process_fast_resume]"
+    )
+
+    def translate_item(chunk_id: Any, chunk_text: str, snapshot: dict) -> tuple[Any, str, str, dict]:
+        translated_text = translate_chunk(
+            client=client,
+            text=chunk_text,
+            chunk_id=chunk_id,
+            from_lang=from_lang,
+            to_lang=to_lang,
+            model=model,
+            filetype=filetype,
+            system_prompt_text=system_prompt_text,
+            glossary_snapshot=snapshot,
+        )
+        translated_text = _clean_translation(translated_text)
+        if not translated_text:
+            raise RuntimeError(f"Chunk {chunk_id} returned empty translation.")
+        return chunk_id, chunk_text, translated_text, snapshot
+
+    remaining = iter(enumerate(untranslated_chunks))
+    pending = {}
+    completed_results = {}
+    next_commit_index = 0
+    failure = None
+    stopping = False
+
+    with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="translate") as executor:
+        def fill_queue() -> None:
+            while len(pending) < max_workers and not failure and not stopping:
+                try:
+                    index, (chunk_id, chunk_text) = next(remaining)
+                except StopIteration:
+                    break
+                snapshot = load_snapshot(paths)
+                future = executor.submit(translate_item, chunk_id, chunk_text, snapshot)
+                pending[future] = (index, chunk_id)
+
+        def commit_ready_results() -> None:
+            nonlocal next_commit_index, failure, stopping
+            while next_commit_index in completed_results:
+                result_id, source_text, translated_text, snapshot = completed_results.pop(next_commit_index)
+                for term in check_translation(source_text, translated_text, snapshot):
+                    print(
+                        f"Glossary review needed in chunk {result_id}: "
+                        f"{term['source_term']} -> {term['target_term']}"
+                    )
+                translations[str(result_id)] = translated_text
+                save_translations(paths, translations)
+                if test_translations is None and not (stop_event is not None and stop_event.is_set()):
+                    try:
+                        learn_chunk(
+                            client, paths, result_id, source_text,
+                            translated_text, model, stop_event,
+                        )
+                    except BaseException as error:
+                        failure = failure or error
+                        stopping = isinstance(error, (KeyboardInterrupt, TranslationStopped))
+                print(
+                    f"✓ Chunk {result_id} translated and saved "
+                    f"({len(translations)}/{total_chunks})."
+                )
+                next_commit_index += 1
+
+        fill_queue()
+        while pending:
+            if stop_event is not None and stop_event.is_set():
+                stopping = True
+                for future in pending:
+                    future.cancel()
+
+            completed, _ = wait(tuple(pending), return_when=FIRST_COMPLETED)
+            for future in completed:
+                index, chunk_id = pending.pop(future)
+                try:
+                    completed_results[index] = future.result()
+                except CancelledError:
+                    continue
+                except BaseException as error:
+                    failure = failure or error
+                    stopping = stopping or isinstance(error, (KeyboardInterrupt, TranslationStopped))
+                    print(f"ERROR translating chunk {chunk_id}: {error}")
+                    for queued in pending:
+                        queued.cancel()
+                    continue
+
+            commit_ready_results()
+
+            if not pending:
+                fill_queue()
+
+    if failure is not None:
+        raise failure
+    if stopping or (stop_event is not None and stop_event.is_set()):
+        print("Stop requested. Completed concurrent translations are preserved.")
+        raise TranslationStopped
+    return translations, None, None
+
+
 # ============================================================
 # TEST MODE
 # ============================================================
@@ -1511,6 +1694,7 @@ def process_translations(
     translation_prompt=None,
     system_prompt_text: str | None = None,
     stop_event: Any = None,
+    style_preset: str | None = None,
 ) -> tuple[dict[str, Any], Any, Any]:
     """
     Main translation workflow dispatcher.
@@ -1632,6 +1816,7 @@ def process_translations(
             filetype=filetype,
             system_prompt_text=system_prompt_text,
             stop_event=stop_event,
+            style_preset=style_preset,
         )
 
     # ========================================================

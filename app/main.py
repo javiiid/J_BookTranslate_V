@@ -13,6 +13,10 @@ from app.jobs.manager import find_resumable_jobs
 from app.core.paths import ensure_dir
 from app.core.config import read_config
 from app.translation.prompts import get_translation_prompt
+from app.output.formats import (
+    available_output_formats,
+    normalize_outputs,
+)
 
 
 # ============================================================
@@ -97,12 +101,12 @@ def main():
             .lstrip(".")
         )
 
-        if filetype not in {"epub", "pdf"}:
+        if filetype not in {"epub", "pdf", "srt"}:
 
             print()
             print("ERROR")
             print("-" * 60)
-            print("Input file must be an EPUB or PDF file.")
+            print("Input file must be an EPUB, PDF or SRT file.")
             print("-" * 60)
 
             sys.exit(1)
@@ -454,7 +458,72 @@ def main():
         )
 
         # ====================================================
+        # 8b. Additional output formats
+        # ====================================================
+
+        output_formats = None
+
+        if args.outputs:
+
+            try:
+
+                if str(args.outputs).strip().lower() == "all":
+
+                    output_formats = (
+                        available_output_formats()
+                    )
+
+                else:
+
+                    output_formats = normalize_outputs(
+                        args.outputs
+                    )
+
+            except ValueError as error:
+
+                print()
+                print("ERROR")
+                print("-" * 60)
+                print(str(error))
+                print("-" * 60)
+
+                sys.exit(1)
+
+        # ====================================================
+        # SRT subtitles use a dedicated subtitle pipeline
+        # ====================================================
+
+        if filetype == "srt":
+
+            from app.output.srt import translate_srt
+
+            print()
+            print("=" * 60)
+            print("Starting SRT translation...")
+            print("=" * 60)
+
+            translate_srt(
+                client,
+                input_path,
+                output_path,
+                from_lang=args.from_lang,
+                to_lang=args.to_lang,
+                model=args.model,
+                mode=args.mode or "fast",
+                translation_prompt=translation_prompt,
+                debug=args.debug,
+            )
+
+            print()
+            print("=" * 60)
+            print("SRT translation completed.")
+            print("=" * 60)
+
+            return
+
+        # ====================================================
         # 9. Start translation
+        # ====================================================
         # ====================================================
 
         print()
@@ -494,6 +563,9 @@ def main():
             # ------------------------------------------------
 
             translation_prompt=translation_prompt,
+
+            output_formats=output_formats,
+            style_preset=args.style,
         )
 
         # ====================================================

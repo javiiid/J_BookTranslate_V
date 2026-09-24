@@ -101,6 +101,7 @@ class FakeCompletions:
         model,
         messages,
         temperature,
+        **kwargs,
     ):
         self.call_count += 1
 
@@ -273,6 +274,7 @@ def test_translation_retry_exhausted():
         model,
         messages,
         temperature,
+        **kwargs,
     ):
         client.chat.completions.call_count += 1
 
@@ -391,6 +393,7 @@ def test_translation_non_retryable_error():
         model,
         messages,
         temperature,
+        **kwargs,
     ):
         client.chat.completions.call_count += 1
 

@@ -21,15 +21,42 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from openai import OpenAI
-from app.core.config import read_config
+from app.core.config import (
+    DEFAULT_BASE_URL,
+    get_openai_config,
+    normalize_base_url,
+    read_config_safe,
+    update_openai_config,
+    write_config,
+)
 from app.core.models import DEFAULT_MODEL, SUPPORTED_MODELS
 from app.core.paths import ensure_dir
 from app.core.validation import ensure_disk_space, validate_book
+from app.core.web_i18n import inject_language_switcher
 from app.pipeline.pipeline import translate
-from app.translation.prompts import get_default_prompt
+from app.output.convert import convert_file, normalize_convert_formats
+from app.translation.prompts import get_default_prompt, with_author_voice
 from app.storage.database import db
 from app.reader.service import chapter_blocks as reader_chapter_blocks, chapters as reader_chapters, chapter as reader_chapter
 from app.reader.page import reader_page
+from app.welcome.page import welcome_page
+from app.account.page import account_page
+from app.account.service import (
+    account_overview,
+    api_keys as account_api_keys,
+    create_api_key,
+    create_business_request,
+    create_order,
+    credit_packages,
+    install_marketplace_item,
+    marketplace as account_marketplace,
+    orders as account_orders,
+    plans_catalog,
+    publisher_overview,
+    revoke_api_key,
+    start_checkout,
+    update_account,
+)
 from app.library.view import library_page
 from app.glossary.service import get_glossary, save_glossary
 from app.glossary.automatic import sync_book
@@ -75,9 +102,15 @@ class Job:
     error: str | None = None
     cancel_requested: bool = False
     progress: dict[str, int] = field(default_factory=lambda: {"completed": 0, "total": 0})
+    assets: dict[str, str] = field(default_factory=dict)
+    qa_report: str | None = None
+    quality: dict | None = None
+    style: str = "literary"
 
 
 JOBS: dict[str, Job] = {}
+CONVERTS: dict[str, dict] = {}
+CONVERTS_LOCK = threading.RLock()
 JOBS_LOCK = threading.RLock()
 RUN_LOCK = threading.Lock()
 
@@ -94,6 +127,9 @@ def _persist_job(job: Job) -> None:
         "updated_at": job.updated_at, "pipeline_job_id": job.pipeline_job_id,
         "paths": job.paths, "output_path": str(job.output_path) if job.output_path else None,
         "error": job.error, "progress": job.progress,
+        "assets": dict(job.assets or {}), "qa_report": job.qa_report,
+        "quality": job.quality,
+        "style": job.style,
     }
     target = JOB_META_DIR / f"{job.id}.json"
     temporary = target.with_suffix(f".{uuid.uuid4().hex}.tmp")
@@ -111,6 +147,40 @@ def _persist_job(job: Job) -> None:
         # SQLite is an observability/index layer; pipeline state remains the
         # authoritative recovery source if the index is temporarily locked.
         pass
+
+
+def _job_event(job: Job, event: str, message: str, level: str = "INFO") -> None:
+    """Record a user-facing job event without affecting translation flow."""
+    try:
+        db.record_event(job.id, level, event, message, recoverable=level != "ERROR")
+    except Exception:
+        pass
+
+
+def _rescue_job(job: Job) -> Path:
+    """Create a portable snapshot of all currently recoverable job state."""
+    rescue_path = WEB_OUTPUT_DIR / f"{job.id}_rescue.zip"
+    candidates = [JOB_META_DIR / f"{job.id}.json", job.input_path]
+    if job.output_path:
+        candidates.append(job.output_path)
+    if job.paths:
+        candidates.extend(Path(value) for value in job.paths.values())
+    with zipfile.ZipFile(rescue_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        seen = set()
+        for candidate in candidates:
+            if not candidate.exists():
+                continue
+            files = candidate.rglob("*") if candidate.is_dir() else [candidate]
+            for file_path in files:
+                if not file_path.is_file():
+                    continue
+                resolved = file_path.resolve()
+                if resolved in seen:
+                    continue
+                seen.add(resolved)
+                archive.write(file_path, f"project/{file_path.name}")
+    _job_event(job, "rescue_created", "نسخهٔ نجات پروژه ساخته شد.")
+    return rescue_path
 
 
 def _library_book_for_job(job: Job) -> int | None:
@@ -157,7 +227,9 @@ def restore_jobs() -> None:
                 data.get("started_at"), data.get("updated_at", now()), data.get("updated_at", now()),
                 data.get("pipeline_job_id"), data.get("paths"), io.StringIO(), threading.Event(),
                 Path(data["output_path"]) if data.get("output_path") else None, data.get("error"), False,
-                data.get("progress", {"completed": 0, "total": 0}))
+                data.get("progress", {"completed": 0, "total": 0}),
+                assets=data.get("assets") or {}, qa_report=data.get("qa_report"),
+                quality=data.get("quality"), style=data.get("style", "literary"))
             was_active = job.status in {"queued", "running"}
             if was_active:
                 job.status = "paused" if job.pipeline_job_id else "failed"
@@ -183,15 +255,48 @@ def _safe_filename(name: str) -> str:
 
 def _friendly_error(error: Exception) -> str:
     text = str(error).lower()
-    if "api configuration" in text or "api_key" in text or "api key" in text:
-        return "کلید API یا آدرس سرویس در config/config.yaml تنظیم نشده یا معتبر نیست."
+    if "missing 'openai" in text or "api configuration" in text or "api_key" in text:
+        return "کلید یا Base URL سرویس ترجمه تنظیم نشده است. از پنل کاربری ← تنظیمات سرویس ترجمه آن را وارد کنید."
     if "401" in text or "unauthorized" in text:
-        return "دسترسی API تأیید نشد؛ کلید API را بررسی کنید."
+        return "کلید Provider پذیرفته نشد (401). این کلید با API Keyهای حساب کاربری تفاوت دارد."
+    if "403" in text or "forbidden" in text:
+        return "سرویس دسترسی را رد کرد (403). اعتبار حساب، مجوز مدل یا Firewall را بررسی کنید."
+    if "404" in text or "not found" in text:
+        return "Base URL یا مدل پیدا نشد (404). آدرس سازگار معمولاً باید به /v1 ختم شود."
     if "429" in text or "rate limit" in text:
         return "سقف درخواست‌های API پر شده است؛ کمی بعد دوباره ادامه دهید."
-    if "timeout" in text or "connection" in text or "network" in text:
-        return "ارتباط با سرویس API برقرار نشد. اینترنت و base URL را بررسی کنید."
+    if "10013" in text or "permissionerror" in text:
+        return "ویندوز دسترسی شبکهٔ برنامه را مسدود کرده است (WinError 10013). برنامه را در Firewall مجاز کنید."
+    if "timeout" in text or "timed out" in text:
+        return "پاسخ Provider بیش از حد طول کشید؛ اینترنت یا وضعیت سرویس را بررسی کنید."
+    if "connection" in text or "network" in text:
+        return "ارتباط با Provider برقرار نشد. اینترنت، Firewall و Base URL را بررسی کنید."
     return "ترجمه متوقف شد. جزئیات فنی در لاگ در دسترس است."
+
+
+def _candidate_provider_config(payload: dict) -> tuple[dict[str, str], str]:
+    """Build a candidate provider config without mutating the saved config."""
+    saved = read_config_safe()
+    provider = saved.get("openai", {}) or {}
+    base_url = normalize_base_url(payload.get("base_url") or provider.get("base_url") or DEFAULT_BASE_URL)
+    api_key = str(payload.get("api_key") or provider.get("api_key") or "").strip()
+    model = str(payload.get("default_model") or saved.get("translation", {}).get("default_model") or DEFAULT_MODEL).strip()
+    if not api_key:
+        raise ValueError("کلید Provider وارد نشده است.")
+    return {"api_key": api_key, "base_url": base_url}, model
+
+
+def _verify_provider_config(config: dict[str, str], model: str) -> dict:
+    """Verify connectivity and report whether the selected model is listed."""
+    response = OpenAI(**config).models.list()
+    model_ids = [str(item.id) for item in (getattr(response, "data", []) or []) if getattr(item, "id", None)]
+    return {
+        "message": "اتصال سرویس ترجمه برقرار است",
+        "base_url": config["base_url"],
+        "models": len(model_ids),
+        "selected_model": model,
+        "model_available": not model_ids or model in model_ids,
+    }
 
 
 def _update_progress(job: Job) -> None:
@@ -237,28 +342,34 @@ def _run_job(job: Job, *, resume: bool = False) -> None:
             job.started_at = job.started_at or now()
             job.last_activity = job.updated_at = now()
             _persist_job(job)
-            config = read_config().get("openai", {})
-            api_key, base_url = config.get("api_key"), config.get("base_url")
-            if not api_key or not base_url:
-                raise ValueError("API configuration is missing.")
-            client = OpenAI(api_key=api_key, base_url=base_url)
+            _job_event(job, "resumed" if resume else "started", "ترجمه از آخرین نقطهٔ سالم ادامه یافت." if resume else "ترجمه شروع شد.")
+            client = OpenAI(**get_openai_config())
             output_name = f"{job.input_path.stem}_{job.options['to_lang'].lower()}_{job.options['model']}.{job.filetype}"
             job.output_path = WEB_OUTPUT_DIR / f"{job.id}_{output_name}"
             prompt = job.options["prompt"] or get_default_prompt(job.options["from_lang"], job.options["to_lang"], job.filetype)
+            if job.options.get("preserve_voice", "true") == "true":
+                prompt = with_author_voice(prompt)
             mode = "resume" if resume else job.mode
             print(f"Starting web job {job.id}")
-            translate(client=client, input_path=job.input_path, output_path=job.output_path,
+            manifest = translate(client=client, input_path=job.input_path, output_path=job.output_path,
                 from_lang=job.options["from_lang"], to_lang=job.options["to_lang"], mode=mode,
                 model=job.options["model"], fast=mode not in {"batch", "batchcheck", "resumebatch"},
                 resume_job_id=job.pipeline_job_id if resume else None, debug=True, filetype=job.filetype,
-                translation_prompt=prompt, stop_event=job.stop_event,
+                output_formats=job.options.get("outputs"), translation_prompt=prompt, stop_event=job.stop_event,
+                style_preset=job.style,
                 on_job_started=lambda pipeline_id, paths: _on_pipeline_started(job, pipeline_id, paths))
             _update_progress(job)
             job.status = "cancelled" if job.cancel_requested else ("paused" if job.stop_event.is_set() else ("completed" if job.output_path.exists() else "failed"))
             if job.status == "completed":
                 _register_library_output(job)
+                if manifest:
+                    job.assets = {name: str(path) for name, path in (manifest.get("generated") or {}).items()}
+                    job.qa_report = manifest.get("qa_report")
+                    job.quality = manifest.get("quality")
+                    job.style = manifest.get("style", "literary")
             job.last_activity = job.updated_at = now()
             _persist_job(job)
+            _job_event(job, job.status, "ترجمه با موفقیت تکمیل شد." if job.status == "completed" else "ترجمه در نقطهٔ امن متوقف شد.")
             if job.status == "paused":
                 print("Job paused safely. Use Resume to continue from saved progress.")
         except BaseException as exc:
@@ -266,22 +377,40 @@ def _run_job(job: Job, *, resume: bool = False) -> None:
             job.status, job.error = "failed", _friendly_error(exc)
             job.last_activity = job.updated_at = now()
             _persist_job(job)
+            _job_event(job, "failed", job.error or "ترجمه با خطا متوقف شد.", "ERROR")
             traceback.print_exc()
 
 
 def _job_payload(job: Job) -> dict:
     _update_progress(job)
     total, completed = job.progress["total"], job.progress["completed"]
+    elapsed_seconds = 0
+    if job.started_at:
+        try: elapsed_seconds = max(0, (datetime.now(UTC) - datetime.fromisoformat(job.started_at)).total_seconds())
+        except ValueError: pass
+    rate = completed / elapsed_seconds if completed and elapsed_seconds else 0
+    eta_seconds = round((total - completed) / rate) if rate and total > completed else 0
+    inactive_seconds = 0
+    try: inactive_seconds = max(0, (datetime.now(UTC) - datetime.fromisoformat(job.updated_at)).total_seconds())
+    except ValueError: pass
+    health = "red" if job.status == "failed" or (job.status == "running" and inactive_seconds > 600) else "yellow" if job.status in {"queued", "paused", "stopping"} or (job.status == "running" and inactive_seconds > 120) else "green"
     result = {"id": job.id, "filename": job.filename, "filetype": job.filetype.upper(), "file_size": job.file_size,
         "source_language": job.source_language, "target_language": job.target_language, "model": job.model, "mode": job.mode,
         "status": job.status, "created_at": job.created_at, "started_at": job.started_at, "updated_at": job.updated_at, "last_activity": job.updated_at, "output_path": str(job.output_path) if job.output_path else None,
         "progress": {"completed": completed, "total": total, "percent": round(completed * 100 / total) if total else 0},
+        "health": health, "eta_seconds": eta_seconds, "chunks_per_minute": round(rate * 60, 2),
         "log": job.log.getvalue(), "error": job.error,
         "can_stop": job.status == "running" and job.mode != "batch",
         "can_cancel": job.status in {"queued", "running", "paused"},
         "can_resume": job.status in {"paused", "failed"} and bool(job.pipeline_job_id) and job.filetype == "epub"}
+    result["rescue"] = f"/downloads/rescue/{job.id}"
+    result["assets"] = dict(job.assets or {})
+    result["qa_report"] = job.qa_report
+    result["quality"] = job.quality
+    result["style"] = job.style
     if job.status == "completed" and job.output_path:
         result["download"] = f"/downloads/{job.id}"
+        result["asset_downloads"] = {name: f"/downloads/{job.id}/{name}" for name in (job.assets or {})}
         if job.filetype == "epub":
             result["reader"] = f"/reader/{job.id}"
     return result
@@ -298,7 +427,7 @@ def dashboard_summary() -> dict:
         "failed_jobs": sum(job.status == "failed" for job in jobs),
         "total_books": len({str(job.input_path) for job in jobs}),
     }
-    config = read_config().get("openai", {})
+    config = read_config_safe().get("openai", {})
     api_status = "ready" if config.get("api_key") and config.get("base_url") else "not_configured"
     storage_free = shutil.disk_usage(ensure_dir("data")).free
     # Token usage is not persisted by the provider layer yet; returning zero
@@ -313,6 +442,8 @@ def dashboard_summary() -> dict:
 
 READING_DEFAULTS = {
     "study_night_mode": False,
+    "reading_theme": "light",
+    "reading_mode": "translation",
     "reading_font_size": 18,
     "reading_line_height": 1.9,
     "reading_width": 760,
@@ -356,6 +487,12 @@ def library_summary(query: str = "") -> dict:
                 variant["download"] = f"/downloads/{file['job_id']}"
                 if file.get("extension", "").lower() == "epub":
                     variant["reader"] = f"/reader/{file['job_id']}"
+                job_object = JOBS.get(file["job_id"])
+                assets = dict((job_object.assets or {}) if job_object else {})
+                if assets:
+                    versions = [{"name": "main", "download": f"/downloads/{file['job_id']}"}]
+                    versions += [{"name": name, "download": f"/downloads/{file['job_id']}/{name}"} for name in sorted(assets)]
+                    variant["versions"] = versions
             variants.append(variant)
         if not variants:
             continue
@@ -372,8 +509,8 @@ def library_summary(query: str = "") -> dict:
 
 PAGE = r'''<!doctype html><html lang="fa" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>J Book Translate</title><style>
 @import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;600;700;800&display=swap');:root{--bg:#f4f7fb;--surface:#fff;--ink:#142033;--muted:#6d7a90;--line:#e3e9f2;--blue:#356df6;--purple:#7257e8;--cyan:#0ca6a6;--green:#08966c;--red:#e24a4a;--shadow:0 18px 55px rgba(38,57,93,.08)}*{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(circle at 8% 0,#e6efff 0,transparent 32%),radial-gradient(circle at 96% 11%,#eee9ff 0,transparent 27%),var(--bg);font:15px Vazirmatn,Segoe UI,Tahoma,sans-serif;color:var(--ink)}.shell{max-width:1180px;margin:auto;padding:34px 22px 62px}.top{display:flex;align-items:center;justify-content:space-between;gap:18px;margin-bottom:26px}.brand{display:flex;align-items:center;gap:14px}.logo{width:49px;height:49px;border-radius:15px;display:grid;place-items:center;background:linear-gradient(140deg,var(--blue),var(--purple));color:#fff;font-size:25px;box-shadow:0 9px 24px #506ff466}.brand h1{font-size:22px;margin:0;font-weight:800}.brand p{margin:3px 0 0;color:var(--muted);font-size:13px}.api-pill{display:flex;align-items:center;gap:8px;background:#fff;border:1px solid var(--line);border-radius:999px;padding:8px 12px;color:var(--muted);font-size:12px;box-shadow:0 4px 16px #26395a0a}.dot{width:8px;height:8px;border-radius:50%;background:#aeb8c7}.dot.ready{background:var(--green);box-shadow:0 0 0 4px #12b9811b}.dot.error{background:var(--red)}.dashboard{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:20px}.card{background:rgba(255,255,255,.92);border:1px solid rgba(224,230,240,.9);border-radius:20px;box-shadow:var(--shadow)}.form-card{padding:27px}.side{display:grid;gap:20px;align-content:start}.side .card{padding:21px}.section-title{display:flex;justify-content:space-between;align-items:center;margin-bottom:23px}.section-title h2{font-size:18px;margin:0}.step{font-size:12px;color:var(--blue);background:#edf3ff;padding:5px 10px;border-radius:999px}.drop{position:relative;border:1.5px dashed #9ab4eb;background:linear-gradient(135deg,#f8faff,#f0f5ff);border-radius:15px;min-height:136px;display:grid;place-items:center;text-align:center;padding:18px;transition:.2s}.drop.drag{border-color:var(--blue);background:#eaf1ff}.drop input{position:absolute;inset:0;width:100%;opacity:0;cursor:pointer}.upload-icon{font-size:28px;color:var(--blue)}.drop strong{display:block;margin:5px 0 3px}.drop small{color:var(--muted)}.file-info{display:none;margin-top:12px;padding:10px 12px;background:#eff8f5;border-radius:9px;color:#166b55;font-size:13px}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:13px}label{display:block;font-size:13px;font-weight:700;margin:18px 0 7px}input,select,textarea{width:100%;font:inherit;border:1px solid #d9e1ed;border-radius:10px;padding:10px 12px;background:#fff;color:var(--ink)}input:focus,select:focus,textarea:focus{outline:0;border-color:var(--blue);box-shadow:0 0 0 3px #356df61a}textarea{resize:vertical;min-height:100px}.optional{font-weight:400;color:var(--muted)}.advanced{margin-top:17px}.advanced summary{cursor:pointer;color:var(--blue);font-weight:700;font-size:13px}.check{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:13px;margin-top:14px}.check input{width:auto;accent-color:var(--blue)}button{border:0;font:700 14px Vazirmatn,Segoe UI,sans-serif;cursor:pointer;border-radius:10px;padding:12px 15px;transition:.15s}button:hover:not(:disabled){filter:brightness(.97);transform:translateY(-1px)}button:disabled{cursor:not-allowed;opacity:.55}.primary{width:100%;margin-top:21px;color:#fff;background:linear-gradient(135deg,var(--blue),#5a62e8);box-shadow:0 10px 20px #4268d338}.secondary{background:#eef3ff;color:#2d5ed4}.danger{background:#fff0f0;color:#ca3636}.intro{display:flex;gap:11px;line-height:1.8;color:#506078;font-size:13px}.intro i{font-style:normal;display:grid;place-items:center;min-width:34px;height:34px;border-radius:10px;background:#eaf1ff;color:var(--blue)}.fact{display:flex;justify-content:space-between;padding:12px 0;border-bottom:1px solid var(--line);font-size:13px}.fact span{color:var(--muted)}.job{display:none;margin-top:20px;padding:23px}.job-head{display:flex;justify-content:space-between;align-items:flex-start;gap:15px}.job-name{font-weight:800;font-size:16px;word-break:break-word}.job-meta{margin-top:4px;color:var(--muted);font-size:12px}.chip{white-space:nowrap;font-size:12px;font-weight:700;border-radius:999px;padding:6px 10px;background:#f0f3f7;color:#687587}.chip.running{background:#eaf1ff;color:#2b62df}.chip.completed{background:#e6f8f1;color:#087d5c}.chip.stopped,.chip.finished{background:#fff5df;color:#a96b00}.chip.failed{background:#fff0f0;color:#c03636}.progress-row{display:flex;justify-content:space-between;margin:21px 0 8px;font-size:13px;font-weight:700}.progress-track{height:10px;background:#e9eef7;border-radius:99px;overflow:hidden}.progress-value{height:100%;width:0;border-radius:inherit;background:linear-gradient(90deg,var(--blue),var(--cyan));transition:width .45s}.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin-top:16px}.stat{background:#f8faff;border:1px solid #edf1f7;border-radius:11px;padding:10px}.stat span{display:block;color:var(--muted);font-size:11px;margin-bottom:3px}.stat strong{font-size:13px}.job-actions{display:flex;flex-wrap:wrap;gap:9px;margin-top:18px}.job-actions button,.download{padding:9px 12px;text-decoration:none;display:inline-block}.download{border-radius:10px;background:var(--green);color:#fff;font-size:13px;font-weight:700}.error{display:none;margin-top:14px;background:#fff2f2;color:#a93434;border:1px solid #ffd9d9;border-radius:10px;padding:11px;font-size:13px}.logs{margin-top:19px}.logs summary{cursor:pointer;color:var(--muted);font-weight:700;font-size:13px}.logs pre{direction:ltr;text-align:left;white-space:pre-wrap;max-height:280px;overflow:auto;background:#101827;color:#c9f8df;border-radius:11px;padding:13px;font:12px ui-monospace,Consolas,monospace}.small{font-size:12px;color:var(--muted)}@media(max-width:850px){.dashboard{grid-template-columns:1fr}.side{grid-template-columns:1fr 1fr}.top{align-items:flex-start}}@media(max-width:570px){.shell{padding:22px 13px}.top{display:block}.api-pill{display:inline-flex;margin-top:14px}.form-card{padding:19px}.grid2,.side,.stats{grid-template-columns:1fr}.job-head{display:block}.chip{display:inline-block;margin-top:10px}}
-</style></head><body><main class="shell"><header class="top"><div class="brand"><div class="logo">文</div><div><h1>J Book Translate</h1><p>داشبورد ترجمهٔ امن EPUB و PDF</p></div></div><div class="api-pill"><i class="dot" id="api-dot"></i><span id="api-status">در حال بررسی تنظیمات API…</span><button class="secondary" id="verify-api" style="padding:5px 9px;font-size:11px">بررسی اتصال</button></div></header><div class="dashboard"><section><div class="card form-card"><div class="section-title"><h2>ترجمهٔ جدید</h2><span class="step">گام ۱ از ۱</span></div><form id="translate-form"><div class="drop" id="drop"><input required type="file" id="book" name="book" accept=".epub,.pdf"><div><div class="upload-icon">⇧</div><strong>کتاب را اینجا رها کنید یا انتخاب کنید</strong><small>فرمت‌های EPUB و PDF تا حداکثر ۱ گیگابایت</small></div></div><div class="file-info" id="file-info"></div><div class="grid2"><div><label>زبان مبدأ</label><select name="from_lang"><option value="EN" selected>انگلیسی</option><option value="FA">فارسی</option><option value="AR">عربی</option><option value="FR">فرانسوی</option><option value="DE">آلمانی</option><option value="ES">اسپانیایی</option><option value="IT">ایتالیایی</option><option value="RU">روسی</option><option value="TR">ترکی</option><option value="ZH">چینی</option><option value="JA">ژاپنی</option><option value="KO">کره‌ای</option></select></div><div><label>زبان مقصد</label><select name="to_lang"><option value="EN">انگلیسی</option><option value="FA" selected>فارسی</option><option value="AR">عربی</option><option value="FR">فرانسوی</option><option value="DE">آلمانی</option><option value="ES">اسپانیایی</option><option value="IT">ایتالیایی</option><option value="RU">روسی</option><option value="TR">ترکی</option><option value="ZH">چینی</option><option value="JA">ژاپنی</option><option value="KO">کره‌ای</option></select></div></div><div class="grid2"><div><label>مدل ترجمه</label><select name="model"><option value="gpt-5.6-luna" selected>gpt-5.6-luna</option><option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite</option></select></div><div><label>حالت اجرا</label><select name="mode"><option value="">سریع (پیشنهادی)</option><option value="batch">Batch</option><option value="pdfbilingual">PDF دوزبانه</option></select></div></div><details class="advanced"><summary>تنظیمات پیشرفته و دستور ترجمه</summary><label>دستور ترجمه <span class="optional">(اختیاری)</span></label><textarea name="prompt" placeholder="خالی بگذارید تا دستور استاندارد برنامه استفاده شود."></textarea><label class="check"><input type="checkbox" name="debug" value="true" checked>نگهداری فایل‌های موقت برای ادامهٔ امن کار</label></details><button class="primary" id="submit" type="submit">شروع ترجمه</button></form></div><section class="card job" id="job"><div class="job-head"><div><div class="job-name" id="job-name"></div><div class="job-meta" id="job-meta"></div></div><span class="chip" id="chip">در انتظار</span></div><div class="progress-row"><span id="progress-label">در حال آماده‌سازی…</span><span id="percent">۰٪</span></div><div class="progress-track"><div class="progress-value" id="progress"></div></div><div class="stats"><div class="stat"><span>Chunk تکمیل‌شده</span><strong id="completed">۰</strong></div><div class="stat"><span>زمان شروع</span><strong id="started">—</strong></div><div class="stat"><span>آخرین فعالیت</span><strong id="activity">—</strong></div></div><div class="error" id="error"></div><div class="job-actions"><button class="danger" hidden id="stop">توقف امن</button><button class="secondary" hidden id="resume">ادامهٔ ترجمه</button><a class="download" hidden id="download">دریافت خروجی</a></div><details class="logs"><summary>نمایش لاگ فنی</summary><pre id="log"></pre></details></section></section><aside class="side"><div class="card"><div class="section-title"><h2>پیش از شروع</h2></div><div class="intro"><i>✓</i><div>کلید API هرگز به مرورگر ارسال یا در صفحه نمایش داده نمی‌شود. فایل‌ها فقط روی همین دستگاه پردازش می‌شوند.</div></div></div><div class="card"><div class="section-title"><h2>تنظیمات فعال</h2></div><div class="fact"><span>محدودهٔ اجرا</span><strong>فقط محلی</strong></div><div class="fact"><span>ذخیرهٔ پیشرفت</span><strong>بعد از هر chunk</strong></div><div class="fact"><span>ادامهٔ کار</span><strong>برای EPUB</strong></div><p class="small">برای توقف امن، درخواست در حال اجرا تمام و ذخیره می‌شود؛ سپس ترجمه پیش از chunk بعدی متوقف خواهد شد.</p></div></aside></div></main><script>
-const $=s=>document.querySelector(s),form=$('#translate-form'),submit=$('#submit'),jobBox=$('#job'),drop=$('#drop'),book=$('#book'),fileInfo=$('#file-info'),apiDot=$('#api-dot'),apiStatus=$('#api-status');let jobId,timer;const fa=n=>new Intl.NumberFormat('fa-IR').format(n||0),date=v=>v?new Intl.DateTimeFormat('fa-IR',{hour:'2-digit',minute:'2-digit',year:'numeric',month:'short',day:'numeric'}).format(new Date(v)):'—',size=n=>n<1024*1024?(n/1024).toFixed(0)+' KB':(n/1024/1024).toFixed(1)+' MB';function fileChanged(){const f=book.files[0];if(!f){fileInfo.style.display='none';return}fileInfo.textContent=`${f.name} · ${f.name.split('.').pop().toUpperCase()} · ${size(f.size)}`;fileInfo.style.display='block'}book.addEventListener('change',fileChanged);['dragenter','dragover'].forEach(e=>drop.addEventListener(e,x=>{x.preventDefault();drop.classList.add('drag')}));['dragleave','drop'].forEach(e=>drop.addEventListener(e,x=>{x.preventDefault();drop.classList.remove('drag')}));async function health(verify=false){try{const r=await fetch('/api/health'+(verify?'?verify=1':'')),d=await r.json();apiStatus.textContent=d.message;apiDot.className='dot '+(d.status==='ready'?'ready':'error')}catch{apiStatus.textContent='وضعیت API نامشخص است';apiDot.className='dot error'}}$('#verify-api').onclick=()=>health(true);health();form.addEventListener('submit',async e=>{e.preventDefault();if(!book.files[0])return;submit.disabled=true;submit.textContent='در حال ایجاد کار…';try{const r=await fetch('/api/jobs',{method:'POST',body:new FormData(form)}),d=await r.json();if(!r.ok)throw Error(d.error||'ایجاد job ناموفق بود');jobId=d.id;jobBox.style.display='block';$('#error').style.display='none';watch()}catch(err){alert(err.message);submit.disabled=false;submit.textContent='شروع ترجمه'}});async function action(name){if(!jobId)return;const r=await fetch(`/api/jobs/${jobId}/${name}`,{method:'POST'}),d=await r.json();if(!r.ok)alert(d.error||'عملیات انجام نشد');watch()}$('#stop').onclick=()=>action('stop');$('#resume').onclick=()=>action('resume');function render(d){const p=d.progress;$('#job-name').textContent=d.filename;$('#job-meta').textContent=`${d.filetype} · ${size(d.file_size)} · ${d.id}`;$('#chip').textContent={queued:'در صف',running:'در حال ترجمه',stopping:'در حال توقف',stopped:'متوقف شده',completed:'تکمیل شد',finished:'پایان یافت',failed:'خطا'}[d.status]||d.status;$('#chip').className='chip '+d.status;$('#progress').style.width=p.percent+'%';$('#percent').textContent=fa(p.percent)+'٪';$('#progress-label').textContent=p.total?`${fa(p.completed)} از ${fa(p.total)} chunk`:'در حال آماده‌سازی chunkها…';$('#completed').textContent=p.total?`${fa(p.completed)} / ${fa(p.total)}`:fa(p.completed);$('#started').textContent=date(d.started_at);$('#activity').textContent=date(d.last_activity);$('#log').textContent=d.log||'در انتظار شروع…';const error=$('#error');error.textContent=d.error||'';error.style.display=d.error?'block':'none';$('#stop').hidden=!d.can_stop;$('#resume').hidden=!d.can_resume;const dl=$('#download');dl.hidden=!d.download;if(d.download)dl.href=d.download;const active=['queued','running','stopping'].includes(d.status);if(!active){clearInterval(timer);submit.disabled=false;submit.textContent='شروع ترجمه'}}function watch(){clearInterval(timer);const tick=async()=>{try{const r=await fetch('/api/jobs/'+jobId),d=await r.json();if(!r.ok)throw Error();render(d)}catch{clearInterval(timer)}};tick();timer=setInterval(tick,1000)}
+</style></head><body><main class="shell"><header class="top"><div class="brand"><div class="logo">文</div><div><h1>J Book Translate</h1><p>داشبورد ترجمهٔ امن EPUB و PDF</p></div></div><div class="api-pill"><i class="dot" id="api-dot"></i><span id="api-status">در حال بررسی تنظیمات API…</span><button class="secondary" id="verify-api" style="padding:5px 9px;font-size:11px">بررسی اتصال</button></div></header><div class="dashboard"><section><div class="card form-card"><div class="section-title"><h2>ترجمهٔ جدید</h2><span class="step">گام ۱ از ۱</span></div><form id="translate-form"><div class="drop" id="drop"><input required type="file" id="book" name="book" accept=".epub,.pdf"><div><div class="upload-icon">⇧</div><strong>کتاب را اینجا رها کنید یا انتخاب کنید</strong><small>فرمت‌های EPUB و PDF تا حداکثر ۱ گیگابایت</small></div></div><div class="file-info" id="file-info"></div><div class="grid2"><div><label>زبان مبدأ</label><select name="from_lang"><option value="EN" selected>انگلیسی</option><option value="FA">فارسی</option><option value="AR">عربی</option><option value="FR">فرانسوی</option><option value="DE">آلمانی</option><option value="ES">اسپانیایی</option><option value="IT">ایتالیایی</option><option value="RU">روسی</option><option value="TR">ترکی</option><option value="ZH">چینی</option><option value="JA">ژاپنی</option><option value="KO">کره‌ای</option></select></div><div><label>زبان مقصد</label><select name="to_lang"><option value="EN">انگلیسی</option><option value="FA" selected>فارسی</option><option value="AR">عربی</option><option value="FR">فرانسوی</option><option value="DE">آلمانی</option><option value="ES">اسپانیایی</option><option value="IT">ایتالیایی</option><option value="RU">روسی</option><option value="TR">ترکی</option><option value="ZH">چینی</option><option value="JA">ژاپنی</option><option value="KO">کره‌ای</option></select></div></div><div class="grid2"><div><label>مدل ترجمه</label><select name="model"><option value="gpt-5.6-luna" selected>gpt-5.6-luna</option><option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite</option></select></div><div><label>حالت اجرا</label><select name="mode"><option value="">سریع (پیشنهادی)</option><option value="batch">Batch</option><option value="pdfbilingual">PDF دوزبانه</option></select></div></div><details class="advanced"><summary>تنظیمات پیشرفته و دستور ترجمه</summary><label>دستور ترجمه <span class="optional">(اختیاری)</span></label><textarea name="prompt" placeholder="خالی بگذارید تا دستور استاندارد برنامه استفاده شود."></textarea><label class="check"><input type="checkbox" name="debug" value="true" checked>نگهداری فایل‌های موقت برای ادامهٔ امن کار</label></details><button class="primary" id="submit" type="submit">شروع ترجمه</button></form></div><section class="card job" id="job"><div class="job-head"><div><div class="job-name" id="job-name"></div><div class="job-meta" id="job-meta"></div></div><span class="chip" id="chip">در انتظار</span></div><div class="progress-row"><span id="progress-label">در حال آماده‌سازی…</span><span id="percent">۰٪</span></div><div class="progress-track"><div class="progress-value" id="progress"></div></div><div class="stats"><div class="stat"><span>Chunk تکمیل‌شده</span><strong id="completed">۰</strong></div><div class="stat"><span>زمان شروع</span><strong id="started">—</strong></div><div class="stat"><span>آخرین فعالیت</span><strong id="activity">—</strong></div></div><div class="error" id="error"></div><div id="quality-box" style="display:none;margin-top:12px;padding:14px;background:#f0f7ff;border:1px solid #356df633;border-radius:12px"><div class="section-title"><h2>گزارش کیفیت</h2></div><div id="quality-content"></div></div><div class="job-actions"><button class="danger" hidden id="stop">توقف امن</button><button class="secondary" hidden id="resume">ادامهٔ ترجمه</button><a class="download" hidden id="download">دریافت خروجی</a></div><details class="logs"><summary>نمایش لاگ فنی</summary><pre id="log"></pre></details></section></section><aside class="side"><div class="card"><div class="section-title"><h2>پیش از شروع</h2></div><div class="intro"><i>✓</i><div>کلید API هرگز به مرورگر ارسال یا در صفحه نمایش داده نمی‌شود. فایل‌ها فقط روی همین دستگاه پردازش می‌شوند.</div></div></div><div class="card"><div class="section-title"><h2>تنظیمات فعال</h2></div><div class="fact"><span>محدودهٔ اجرا</span><strong>فقط محلی</strong></div><div class="fact"><span>ذخیرهٔ پیشرفت</span><strong>بعد از هر chunk</strong></div><div class="fact"><span>ادامهٔ کار</span><strong>برای EPUB</strong></div><p class="small">برای توقف امن، درخواست در حال اجرا تمام و ذخیره می‌شود؛ سپس ترجمه پیش از chunk بعدی متوقف خواهد شد.</p></div></aside></div></main><script>
+const $=s=>document.querySelector(s),form=$('#translate-form'),submit=$('#submit'),jobBox=$('#job'),drop=$('#drop'),book=$('#book'),fileInfo=$('#file-info'),apiDot=$('#api-dot'),apiStatus=$('#api-status');let jobId,timer;const fa=n=>new Intl.NumberFormat('fa-IR').format(n||0),date=v=>v?new Intl.DateTimeFormat('fa-IR',{hour:'2-digit',minute:'2-digit',year:'numeric',month:'short',day:'numeric'}).format(new Date(v)):'—',size=n=>n<1024*1024?(n/1024).toFixed(0)+' KB':(n/1024/1024).toFixed(1)+' MB';function fileChanged(){const f=book.files[0];if(!f){fileInfo.style.display='none';return}fileInfo.textContent=`${f.name} · ${f.name.split('.').pop().toUpperCase()} · ${size(f.size)}`;fileInfo.style.display='block'}book.addEventListener('change',fileChanged);['dragenter','dragover'].forEach(e=>drop.addEventListener(e,x=>{x.preventDefault();drop.classList.add('drag')}));['dragleave','drop'].forEach(e=>drop.addEventListener(e,x=>{x.preventDefault();drop.classList.remove('drag')}));drop.addEventListener('drop',e=>{e.preventDefault();if(e.dataTransfer&&e.dataTransfer.files[0]){book.files=e.dataTransfer.files;fileChanged()}});async function health(verify=false){try{const r=await fetch('/api/health'+(verify?'?verify=1':'')),d=await r.json();apiStatus.textContent=d.message;apiDot.className='dot '+(d.status==='ready'?'ready':'error')}catch{apiStatus.textContent='وضعیت API نامشخص است';apiDot.className='dot error'}}$('#verify-api').onclick=()=>health(true);health();form.addEventListener('submit',async e=>{e.preventDefault();if(!book.files[0])return;submit.disabled=true;submit.textContent='در حال ایجاد کار…';try{const r=await fetch('/api/jobs',{method:'POST',body:new FormData(form)}),d=await r.json();if(!r.ok)throw Error(d.error||'ایجاد job ناموفق بود');jobId=d.id;jobBox.style.display='block';$('#error').style.display='none';watch()}catch(err){alert(err.message);submit.disabled=false;submit.textContent='شروع ترجمه'}});async function action(name){if(!jobId)return;const r=await fetch(`/api/jobs/${jobId}/${name}`,{method:'POST'}),d=await r.json();if(!r.ok)alert(d.error||'عملیات انجام نشد');watch()}$('#stop').onclick=()=>action('stop');$('#resume').onclick=()=>action('resume');function render(d){const p=d.progress;$('#job-name').textContent=d.filename;$('#job-meta').textContent=`${d.filetype} · ${size(d.file_size)} · ${d.id}`;$('#chip').textContent={queued:'در صف',running:'در حال ترجمه',stopping:'در حال توقف',stopped:'متوقف شده',completed:'تکمیل شد',finished:'پایان یافت',failed:'خطا'}[d.status]||d.status;$('#chip').className='chip '+d.status;$('#progress').style.width=p.percent+'%';$('#percent').textContent=fa(p.percent)+'٪';$('#progress-label').textContent=p.total?`${fa(p.completed)} از ${fa(p.total)} chunk`:'در حال آماده‌سازی chunkها…';$('#completed').textContent=p.total?`${fa(p.completed)} / ${fa(p.total)}`:fa(p.completed);$('#started').textContent=date(d.started_at);$('#activity').textContent=date(d.last_activity);$('#log').textContent=d.log||'در انتظار شروع…';const error=$('#error');error.textContent=d.error||'';error.style.display=d.error?'block':'none';const ql=document.getElementById('quality-box');if(ql){ql.style.display=d.quality?'block':'none';if(d.quality){document.getElementById('quality-content').innerHTML='<div style="padding:8px 0"><strong>Quality Report</strong><br>Total chunks: '+d.quality.total_chunks+' · Flagged: '+d.quality.flagged_count+' · Average: '+d.quality.average_composite+'</div>'}}$('#stop').hidden=!d.can_stop;$('#resume').hidden=!d.can_resume;const dl=$('#download');dl.hidden=!d.download;if(d.download)dl.href=d.download;const active=['queued','running','stopping'].includes(d.status);if(!active){clearInterval(timer);submit.disabled=false;submit.textContent='شروع ترجمه'}}function watch(){clearInterval(timer);const tick=async()=>{try{const r=await fetch('/api/jobs/'+jobId),d=await r.json();if(!r.ok)throw Error();render(d)}catch{clearInterval(timer)}};tick();timer=setInterval(tick,1000)}
 </script></body></html>'''.replace("__DEFAULT_MODEL__", DEFAULT_MODEL)
 
 
@@ -391,10 +528,23 @@ PAGE = PAGE.replace("</head>", "<style>body.app-dark .side-summary{background:li
 PAGE = PAGE.replace("</body>", "<script>document.addEventListener('click',function(event){const button=event.target.closest('[data-toast]');if(button&&button.textContent.includes('کتابخانه')){event.preventDefault();event.stopImmediatePropagation();location.href='/library'}},true);</script></body>")
 
 
-PAGE = PAGE.replace('<button class="primary" id="submit"', '''<label class="check"><input type="checkbox" name="auto_glossary" value="true" checked>ساخت خودکار واژه‌نامه حین ترجمه</label><p id="auto-glossary-note">برای هر قطعه یک درخواست API اضافی مصرف می‌شود. اصطلاحات در Library ← واژه‌نامه قابل مشاهده‌اند. در Batch این قابلیت فعال نیست.</p><button class="primary" id="submit"''', 1)
+PAGE = PAGE.replace('<button class="primary" id="submit"', '''<label class="check"><input type="checkbox" name="auto_glossary" value="true" checked>ساخت خودکار واژه‌نامه حین ترجمه</label><p id="auto-glossary-note">برای ثبات اصطلاحات، واژه‌نامهٔ خودکار ترجمه را ترتیبی می‌کند. برای حالت Turbo و ارسال هم‌زمان چند chunk، این گزینه را خاموش کنید.</p><button class="primary" id="submit"''', 1)
+PAGE = PAGE.replace('<button class="primary" id="submit"', '''<label class="check"><input type="checkbox" name="preserve_voice" value="true" checked>حفظ لحن و صدای نویسنده</label><button class="primary" id="submit"''', 1)
+PAGE = PAGE.replace('<button class="primary" id="submit"', '''<div class="grid2"><div style="grid-column:1/-1"><label>خروجی‌های اضافی پس از ترجمه (اختیاری)</label><div><label class="check"><input type="checkbox" name="outputs" value="json_segments">JSON_SEGMENTS <small>(حافظهٔ ترجمه)</small></label><label class="check"><input type="checkbox" name="outputs" value="txt_bilingual">TXT_BILINGUAL</label><label class="check"><input type="checkbox" name="outputs" value="markdown">MARKDOWN</label><label class="check"><input type="checkbox" name="outputs" value="docx">DOCX</label><label class="check"><input type="checkbox" name="outputs" value="translated_pdf">TRANSLATED_PDF</label><label class="check"><input type="checkbox" name="outputs" value="bilingual_pdf">BILINGUAL_PDF</label><label class="check"><input type="checkbox" name="outputs" value="quality_report">QUALITY_REPORT <small>(امتیاز شش‌بعدی LLM)</small></label><small style="display:block;color:#8892a0;margin-top:4px">سگمنت‌های پرچم‌شده ({NOTE:} / {BOUNDARY_WARNING}) در خروجی‌ها هایلایت شده و در QA_REPORT فهرست می‌شوند.</small></div></div></div><button class="primary" id="submit"''', 1)
+PAGE = PAGE.replace('<button class="primary" id="submit"', '''<label style="display:block;margin:8px 0"><strong>سبک ترجمه:</strong>
+<select name="style_preset" style="margin-right:8px;padding:6px 10px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font-size:13px">
+<option value="literary" selected>📖 ادبی</option>
+<option value="technical">⚙️ فنی</option>
+<option value="conversational">💬 محاوره‌ای</option>
+<option value="formal">🏛️ رسمی</option>
+</select></label><button class="primary" id="submit"''', 1)
 PAGE = PAGE.replace('</body>', '''<script>(()=>{const mode=document.querySelector('[name="mode"]'),auto=document.querySelector('[name="auto_glossary"]');function sync(){auto.disabled=mode.value==='batch'}mode.addEventListener('change',sync);sync()})();</script></body>''', 1)
 
 
+CONVERT_CARD_HTML = r'''<div class="card form-card" id="convert-card" style="margin-top:18px"><div class="section-title"><h2>تبدیل سریع فایل</h2><span class="step">بدون ترجمه</span></div><p class="small" style="color:var(--muted);margin:-8px 0 14px;line-height:1.7">فایل EPUB / PDF / SRT / TXT را انتخاب کنید و فرمت‌های خروجی را تیک بزنید — فایل شما بدون استفاده از هوش مصنوعی، مستقیم به فرمت‌های دیگر تبدیل می‌شود.</p><form id="convert-form"><div class="drop" id="convert-drop"><input type="file" id="convert-book" name="convert_book" accept=".epub,.pdf,.srt,.txt,.md"><div><div class="upload-icon">⇄</div><strong>فایل را اینجا رها کنید یا انتخاب کنید</strong><small>EPUB · PDF · SRT · TXT تا ۱ گیگابایت</small></div></div><div class="file-info" id="convert-file-info" style="display:none"></div><div class="grid2"><div style="grid-column:1/-1"><label>فرمت‌های خروجی</label><div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px"><label class="check"><input type="checkbox" name="convert_outputs" value="txt_bilingual">TXT</label><label class="check"><input type="checkbox" name="convert_outputs" value="markdown">Markdown</label><label class="check"><input type="checkbox" name="convert_outputs" value="docx">DOCX</label><label class="check"><input type="checkbox" name="convert_outputs" value="translated_pdf">PDF</label><label class="check"><input type="checkbox" name="convert_outputs" value="json_segments">JSON</label></div><small style="display:block;color:#8892a0;margin-top:6px">حداقل یک فرمت را انتخاب کنید. خروجی‌ها از متن اصلی فایل ساخته می‌شوند.</small></div></div><button class="primary" id="convert-submit" type="submit">تبدیل فایل</button></form><div id="convert-result" style="display:none;margin-top:16px;padding:14px;background:#f4f7ff;border:1px solid #e3e9f2;border-radius:12px"></div></div>'''
+CONVERT_SCRIPT = r'''<script>(()=>{const form=document.getElementById('convert-form'),fileInput=document.getElementById('convert-book'),drop=document.getElementById('convert-drop'),info=document.getElementById('convert-file-info'),btn=document.getElementById('convert-submit'),result=document.getElementById('convert-result');if(!form)return;const size=n=>n<1024*1024?(n/1024).toFixed(0)+' KB':(n/1024/1024).toFixed(1)+' MB';function fileChanged(){const f=fileInput.files[0];if(!f){info.style.display='none';return}info.textContent=`${f.name} · ${f.name.split('.').pop().toUpperCase()} · ${size(f.size)}`;info.style.display='block'}fileInput.addEventListener('change',fileChanged);['dragenter','dragover'].forEach(e=>drop.addEventListener(e,x=>{x.preventDefault();drop.classList.add('drag')}));['dragleave','drop'].forEach(e=>drop.addEventListener(e,x=>{x.preventDefault();drop.classList.remove('drag')}));drop.addEventListener('drop',e=>{if(e.dataTransfer.files[0]){fileInput.files=e.dataTransfer.files;fileChanged()}});form.addEventListener('submit',async e=>{e.preventDefault();const f=fileInput.files[0];if(!f){alert('فایل را انتخاب کنید.');return}const checked=[...form.querySelectorAll('input[name="convert_outputs"]:checked')].map(i=>i.value);if(!checked.length){alert('حداقل یک فرمت خروجی انتخاب کنید.');return}btn.disabled=true;btn.textContent='در حال تبدیل…';result.style.display='none';try{const fd=new FormData();fd.append('convert_book',f);checked.forEach(v=>fd.append('convert_outputs',v));const r=await fetch('/api/convert',{method:'POST',body:fd}),d=await r.json();if(!r.ok)throw Error(d.error||'تبدیل ناموفق بود');result.innerHTML=`<strong style="color:var(--green)">تبدیل انجام شد ✓</strong><div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px">${d.versions.map(v=>`<a href="${v.download}" style="padding:7px 10px;background:#eaf1ff;color:#2d5ed4;border-radius:8px;font:700 11px Vazirmatn;text-decoration:none">دانلود ${v.name.toUpperCase()}</a>`).join('')}</div>`;result.style.display='block';}catch(err){alert(err.message)}finally{btn.disabled=false;btn.textContent='تبدیل فایل'}}})();</script>'''
+PAGE = PAGE.replace('</section><aside class="side">', CONVERT_CARD_HTML + '</section><aside class="side">', 1)
+PAGE = PAGE.replace('</body>', CONVERT_SCRIPT + '</body>', 1)
 PAGE = install_jobs_dashboard(PAGE)
 PAGE = install_workspace(PAGE)
 
@@ -428,9 +578,20 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError as exc: self._json({'error': str(exc)}, 400)
             return
         if parsed.path == "/":
-            data = PAGE.encode("utf-8"); self.send_response(HTTPStatus.OK); self.send_header("Content-Type", "text/html; charset=utf-8"); self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data); return
+            data = inject_language_switcher(welcome_page()).encode("utf-8"); self.send_response(HTTPStatus.OK); self.send_header("Content-Type", "text/html; charset=utf-8"); self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data); return
+        if parsed.path == "/landing":
+            lp = Path(__file__).parent.parent / "landing.html"
+            alt = Path("D:/J_BookTranslate_V/landing.html")
+            src_path = lp if lp.exists() else alt
+            if src_path.exists():
+                data = src_path.read_bytes(); self.send_response(HTTPStatus.OK); self.send_header("Content-Type", "text/html; charset=utf-8"); self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data); return
+            self.send_error(404); return
+        if parsed.path == "/workspace":
+            data = inject_language_switcher(PAGE).encode("utf-8"); self.send_response(HTTPStatus.OK); self.send_header("Content-Type", "text/html; charset=utf-8"); self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data); return
+        if parsed.path == "/account":
+            data = account_page().encode("utf-8"); self.send_response(HTTPStatus.OK); self.send_header("Content-Type", "text/html; charset=utf-8"); self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data); return
         if parsed.path == "/library":
-            data = library_page().encode("utf-8"); self.send_response(HTTPStatus.OK); self.send_header("Content-Type", "text/html; charset=utf-8"); self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data); return
+            data = inject_language_switcher(library_page()).encode("utf-8"); self.send_response(HTTPStatus.OK); self.send_header("Content-Type", "text/html; charset=utf-8"); self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data); return
         if parsed.path == "/api/reader/settings":
             self._json({"value": reading_settings()}); return
         if parsed.path.startswith("/api/reader/") and parsed.path.endswith("/chapters"):
@@ -460,6 +621,10 @@ class Handler(BaseHTTPRequestHandler):
             data = reader_page(job.id).encode("utf-8"); self.send_response(HTTPStatus.OK); self.send_header("Content-Type", "text/html; charset=utf-8"); self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data); return
         if parsed.path == "/api/dashboard/summary":
             self._json(dashboard_summary()); return
+        if parsed.path == "/api/account/portal":
+            self._json({"overview": account_overview(), "plans": plans_catalog(), "packages": credit_packages(), "api_keys": account_api_keys(), "marketplace": account_marketplace(), "orders": account_orders(), "publisher": publisher_overview()}); return
+        if parsed.path == "/api/account/marketplace":
+            self._json(account_marketplace(parse_qs(parsed.query).get("kind", [""])[0])); return
         if parsed.path == "/api/jobs":
             status_filter = dict(item.split("=", 1) for item in parsed.query.split("&") if "=" in item).get("status") if parsed.query else None
             with JOBS_LOCK:
@@ -472,10 +637,22 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/api/profiles":
             self._json({"items": db.fetch_all("SELECT id, name, temperature, preserve_html, preserve_quotes, glossary_id, created_at, updated_at FROM translation_profiles ORDER BY name")}); return
         if parsed.path == "/api/providers":
-            config = read_config().get("openai", {})
-            self._json({"items": [{"name": "configured", "base_url": config.get("base_url", ""), "enabled": bool(config.get("api_key"))}]}); return
+            config = read_config_safe().get("openai", {})
+            self._json({"items": [{"name": "configured", "base_url": config.get("base_url") or DEFAULT_BASE_URL, "enabled": bool(config.get("api_key"))}]}); return
         if parsed.path.startswith("/api/providers/") and parsed.path.endswith("/models"):
             self._json({"items": [{"id": DEFAULT_MODEL, "available": True}]}); return
+        if parsed.path == "/api/provider-config":
+            # Single source of truth: config/config.yaml. The account
+            # settings page and every other API check read from here so
+            # the base URL can never drift into a second, disconnected path.
+            config = read_config_safe().get("openai", {}) or {}
+            translation_config = read_config_safe().get("translation", {}) or {}
+            self._json({
+                "base_url": config.get("base_url") or DEFAULT_BASE_URL,
+                "has_api_key": bool(config.get("api_key")),
+                "default_model": translation_config.get("default_model", DEFAULT_MODEL),
+                "max_concurrency": max(1, min(int(translation_config.get("max_concurrency", 3)), 12)),
+            }); return
         if parsed.path == "/api/glossaries":
             self._json({"items": db.fetch_all("SELECT g.*, COUNT(t.id) AS term_count FROM glossaries g LEFT JOIN glossary_terms t ON t.glossary_id=g.id GROUP BY g.id ORDER BY g.name")}); return
         if parsed.path == "/api/memory/search":
@@ -511,10 +688,9 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"items": db.fetch_all("SELECT * FROM job_events WHERE job_id=? ORDER BY timestamp ASC", (job_id,))}); return
         if parsed.path == "/api/health":
             try:
-                config = read_config().get("openai", {})
-                if not config.get("api_key") or not config.get("base_url"): raise ValueError("API configuration is missing.")
-                if "verify=1" in parsed.query: OpenAI(api_key=config["api_key"], base_url=config["base_url"]).models.list(); message = "اتصال API برقرار است"
-                else: message = "تنظیمات API آماده است"
+                config = get_openai_config()
+                if "verify=1" in parsed.query: OpenAI(**config).models.list(); message = "اتصال سرویس ترجمه برقرار است"
+                else: message = "تنظیمات سرویس ترجمه آماده است"
                 self._json({"status":"ready","message":message}); return
             except Exception as exc: self._json({"status":"error","message":_friendly_error(exc)}); return
         if parsed.path.startswith("/api/jobs/") and parsed.path.count("/") == 3:
@@ -522,6 +698,44 @@ class Handler(BaseHTTPRequestHandler):
             if not job: self._json({"error":"کار موردنظر پیدا نشد."},404); return
             self._json(_job_payload(job)); return
         if parsed.path.startswith("/downloads/"):
+            if parsed.path.startswith("/downloads/convert/"):
+                rest = parsed.path[len("/downloads/convert/"):]
+                if "/" in rest:
+                    convert_id, format_name = rest.split("/", 1)
+                    entry = CONVERTS.get(convert_id)
+                    file_path = (entry or {}).get("generated", {}).get(format_name) if entry else None
+                    if not file_path:
+                        cand_dir = WEB_OUTPUT_DIR / f"convert_{convert_id}"
+                        if cand_dir.is_dir():
+                            from app.output.formats import SUFFIXES as _SUFFIXES
+                            suffix = _SUFFIXES.get(format_name, "")
+                            for cand in cand_dir.glob(f"*{suffix}"):
+                                if cand.is_file():
+                                    file_path = str(cand)
+                                    break
+                    p2 = Path(file_path) if file_path else None
+                    if not p2 or not p2.is_file() or WEB_OUTPUT_DIR not in p2.parents:
+                        self.send_error(404); return
+                    self.send_response(200); self.send_header("Content-Type","application/octet-stream"); self.send_header("Content-Disposition",f'attachment; filename="{p2.name}"'); self.send_header("Content-Length",str(p2.stat().st_size)); self.end_headers()
+                    with p2.open("rb") as output: shutil.copyfileobj(output,self.wfile)
+                    return
+            if parsed.path.startswith("/downloads/rescue/"):
+                job = self._job(parsed.path.rsplit("/", 1)[-1])
+                rescue_path = WEB_OUTPUT_DIR / f"{job.id}_rescue.zip" if job else None
+                if not rescue_path or not rescue_path.is_file(): self.send_error(404); return
+                self.send_response(200); self.send_header("Content-Type", "application/zip"); self.send_header("Content-Disposition", f'attachment; filename="{rescue_path.name}"'); self.send_header("Content-Length", str(rescue_path.stat().st_size)); self.end_headers()
+                with rescue_path.open("rb") as output: shutil.copyfileobj(output, self.wfile)
+                return
+            if parsed.path.count("/") == 3:
+                asset_job_id, asset_name = parsed.path[len("/downloads/"):].split("/", 1)
+                asset_job = self._job(asset_job_id)
+                asset_path = (asset_job.assets or {}).get(asset_name) if asset_job else None
+                asset_file = Path(asset_path) if asset_path else None
+                if not asset_file or not asset_file.is_file() or WEB_OUTPUT_DIR not in asset_file.parents:
+                    self.send_error(404); return
+                self.send_response(200); self.send_header("Content-Type","application/octet-stream"); self.send_header("Content-Disposition",f'attachment; filename="{asset_file.name}"'); self.send_header("Content-Length",str(asset_file.stat().st_size)); self.end_headers()
+                with asset_file.open("rb") as output: shutil.copyfileobj(output,self.wfile)
+                return
             job=self._job(parsed.path.rsplit("/",1)[-1])
             if not job or not job.output_path or not job.output_path.is_file(): self.send_error(404); return
             self.send_response(200); self.send_header("Content-Type","application/octet-stream"); self.send_header("Content-Disposition",f'attachment; filename="{job.output_path.name}"'); self.send_header("Content-Length",str(job.output_path.stat().st_size)); self.end_headers()
@@ -545,7 +759,7 @@ class Handler(BaseHTTPRequestHandler):
                 model = body.get('model', DEFAULT_MODEL)
                 if not isinstance(model, str) or not model.strip() or len(model) > 150 or any(char in model for char in '/\\:'):
                     raise ValueError('مدل نامعتبر است.')
-                options = dict(from_lang=snapshot['source_language'], to_lang=snapshot['target_language'], model=model.strip(), mode='fast', prompt='', glossary_snapshot=json.dumps(snapshot, ensure_ascii=False))
+                options = dict(from_lang=snapshot['source_language'], to_lang=snapshot['target_language'], model=model.strip(), mode='fast', prompt='', outputs=body.get('outputs') or '', glossary_snapshot=json.dumps(snapshot, ensure_ascii=False))
                 with JOBS_LOCK:
                     if any(item.status in {'queued', 'running'} for item in JOBS.values()):
                         self._json({'error': 'یک ترجمه در حال اجراست.'}, 409); return
@@ -557,6 +771,64 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({'id': job.id}, 201)
             except LookupError as exc: self._json({'error': str(exc)}, 404)
             except (ValueError, TypeError) as exc: self._json({'error': str(exc)}, 400)
+            return
+        if path == "/api/convert":
+            content_type = self.headers.get("Content-Type","")
+            if "multipart/form-data" not in content_type:
+                self._json({"error": "فرم آپلود نامعتبر است."},400); return
+            try:
+                size = int(self.headers.get("Content-Length","0"))
+                if not 0 < size <= 1024*1024*1024:
+                    raise ValueError("فایل خالی است یا بیش از ۱ گیگابایت حجم دارد.")
+                message = BytesParser(policy=policy.default).parsebytes(f"Content-Type: {content_type}\r\nMIME-Version: 1.0\r\n\r\n".encode()+self.rfile.read(size))
+                fields, upload_name, upload_data = {}, "", b""
+                for part in message.iter_parts():
+                    name = part.get_param("name",header="content-disposition")
+                    if not name: continue
+                    payload = part.get_payload(decode=True) or b""
+                    if part.get_filename():
+                        upload_name, upload_data = part.get_filename(), payload
+                    else:
+                        value = payload.decode("utf-8",errors="replace")
+                        fields[name] = fields[name]+","+value if name in fields else value
+            except (ValueError,OSError) as exc:
+                self._json({"error":str(exc)},400); return
+            filename = _safe_filename(upload_name)
+            suffix = Path(filename).suffix.lower()
+            if not filename or suffix not in {".epub",".pdf",".srt",".txt",".md"}:
+                self._json({"error":"فرمت فایل برای تبدیل پشتیبانی نمی‌شود. (EPUB, PDF, SRT, TXT)"},400); return
+            convert_id = uuid.uuid4().hex[:10]
+            input_path = UPLOAD_DIR / f"convert_{convert_id}_{filename}"
+            try:
+                ensure_disk_space(UPLOAD_DIR, required_bytes=len(upload_data) * 3)
+                input_path.write_bytes(upload_data)
+            except (OSError, ValueError) as exc:
+                if input_path.exists(): input_path.unlink(missing_ok=True)
+                self._json({"error":str(exc)},400); return
+            formats_str = fields.get("convert_outputs") or fields.get("formats") or fields.get("outputs") or ""
+            try:
+                normalized = normalize_convert_formats(formats_str)
+                if not normalized:
+                    raise ValueError("حداقل یک فرمت خروجی انتخاب کنید.")
+            except ValueError as exc:
+                if input_path.exists(): input_path.unlink(missing_ok=True)
+                self._json({"error":str(exc)},400); return
+            try:
+                output_dir = WEB_OUTPUT_DIR / f"convert_{convert_id}"
+                output_dir.mkdir(parents=True, exist_ok=True)
+                result = convert_file(input_path, output_dir, normalized, title=Path(filename).stem)
+                with CONVERTS_LOCK:
+                    CONVERTS[convert_id] = {"generated": result["generated"], "source": filename, "created_at": now()}
+                versions = [{"name": name, "download": f"/downloads/convert/{convert_id}/{name}", "filename": Path(pp).name} for name, pp in result["generated"].items()]
+                self._json({"id": convert_id, "versions": versions, "generated": result["generated"]}, 201)
+            except Exception as exc:
+                traceback.print_exc()
+                self._json({"error": str(exc)}, 500)
+            finally:
+                try:
+                    if input_path.exists(): input_path.unlink()
+                except Exception:
+                    pass
             return
         # Resource creation and import endpoints
         if path == "/api/glossaries":
@@ -597,8 +869,45 @@ class Handler(BaseHTTPRequestHandler):
             try: body = self._request_json(); size = int(body.get("file_size", 0)); model = body.get("model", DEFAULT_MODEL)
             except (ValueError, json.JSONDecodeError) as exc: self._json({"error": str(exc)}, 400); return
             chunks = max(1, (size + 12000 - 1) // 12000); self._json({"chunks": chunks, "estimated_seconds": chunks * 4, "estimated_cost": 0.0, "model": model}); return
+        if path == "/api/provider-config/test":
+            try:
+                body = self._request_json()
+                config, model = _candidate_provider_config(body)
+                self._json(_verify_provider_config(config, model)); return
+            except Exception as exc:
+                self._json({"error": _friendly_error(exc)}, 502); return
+        if path == "/api/account/checkout":
+            try:
+                body = self._request_json(); self._json(start_checkout(str(body.get("kind", "")), str(body.get("reference_id", ""))), 201)
+            except LookupError as exc: self._json({"error": str(exc)}, 404)
+            except (ValueError, TypeError) as exc: self._json({"error": str(exc)}, 400)
+            return
+        if path == "/api/account/api-keys":
+            try:
+                body = self._request_json(); self._json(create_api_key(body.get("name", ""), body.get("scopes", "translate:write jobs:read")), 201)
+            except (ValueError, TypeError) as exc: self._json({"error": str(exc)}, 400)
+            return
+        if path.startswith("/api/account/api-keys/") and path.endswith("/revoke"):
+            try: revoke_api_key(int(path.split("/")[-2])); self._json({"ok": True})
+            except ValueError as exc: self._json({"error": str(exc)}, 400)
+            return
+        if path.startswith("/api/account/marketplace/") and path.endswith("/install"):
+            try: self._json(install_marketplace_item(path.split("/")[-2]), 201)
+            except LookupError as exc: self._json({"error": str(exc)}, 404)
+            return
+        if path == "/api/account/orders":
+            try: self._json(create_order(self._request_json()), 201)
+            except (ValueError, TypeError) as exc: self._json({"error": str(exc)}, 400)
+            return
+        if path == "/api/account/business-requests":
+            try: self._json(create_business_request(self._request_json()), 201)
+            except (ValueError, TypeError) as exc: self._json({"error": str(exc)}, 400)
+            return
         if path.startswith("/api/providers/") and path.endswith("/test"):
-            self._json({"ok": bool(read_config().get("openai", {}).get("api_key")), "status": "ready" if read_config().get("openai", {}).get("api_key") else "not_configured"}); return
+            # Legacy path, now backed by the same config.yaml as
+            # /api/provider-config/test so results always agree.
+            config = read_config_safe().get("openai", {}) or {}
+            self._json({"ok": bool(config.get("api_key")), "status": "ready" if config.get("api_key") else "not_configured", "base_url": config.get("base_url") or DEFAULT_BASE_URL}); return
         if path.startswith("/api/glossaries/") and path.endswith("/import"):
             gid = path.split("/")[-2]
             try: body = self._request_json(); terms = body.get("terms", body.get("items", []))
@@ -615,7 +924,7 @@ class Handler(BaseHTTPRequestHandler):
             job=self._job(path.split("/")[-2])
             if not job or job.status!="running": self._json({"error":"این کار قابل توقف نیست."},400); return
             if job.options.get("mode")=="batch": self._json({"error":"Batch پس از ارسال به سرویس متوقف نمی‌شود."},400); return
-            job.stop_event.set(); job.last_activity=job.updated_at=now(); _persist_job(job); self._json({"ok":True}); return
+            job.stop_event.set(); job.last_activity=job.updated_at=now(); _persist_job(job); _job_event(job, "stop_requested", "درخواست توقف امن ثبت شد."); self._json({"ok":True}); return
         if path.startswith("/api/jobs/") and path.endswith("/cancel"):
             job=self._job(path.split("/")[-2])
             if not job or job.status not in {"queued", "running", "paused"}: self._json({"error":"این کار قابل لغو نیست."},400); return
@@ -623,11 +932,16 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/api/jobs/") and path.endswith("/resume"):
             job=self._job(path.split("/")[-2])
             if not job or job.filetype!="epub" or not job.pipeline_job_id or job.status not in {"paused","failed"}: self._json({"error":"این کار قابل ادامه نیست."},400); return
-            if RUN_LOCK.locked(): self._json({"error":"یک ترجمهٔ دیگر در حال اجراست."},409); return
-            job.stop_event=threading.Event(); job.cancel_requested=False; job.status="queued"; job.error=None; job.last_activity=job.updated_at=now(); _persist_job(job); threading.Thread(target=_run_job,args=(job,),kwargs={"resume":True},daemon=True).start(); self._json({"ok":True},202); return
+            job.stop_event=threading.Event(); job.cancel_requested=False; job.status="queued"; job.error=None; job.last_activity=job.updated_at=now(); _persist_job(job); _job_event(job, "resume_queued", "ادامه از آخرین جای سالم وارد صف شد."); threading.Thread(target=_run_job,args=(job,),kwargs={"resume":True},daemon=True).start(); self._json({"ok":True},202); return
+        if path.startswith("/api/jobs/") and path.endswith("/rescue"):
+            job = self._job(path.split("/")[-2])
+            if not job: self._json({"error": "Job not found."}, 404); return
+            try:
+                rescue_path = _rescue_job(job)
+                self._json({"ok": True, "download": f"/downloads/rescue/{job.id}", "size": rescue_path.stat().st_size}, 201)
+            except OSError as exc: self._json({"error": str(exc)}, 500)
+            return
         if path!="/api/jobs": self.send_error(404); return
-        with JOBS_LOCK:
-            if any(item.status in {"queued","running"} for item in JOBS.values()): self._json({"error":"تا پایان یا توقف ترجمهٔ فعلی، شروع هم‌زمان غیرفعال است."},409); return
         content_type=self.headers.get("Content-Type","")
         if "multipart/form-data" not in content_type: self._json({"error":"فرم آپلود نامعتبر است."},400); return
         try:
@@ -639,7 +953,9 @@ class Handler(BaseHTTPRequestHandler):
                 if not name: continue
                 payload=part.get_payload(decode=True) or b""
                 if part.get_filename(): upload_name,upload_data=part.get_filename(),payload
-                else: fields[name]=payload.decode("utf-8",errors="replace")
+                else:
+                    value=payload.decode("utf-8",errors="replace")
+                    fields[name]=fields[name]+","+value if name in fields else value
         except (ValueError,OSError) as exc: self._json({"error":str(exc)},400); return
         filename=_safe_filename(upload_name); suffix=Path(filename).suffix.lower()
         if not filename or suffix not in {".epub",".pdf"}: self._json({"error":"فقط فایل EPUB یا PDF قابل پذیرش است."},400); return
@@ -651,10 +967,11 @@ class Handler(BaseHTTPRequestHandler):
         except (OSError, ValueError) as exc:
             if input_path.exists(): input_path.unlink()
             self._json({"error":str(exc)},400); return
-        options={key:fields.get(key,"").strip() for key in ("from_lang","to_lang","model","mode","prompt","debug")}; options["from_lang"]=options["from_lang"] or "EN"; options["to_lang"]=options["to_lang"] or "FA"; options["model"]=options["model"] or DEFAULT_MODEL; options["mode"]=options["mode"] or "fast"
-        job=Job(job_id,filename,input_path,suffix.lstrip("."),len(upload_data),options,options["from_lang"],options["to_lang"],options["model"],options["mode"])
+        options={key:fields.get(key,"").strip() for key in ("from_lang","to_lang","model","mode","prompt","debug")}; options["preserve_voice"] = fields.get("preserve_voice", "false"); options["from_lang"]=options["from_lang"] or "EN"; options["to_lang"]=options["to_lang"] or "FA"; options["model"]=options["model"] or DEFAULT_MODEL; options["mode"]=options["mode"] or "fast"; options["outputs"]=fields.get("outputs",""); options["style_preset"]=fields.get("style_preset","literary")
+        job=Job(job_id,filename,input_path,suffix.lstrip("."),len(upload_data),options,options["from_lang"],options["to_lang"],options["model"],options["mode"],style=options.get("style_preset","literary"))
         with JOBS_LOCK: JOBS[job_id]=job
         _persist_job(job)
+        _job_event(job, "queued", "کتاب به صف ترجمه اضافه شد.")
         try:
             book_id = _ensure_library_source(job)
             snapshot = get_glossary(db, book_id, options['from_lang'], options['to_lang'])
@@ -676,6 +993,38 @@ class Handler(BaseHTTPRequestHandler):
             return
         try: body = self._request_json()
         except (ValueError, json.JSONDecodeError) as exc: self._json({"error": str(exc)}, 400); return
+        if path == "/api/account":
+            try: self._json(update_account(body))
+            except (ValueError, TypeError) as exc: self._json({"error": str(exc)}, 400)
+            return
+        if path == "/api/provider-config":
+            try:
+                candidate, default_model = _candidate_provider_config(body)
+                verification = _verify_provider_config(candidate, default_model)
+                if not verification["model_available"]:
+                    self._json({"error": f"مدل {default_model} در Provider انتخاب‌شده پیدا نشد."}, 400); return
+                config = read_config_safe()
+                config["openai"] = candidate
+                translation_config = dict(config.get("translation") or {})
+                translation_config["default_model"] = default_model
+                max_concurrency = int(body.get("max_concurrency", translation_config.get("max_concurrency", 3)))
+                if not 1 <= max_concurrency <= 12:
+                    raise ValueError("تعداد درخواست هم‌زمان باید بین 1 تا 12 باشد.")
+                translation_config["max_concurrency"] = max_concurrency
+                config["translation"] = translation_config
+                write_config(config)
+                self._json({
+                    "base_url": candidate["base_url"],
+                    "has_api_key": True,
+                    "default_model": default_model,
+                    "max_concurrency": max_concurrency,
+                    "verified": True,
+                    "models": verification["models"],
+                }); return
+            except ValueError as exc:
+                self._json({"error": str(exc)}, 400); return
+            except Exception as exc:
+                self._json({"error": _friendly_error(exc)}, 502); return
         if path == "/api/reader/settings":
             allowed = set(READING_DEFAULTS)
             clean = {key: value for key, value in body.items() if key in allowed}
@@ -683,6 +1032,8 @@ class Handler(BaseHTTPRequestHandler):
             if "reading_line_height" in clean: clean["reading_line_height"] = max(1.4, min(2.6, float(clean["reading_line_height"])))
             if "reading_width" in clean: clean["reading_width"] = max(560, min(1000, int(clean["reading_width"])))
             if "reading_direction" in clean and clean["reading_direction"] not in {"auto", "rtl", "ltr"}: clean["reading_direction"] = "auto"
+            if "reading_theme" in clean and clean["reading_theme"] not in {"light", "night", "sepia"}: clean["reading_theme"] = "light"
+            if "reading_mode" in clean and clean["reading_mode"] not in {"translation", "bilingual", "columns", "original"}: clean["reading_mode"] = "translation"
             for key, value in clean.items(): db.execute("INSERT INTO settings(key, value_json, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json, updated_at=excluded.updated_at", (key, json.dumps(value, ensure_ascii=False), now()))
             self._json({"ok": True, "value": reading_settings()}); return
         if path == "/api/settings":
@@ -699,7 +1050,13 @@ class Handler(BaseHTTPRequestHandler):
         if len(parts) == 3 and parts[0:2] == ["api", "profiles"]:
             pid = parts[2]; db.execute("UPDATE translation_profiles SET name=COALESCE(NULLIF(?, ''), name), system_prompt=COALESCE(NULLIF(?, ''), system_prompt), temperature=COALESCE(?, temperature), preserve_html=COALESCE(?, preserve_html), preserve_quotes=COALESCE(?, preserve_quotes), glossary_id=?, updated_at=? WHERE id=?", (str(body.get("name", "")), str(body.get("system_prompt", "")), body.get("temperature"), body.get("preserve_html"), body.get("preserve_quotes"), body.get("glossary_id"), now(), pid)); self._json({"ok": True}); return
         if len(parts) == 3 and parts[0:2] == ["api", "providers"]:
-            provider_id = parts[2]; db.execute("UPDATE providers SET name=COALESCE(NULLIF(?, ''), name), base_url=COALESCE(NULLIF(?, ''), base_url), default_model=COALESCE(?, default_model), enabled=COALESCE(?, enabled), updated_at=? WHERE id=?", (str(body.get("name", "")), str(body.get("base_url", "")), body.get("default_model"), body.get("enabled"), now(), provider_id)); self._json({"ok": True}); return
+            # Kept for backward compatibility, but writes go through the
+            # same config.yaml path as /api/provider-config so this can
+            # never diverge into a second base URL.
+            provider_id = parts[2]
+            db.execute("UPDATE providers SET name=COALESCE(NULLIF(?, ''), name), base_url=COALESCE(NULLIF(?, ''), base_url), default_model=COALESCE(?, default_model), enabled=COALESCE(?, enabled), updated_at=? WHERE id=?", (str(body.get("name", "")), str(body.get("base_url", "")), body.get("default_model"), body.get("enabled"), now(), provider_id))
+            if body.get("base_url"): update_openai_config(base_url=str(body.get("base_url")))
+            self._json({"ok": True}); return
         self.send_error(404)
 
     def do_DELETE(self) -> None:

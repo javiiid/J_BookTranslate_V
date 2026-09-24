@@ -1,0 +1,58 @@
+{
+  "literary": {
+    "name": "ادبی",
+    "name_en": "Literary",
+    "description": "حفظ لحن هنری، استعاره‌ها و احساس متن. مناسب رمان و داستان.",
+    "prompt_insert": "[STYLE: LITERARY]\n\nYour goal is to produce a translation that preserves the artistic and emotional quality of the source.\n\nPriorities:\n- Tone and mood — Match the emotional register and atmosphere\n- Figurative language — Translate metaphors, similes, and imagery naturally; adapt when literal translation sounds awkward\n- Flow and rhythm — Maintain sentence rhythm and paragraph pacing; prefer natural Persian prose over rigid word-for-word accuracy\n- Cultural adaptation — Adapt idioms and cultural references for Persian readers when direct translation loses meaning\n- Character voice — Preserve distinct voices in dialogue; reflect personality, age, education level\n\nGuidelines:\n- Use rich, varied vocabulary appropriate to the genre\n- Favor eloquent phrasing over technical precision\n- Break long, complex sentences if Persian style demands it\n- Preserve paragraph breaks, dialogue formatting, and literary devices\n- If a phrase has multiple valid interpretations, choose the one that fits the overall mood\n\nAvoid:\n- Overly literal translation that sounds stiff or unnatural\n- Modern slang in classical or formal prose (unless source uses it intentionally)\n- Losing the emotional weight of key moments",
+    "params": {
+      "temperature": 0.7,
+      "top_p": 0.9,
+      "presence_penalty": 0.3,
+      "frequency_penalty": 0.2
+    },
+    "recommended_for": ["epub", "pdf", "txt"],
+    "icon": "📖"
+  },
+  "technical": {
+    "name": "فنی",
+    "name_en": "Technical",
+    "description": "دقت مطلق و اصطلاحات استاندارد. مناسب مستندات فنی.",
+    "prompt_insert": "[STYLE: TECHNICAL]\n\nYour goal is precision, consistency, and clarity. This is technical documentation.\n\nPriorities:\n- Accuracy — Translate every detail exactly; do not paraphrase or simplify\n- Terminology — Use glossary terms without exception; if a term is missing, use the established Persian equivalent in the field\n- Clarity — Prefer clear, unambiguous phrasing; avoid poetic or decorative language\n- Structure — Preserve headings, lists, numbering, code blocks, and formatting exactly\n- Consistency — Use the same translation for repeated terms throughout the document\n\nGuidelines:\n- Keep technical terms in English if no standard Persian equivalent exists (e.g., API, endpoint, JSON)\n- Use formal, neutral tone\n- Preserve imperative sentences\n- Maintain parallelism in lists and instructions\n- Do not add explanations or context unless present in source\n\nAvoid:\n- Synonym variation for technical terms\n- Colloquial or informal phrasing\n- Summarizing or omitting details\n- Changing sentence structure unless Persian grammar absolutely requires it",
+    "params": {
+      "temperature": 0.2,
+      "top_p": 0.85,
+      "presence_penalty": 0.0,
+      "frequency_penalty": 0.0
+    },
+    "recommended_for": ["pdf", "markdown", "html", "docx"],
+    "icon": "⚙️"
+  },
+  "conversational": {
+    "name": "محاوره‌ای",
+    "name_en": "Conversational",
+    "description": "زبان روزمره و دوستانه. مناسب بلاگ و محتوای آموزشی.",
+    "prompt_insert": "[STYLE: CONVERSATIONAL]\n\nYour goal is to sound friendly, approachable, and natural — like speaking to a friend.\n\nPriorities:\n- Naturalness — Use everyday Persian; avoid bookish or archaic vocabulary\n- Simplicity — Break complex sentences into shorter, digestible ones\n- Engagement — Keep the reader's attention; use questions, direct address, and active voice\n- Cultural fit — Adapt humor, idioms, and references for Persian-speaking audiences\n- Clarity — Explain complex ideas in simple terms; paraphrase when needed\n\nGuidelines:\n- Use informal but respectful tone\n- Prefer short paragraphs (2–3 sentences max)\n- Use contractions and colloquial expressions where natural\n- Include conversational connectors (e.g., \"خب\", \"یعنی\", \"راستش\")\n- Adapt examples to local context when possible\n\nAvoid:\n- Overly formal or bureaucratic language\n- Long, nested sentences\n- Academic jargon without explanation\n- Literal translation of English idioms that don't work in Persian",
+    "params": {
+      "temperature": 0.6,
+      "top_p": 0.9,
+      "presence_penalty": 0.2,
+      "frequency_penalty": 0.3
+    },
+    "recommended_for": ["markdown", "html", "txt"],
+    "icon": "💬"
+  },
+  "formal": {
+    "name": "رسمی",
+    "name_en": "Formal",
+    "description": "لحن محترمانه و حرفه‌ای. مناسب مکاتبات اداری و گزارش.",
+    "prompt_insert": "[STYLE: FORMAL]\n\nYour goal is to produce a respectful, professional, and polished translation suitable for official contexts.\n\nPriorities:\n- Formality — Use formal register throughout; avoid colloquialisms\n- Precision — Translate accurately; do not add or omit information\n- Respect — Use شما and formal verb forms; maintain polite tone\n- Structure — Preserve document structure, headings, numbering, and legal/administrative phrasing\n- Clarity — Be clear and unambiguous; avoid poetic or creative flourishes\n\nGuidelines:\n- Use formal vocabulary and complete sentences\n- Prefer passive voice where appropriate\n- Keep honorifics and titles (e.g., \"Mr.\", \"Dr.\")\n- Preserve legal, financial, and administrative terms precisely\n- Maintain professional distance; avoid humor or casual tone\n\nAvoid:\n- Informal pronouns (تو)\n- Slang, abbreviations, or contractions\n- Over-simplification of complex terms\n- Personal opinions or editorial comments",
+    "params": {
+      "temperature": 0.3,
+      "top_p": 0.85,
+      "presence_penalty": 0.0,
+      "frequency_penalty": 0.1
+    },
+    "recommended_for": ["docx", "pdf", "txt"],
+    "icon": "🏛️"
+  }
+}
