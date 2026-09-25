@@ -1,0 +1,35 @@
+import { StrictMode } from 'react'
+import { createRoot } from 'react-dom/client'
+import { BrowserRouter } from 'react-router-dom'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { App } from './App'
+import { applyStoredTheme } from './hooks/useTheme'
+import './styles/tokens.css'
+
+// Must run before the first paint, otherwise a dark-mode user sees a white
+// flash while React boots.
+applyStoredTheme()
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: 1,
+      // The backend is a local process; failing fast beats a long spinner.
+      refetchOnWindowFocus: true,
+      staleTime: 1000,
+    },
+  },
+})
+
+const container = document.getElementById('root')
+if (!container) throw new Error('Root container #root is missing from index.html')
+
+createRoot(container).render(
+  <StrictMode>
+    <QueryClientProvider client={queryClient}>
+      <BrowserRouter>
+        <App />
+      </BrowserRouter>
+    </QueryClientProvider>
+  </StrictMode>,
+)

@@ -1,0 +1,110 @@
+{
+  "base": "http://127.0.0.1:8765",
+  "job": "040061b0658b",
+  "pages": {
+    "welcome": {
+      "path": "/",
+      "status": 200,
+      "bytes": 362617,
+      "title": "شروع | J Book Translate"
+    },
+    "landing": {
+      "path": "/landing",
+      "status": 200,
+      "bytes": 65391,
+      "title": "J Book Translate — Secure AI Book Translation for EPUB, PDF & Subtitles"
+    },
+    "workspace": {
+      "path": "/workspace",
+      "status": 200,
+      "bytes": 409545,
+      "title": "J Book Translate"
+    },
+    "library": {
+      "path": "/library",
+      "status": 200,
+      "bytes": 384692,
+      "title": "کتابخانه | J Book Translate"
+    },
+    "reader": {
+      "path": "/reader/040061b0658b",
+      "status": 200,
+      "bytes": 376013,
+      "title": "مطالعهٔ کتاب | J Book Translate"
+    },
+    "account": {
+      "path": "/account",
+      "status": 200,
+      "bytes": 381405,
+      "title": "پنل کاربری | J Book Translate"
+    },
+    "job-monitor": {
+      "path": "/workspace/job/040061b0658b",
+      "status": 200,
+      "bytes": 378691,
+      "title": "پایش ترجمه | J Book Translate"
+    }
+  },
+  "apis": {
+    "/api/health": {
+      "status": 200,
+      "shape": "keys=['message', 'status']"
+    },
+    "/api/dashboard/summary": {
+      "status": 200,
+      "shape": "keys=['active_jobs', 'api_status', 'completed_jobs', 'estimated_cost', 'failed_jobs', 'paused_jobs', 'storage_free', 'total_books']"
+    },
+    "/api/jobs": {
+      "status": 200,
+      "shape": "list[8]"
+    },
+    "/api/models": {
+      "status": 200,
+      "shape": "list[3]"
+    },
+    "/api/languages": {
+      "status": 200,
+      "shape": "list[5]"
+    },
+    "/api/library": {
+      "status": 200,
+      "shape": "list[5]"
+    },
+    "/api/glossaries": {
+      "status": 200,
+      "shape": "list[0]"
+    },
+    "/api/analytics/overview": {
+      "status": 200,
+      "shape": "keys=['completed_chunks', 'estimated_cost', 'input_tokens', 'jobs', 'output_tokens', 'retries']"
+    },
+    "/api/reader/settings": {
+      "status": 200,
+      "shape": "keys=['value']"
+    },
+    "/api/reader/040061b0658b/chapters": {
+      "status": 200,
+      "shape": "list[5]"
+    },
+    "/api/reader/040061b0658b/chapters/2": {
+      "status": 200,
+      "shape": "keys=['html', 'id', 'title']"
+    },
+    "/api/reader/040061b0658b/chapters/2/blocks": {
+      "status": 200,
+      "shape": "list[1]"
+    },
+    "/api/jobs/040061b0658b": {
+      "status": 200,
+      "shape": "keys=['asset_downloads', 'assets', 'can_cancel', 'can_resume', 'can_stop', 'chunks_per_minute', 'created_at', 'download']"
+    },
+    "/api/jobs/040061b0658b/chunks": {
+      "status": 200,
+      "shape": "list[6]"
+    },
+    "/api/jobs/040061b0658b/logs": {
+      "status": 200,
+      "shape": "list[3]"
+    }
+  }
+}

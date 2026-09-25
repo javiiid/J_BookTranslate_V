@@ -1,0 +1,114 @@
+/* Design tokens ported from design-system/j-book-translate/MASTER.md
+   (D:\J_BookTranslate_V\design-system\j-book-translate\MASTER.md)
+
+   The storage key `jbook-study-dark` and the light/dark values below MUST stay
+   in sync with the Python pages until they are retired, otherwise a user's
+   theme silently resets when they move between the old and new UI. */
+
+@import 'tailwindcss';
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: 'Vazirmatn', 'Plus Jakarta Sans', system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+
+  --color-ink: #142033;
+  --color-ink-strong: #142033;
+  --color-blue: #356df6;
+  --color-purple: #7257e8;
+  --color-green: #08966c;
+  --color-cyan: #0ca6a6;
+  --color-amber: #d98518;
+  --color-red: #e24a4a;
+  --color-line: #e3e9f2;
+  --color-muted: #6d7a90;
+}
+
+:root {
+  --bg: #f4f7fb;
+  --surface: #ffffff;
+  --surface-2: #f1f3f5;
+  --ink: #142033;
+  --ink-strong: #142033;
+  --muted: #6d7a90;
+  --muted-2: #94a3b8;
+  --line: #e3e9f2;
+  --line-strong: #2e4056;
+  --blue: #356df6;
+  --blue-soft: #edf3ff;
+  --purple: #7257e8;
+  --green: #08966c;
+  --amber: #d98518;
+  --red: #e24a4a;
+  --ring: #356df6;
+  --shadow-soft: 0 18px 55px rgba(38, 57, 93, 0.08);
+  --shadow-card: 0 12px 32px rgba(38, 57, 93, 0.07);
+  color-scheme: light;
+}
+
+.dark {
+  --bg: #0e141e;
+  --surface: #18202e;
+  --surface-2: #1e293b;
+  --ink: #f1f5f9;
+  --ink-strong: #ffffff;
+  --muted: #b8c6d6;
+  --muted-2: #94a3b8;
+  --line: #243142;
+  --line-strong: #2e4056;
+  --blue: #60a5fa;
+  --blue-soft: #1e3a5a;
+  --purple: #a78bfa;
+  --green: #34d399;
+  --amber: #fbbf24;
+  --red: #f87171;
+  --ring: #60a5fa;
+  --shadow-soft: 0 18px 55px rgba(0, 0, 0, 0.45);
+  --shadow-card: 0 12px 32px rgba(0, 0, 0, 0.55);
+  color-scheme: dark;
+}
+
+@layer base {
+  * {
+    border-color: var(--line);
+  }
+
+  html {
+    /* Keeps the sticky header from covering a focused element (WCAG 2.2). */
+    scroll-padding-top: 80px;
+  }
+
+  body {
+    margin: 0;
+    min-height: 100dvh;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation: none !important;
+      transition: none !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer components {
+  .surface-card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    box-shadow: var(--shadow-soft);
+  }
+}
