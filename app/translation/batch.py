@@ -7,6 +7,7 @@ from app.core.paths import ensure_dir
 
 UTC = timezone.utc
 
+from app.jobs.state import save_translations
 from app.translation.prompts import get_translation_prompt
 from app.translation.prompts import get_default_prompt
 from app.glossary.service import load_snapshot, glossary_prompt
@@ -36,9 +37,14 @@ def load_batch_state(temp_dir):
     with open(latest_file, 'r', encoding='utf-8') as f:
         return json.load(f), latest_file
 
-def batch_translate_chunks(client, chunks, from_lang, to_lang, mode=None, model='gpt-5.6-terra', 
+def batch_translate_chunks(client, chunks, from_lang, to_lang, mode=None, model=None, 
                          test_translations=None, keep_temp=False, paths=None, chapter_map=None, filetype='epub'):
     """Handle translation of all chunks in a single batch"""
+    # The signature used to default to 'gpt-5.6-terra', so a caller that
+    # omitted `model` sent terra regardless of the configured default.
+    if model is None:
+        from app.core.models import resolve_default_model
+        model = resolve_default_model()
     if mode == 'batchcheck':
         return {}, None, None
 
@@ -146,9 +152,14 @@ def parse_batch_response(response):
                 translations[chunk_id] = translated_text
     return translations
 
-def batch_translate_chunks(client, chunks, from_lang, to_lang, mode=None, model='gpt-5.6-terra', 
+def batch_translate_chunks(client, chunks, from_lang, to_lang, mode=None, model=None, 
                          test_translations=None, keep_temp=False, paths=None, chapter_map=None, filetype='epub'):
     """Handle translation of all chunks in a single batch"""
+    # The signature used to default to 'gpt-5.6-terra', so a caller that
+    # omitted `model` sent terra regardless of the configured default.
+    if model is None:
+        from app.core.models import resolve_default_model
+        model = resolve_default_model()
     if mode == 'batchcheck':
         return {}, None, None
 

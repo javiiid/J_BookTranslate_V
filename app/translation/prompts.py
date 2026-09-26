@@ -2,6 +2,27 @@
 # app/translation/prompts.py
 # ============================================================
 
+AUTHOR_VOICE_MARKER = "[AUTHOR_VOICE_PRESERVATION]"
+
+AUTHOR_VOICE_GUIDANCE = f"""
+{AUTHOR_VOICE_MARKER}
+Preserve the author's voice, not only the literal meaning:
+- Retain sentence rhythm, pacing, register, and stylistic density.
+- Preserve the narrative point of view and the narrator's distance.
+- Keep each character's dialogue distinct and consistent.
+- Recreate humor, irony, ambiguity, subtext, and emotional intensity naturally.
+- Do not flatten unusual but intentional stylistic choices into generic prose.
+""".strip()
+
+
+def with_author_voice(prompt: str) -> str:
+    """Append concrete author-voice guidance once."""
+    prompt = str(prompt or "").strip()
+    if AUTHOR_VOICE_MARKER in prompt:
+        return prompt
+    return f"{prompt}\n\n{AUTHOR_VOICE_GUIDANCE}".strip()
+
+
 def get_translation_prompt(
     from_lang,
     to_lang,
@@ -91,6 +112,113 @@ def get_translation_prompt(
 
 
 # ============================================================
+# ============================================================
+# ENGINE RULES
+# ============================================================
+
+ENGINE_RULES = """
+Translation engine rules:
+
+- [FORMAT: {FORMAT}] Input is a {FORMAT} document. Translate only
+  its human-readable text and preserve every structural marker
+  exactly (HTML/XML tags, attributes and hierarchy; Markdown
+  syntax; timecodes).
+- Do not translate attribute values, code blocks or script/style
+  content.
+- Apply the glossary strictly when one is provided.
+- Never add, remove or summarize content; translate what is there.
+- If a passage is ambiguous, keep the closest faithful meaning and
+  append {{NOTE: short explanation}} after your translation of that
+  passage.
+- If the text appears cut off at the start or end of the chunk, do
+  not guess the missing words; append {{BOUNDARY_WARNING}} instead.
+- Keep proper nouns, brand names and technical terms unless the
+  glossary overrides them.
+- Return ONLY the translated content without explanations or code
+  fences.
+""".strip()
+
+
+def _with_engine_rules(prompt, filetype):
+    """
+    Append the translation engine rules to any prompt.
+    """
+
+    prompt = str(prompt or "").strip()
+
+    format_tag = str(filetype).upper().lstrip(".")
+
+    return (
+        f"{prompt}\n\n"
+        f"{ENGINE_RULES.format(FORMAT=format_tag)}"
+    ).strip()
+
+
+def get_engine_prompt(
+    from_lang,
+    to_lang,
+    filetype,
+):
+    """
+    Build the standalone professional translation-engine prompt.
+    """
+
+    filetype = str(
+        filetype
+    ).lower().lstrip(".")
+
+    format_tag = filetype.upper()
+
+    if filetype == "srt":
+
+        behavior = """
+SRT (subtitle) behavior:
+
+- Each chunk is one subtitle text.
+- Translate ONLY the text lines.
+- Never alter the index or the timecodes.
+- Keep line breaks where the original has them.
+- Maximum translated line length: 42 characters per line.
+- If a translated line exceeds this, break it naturally at a
+  phrase boundary.
+""".strip()
+
+    elif filetype == "pdf":
+
+        behavior = """
+PDF behavior:
+
+- Preserve paragraph structure as much as possible.
+- Greek and Latin quotations do not need to be translated.
+- Preserve them as they appear in the source.
+""".strip()
+
+    else:
+
+        behavior = """
+HTML/XML behavior (EPUB):
+
+- Preserve all HTML/XML tags, tag names, attributes, attribute
+  values, tag hierarchy, element order, IDs and classes.
+- Do not modify the document structure.
+- Translate only human-readable text.
+""".strip()
+
+    return (
+        f"""
+You are a professional translation engine. Translate the content
+from {from_lang} to {to_lang} faithfully while preserving all
+formatting markers.
+
+[FORMAT: {format_tag}]
+
+{behavior}
+
+{ENGINE_RULES.format(FORMAT=format_tag)}
+""".strip()
+    )
+
+
 # DEFAULT PROMPT
 # ============================================================
 
@@ -113,7 +241,7 @@ def get_default_prompt(
 
     if filetype == "epub":
 
-        return f"""
+        return _with_engine_rules(f"""
 You are an expert literary and academic translator.
 
 Translate the provided content from {from_lang} to {to_lang}.
@@ -152,7 +280,7 @@ Return ONLY the translated content.
 Do not add explanations.
 Do not add comments.
 Do not use Markdown code fences.
-""".strip()
+""".strip(), filetype)
 
     # ========================================================
     # PDF
@@ -160,7 +288,7 @@ Do not use Markdown code fences.
 
     if filetype == "pdf":
 
-        return f"""
+        return _with_engine_rules(f"""
 You are an expert literary and academic translator.
 
 Translate the provided content from {from_lang} to {to_lang}.
@@ -184,13 +312,13 @@ Return ONLY the translated content.
 Do not add explanations.
 Do not add comments.
 Do not use Markdown code fences.
-""".strip()
+""".strip(), filetype)
 
     # ========================================================
     # GENERIC
     # ========================================================
 
-    return f"""
+    return _with_engine_rules(f"""
 You are an expert translator.
 
 Translate the provided content from {from_lang} to {to_lang}.
@@ -215,4 +343,4 @@ Do not explain your translation.
 Return ONLY the translated content.
 
 Do not use Markdown code fences.
-""".strip()
+""".strip(), filetype)

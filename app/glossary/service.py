@@ -1,6 +1,7 @@
 import json
 import re
 import unicodedata
+from datetime import datetime, timezone
 from html import unescape
 from pathlib import Path
 
@@ -51,6 +52,80 @@ def save_glossary(database, book_id, body):
         if changed.rowcount != 1:
             raise ValueError('واژه‌نامه تغییر کرده؛ دوباره بارگذاری کنید.')
     return get_glossary(database, book_id, source, target)
+
+
+PROPOSAL_ORIGINS = ('preflight', 'postrun')
+
+
+def save_proposal(database, book_id, source, target, terms, origin='preflight'):
+    """Persist a draft for the user to review. Nothing here is live yet.
+
+    Drafts deliberately live in their own table rather than in
+    ``book_glossaries``: the approved glossary is snapshotted into running
+    jobs, so a half-reviewed proposal must never reach that table.
+    """
+    source, target = language(source), language(target)
+    if origin not in PROPOSAL_ORIGINS:
+        raise ValueError('نوع پیشنهاد نامعتبر است.')
+    if not isinstance(terms, list) or len(terms) > 500:
+        raise ValueError('فهرست پیشنهاد نامعتبر است.')
+    cleaned, seen = [], set()
+    for term in terms:
+        if not isinstance(term, dict):
+            raise ValueError('اصطلاح پیشنهادی نامعتبر است.')
+        entry = {}
+        for key, limit in [('source_term', 200), ('target_term', 200), ('notes', 500), ('kind', 30)]:
+            value = term.get(key, '')
+            if not isinstance(value, str) or len(value) > limit:
+                raise ValueError('طول یا نوع متن اصطلاح نامعتبر است.')
+            entry[key] = value.strip()
+        normalized = unicodedata.normalize('NFKC', entry['source_term']).casefold()
+        if not normalized or not entry['target_term'] or normalized in seen:
+            continue
+        seen.add(normalized)
+        entry['origin'] = 'proposed'
+        cleaned.append(entry)
+    with database._lock, database.connect() as connection:
+        if not connection.execute('SELECT id FROM library_books WHERE id=?', (book_id,)).fetchone():
+            raise LookupError('کتاب پیدا نشد.')
+        connection.execute(
+            'INSERT OR REPLACE INTO book_glossary_proposals'
+            '(book_id,source_language,target_language,origin,terms_json,created_at)'
+            ' VALUES (?,?,?,?,?,?)',
+            (book_id, source, target, origin, json.dumps(cleaned, ensure_ascii=False),
+             datetime.now(timezone.utc).isoformat()),
+        )
+    return get_proposal(database, book_id, source, target, origin)
+
+
+def get_proposal(database, book_id, source, target, origin='preflight'):
+    source, target, origin = language(source), language(target), origin
+    if origin not in PROPOSAL_ORIGINS:
+        raise ValueError('نوع پیشنهاد نامعتبر است.')
+    if not database.fetch_one('SELECT id FROM library_books WHERE id=?', (book_id,)):
+        raise LookupError('کتاب پیدا نشد.')
+    row = database.fetch_one(
+        'SELECT terms_json, created_at FROM book_glossary_proposals'
+        ' WHERE book_id=? AND source_language=? AND target_language=? AND origin=?',
+        (book_id, source, target, origin),
+    )
+    return {
+        'book_id': int(book_id),
+        'source_language': source,
+        'target_language': target,
+        'origin': origin,
+        'created_at': row['created_at'] if row else None,
+        'terms': json.loads(row['terms_json']) if row else [],
+    }
+
+
+def clear_proposal(database, book_id, source, target, origin='preflight'):
+    source, target = language(source), language(target)
+    return database.execute(
+        'DELETE FROM book_glossary_proposals'
+        ' WHERE book_id=? AND source_language=? AND target_language=? AND origin=?',
+        (book_id, source, target, origin),
+    )
 
 
 def load_snapshot(paths):

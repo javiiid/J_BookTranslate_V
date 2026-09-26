@@ -45,8 +45,12 @@ from app.jobs.state import save_translations
 from app.jobs.state import deduplicate_chunks
 
 from app.core.paths import ensure_dir
-from app.core.config import get_translation_config
+from app.core.config import (
+    MAX_TRANSLATION_CONCURRENCY,
+    get_translation_config,
+)
 
+from app.core.rate_limit import AdaptiveRateLimiter
 from app.core.retry import (
     retry_operation,
     RetryError,
@@ -482,12 +486,13 @@ def translate_chunk(
     chunk_id: Any = None,
     from_lang: str = "EN",
     to_lang: str = "FA",
-    model: str = "gpt-5.6-terra",
+    model: str | None = None,
     test_translations: dict[str, Any] | None = None,
     filetype: str = "epub",
     system_prompt_text: str | None = None,
     glossary_snapshot=None,
     style_preset: str | None = None,
+    rate_limiter: Any = None,
 ) -> str:
     """
     Translate one chunk.
@@ -497,6 +502,12 @@ def translate_chunk(
 
     Retry behavior is controlled by retry_operation().
     """
+
+    # This used to default to "gpt-5.6-terra" in the signature, so any caller
+    # that omitted `model` quietly sent terra instead of the configured one.
+    if model is None:
+        from app.core.models import resolve_default_model
+        model = resolve_default_model()
 
     # ========================================================
     # VALIDATE INPUT
@@ -580,27 +591,37 @@ def translate_chunk(
         from app.presets.manager import get_preset_params
         preset_params = get_preset_params(style_preset)
 
-        response = client.chat.completions.create(
-            model=model,
-            messages=[
-                {
-                    "role": "system",
-                    "content": system_message,
-                },
-                {
-                    "role": "user",
-                    "content": text,
-                },
-            ],
-            temperature=preset_params.get("temperature", 0.2),
-            top_p=preset_params.get("top_p", 1.0),
-            presence_penalty=preset_params.get(
-                "presence_penalty", 0.0,
-            ),
-            frequency_penalty=preset_params.get(
-                "frequency_penalty", 0.0,
-            ),
-        )
+        try:
+            response = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": system_message,
+                    },
+                    {
+                        "role": "user",
+                        "content": text,
+                    },
+                ],
+                temperature=preset_params.get("temperature", 0.2),
+                top_p=preset_params.get("top_p", 1.0),
+                presence_penalty=preset_params.get(
+                    "presence_penalty", 0.0,
+                ),
+                frequency_penalty=preset_params.get(
+                    "frequency_penalty", 0.0,
+                ),
+            )
+        except BaseException as error:
+            # Feed the shared limiter so the rest of the run slows down too,
+            # instead of every worker rediscovering the limit on its own.
+            if rate_limiter is not None and _is_rate_limit_error(error):
+                rate_limiter.report_throttled(_retry_after_seconds(error))
+            raise
+
+        if rate_limiter is not None:
+            rate_limiter.report_success()
 
         return _extract_translation_from_response(
             response
@@ -1428,7 +1449,136 @@ def _translation_concurrency() -> int:
         value = int(get_translation_config().get("max_concurrency", 3))
     except (OSError, TypeError, ValueError):
         value = 3
-    return max(1, min(value, 12))
+    return max(1, min(value, MAX_TRANSLATION_CONCURRENCY))
+
+
+def _flush_glossary(
+    client: Any,
+    paths: Any,
+    pending_terms: list[tuple[Any, str, str]],
+    model: str,
+    stop_event: Any,
+    workers: int,
+) -> None:
+    """Learn glossary terms for finished chunks, off the translation path.
+
+    This runs after the translation workers have drained, so it cannot slow the
+    pipeline down, and it runs in parallel so a long book does not gain a serial
+    tail. A glossary failure is logged and skipped: the translations are already
+    saved, and a broken term-extraction pass must never fail the whole job.
+    """
+    if not pending_terms:
+        return
+    if stop_event is not None and stop_event.is_set():
+        return
+
+    count = max(1, min(workers, len(pending_terms)))
+    print(
+        f"Learning glossary terms for {len(pending_terms)} chunks "
+        f"with {count} workers [glossary]"
+    )
+    learned = 0
+
+    def learn(item: tuple[Any, str, str]) -> None:
+        chunk_id, source_text, translated_text = item
+        try:
+            learn_chunk(client, paths, chunk_id, source_text, translated_text, model, stop_event)
+        except (KeyboardInterrupt, TranslationStopped):
+            raise
+        except BaseException as error:  # noqa: BLE001 - glossary must not fail the job
+            print(f"Glossary learning failed for chunk {chunk_id}: {error}")
+
+    with ThreadPoolExecutor(max_workers=count, thread_name_prefix="glossary") as pool:
+        futures = [pool.submit(learn, item) for item in pending_terms]
+        for future in futures:
+            try:
+                future.result()
+                learned += 1
+            except (KeyboardInterrupt, TranslationStopped):
+                raise
+            except BaseException:  # noqa: BLE001 - already reported by learn()
+                continue
+
+    print(f"Glossary pass finished for {learned}/{len(pending_terms)} chunks [glossary]")
+
+
+def _glossary_mode() -> str:
+    """How glossary terms are handled during a run.
+
+    ``off`` (the default) learns nothing. Terms come from the reviewed proposal
+    that was snapshotted into the job before it started, which means every
+    chunk - including the first - translates with the same terminology and no
+    unapproved term is ever added mid-book.
+
+    ``deferred`` and ``inline`` remain available for anyone who wants automatic
+    learning: deferred keeps chunks in flight and learns afterwards, inline
+    forces sequential translation so later chunks see earlier terms. Both add
+    one LLM call per chunk on top of the translation.
+    """
+    try:
+        value = str(get_translation_config().get("glossary_mode", "off")).lower()
+    except (OSError, TypeError, ValueError):
+        value = "off"
+    return value if value in {"off", "deferred", "inline"} else "off"
+
+
+def _is_rate_limit_error(error: BaseException) -> bool:
+    """True when an exception represents HTTP 429 / a provider rate limit.
+
+    The SDK surfaces the status in several places depending on the version, so
+    the status code, the ``response`` attribute, and the message text are all
+    checked rather than assuming one shape.
+    """
+    status = getattr(error, "status_code", None)
+    if status is None:
+        status = getattr(getattr(error, "response", None), "status_code", None)
+    if status == 429:
+        return True
+    text = str(error).lower()
+    return "429" in text or "rate limit" in text or "too many requests" in text
+
+
+def _retry_after_seconds(error: BaseException) -> float | None:
+    """Read the provider's Retry-After hint, when it sends one."""
+    response = getattr(error, "response", None)
+    headers = getattr(response, "headers", None)
+    if headers:
+        try:
+            value = headers.get("retry-after") or headers.get("Retry-After")
+        except AttributeError:
+            value = None
+        if value:
+            try:
+                return max(0.0, float(value))
+            except (TypeError, ValueError):
+                return None
+    return None
+
+
+def _build_rate_limiter(concurrency: int) -> Any | None:
+    """Return a shared limiter for this run, or None when pacing is disabled.
+
+    Without a configured ceiling the limiter would guess a requests-per-minute
+    budget from the worker count, which is wrong for providers with their own
+    tiers. So an explicit ``requests_per_minute`` is required to opt in; the
+    pipeline still gets concurrency and retry backoff either way.
+    """
+    try:
+        configured = get_translation_config().get("requests_per_minute")
+    except (OSError, TypeError, ValueError):
+        return None
+    if configured in (None, "", 0):
+        return None
+    try:
+        rpm = int(configured)
+    except (TypeError, ValueError):
+        return None
+    if rpm < 1:
+        return None
+    return AdaptiveRateLimiter(
+        max_requests_per_minute=rpm,
+        min_requests_per_minute=max(2, rpm // 10),
+    )
 
 
 def _process_fast_resume(
@@ -1449,17 +1599,18 @@ def _process_fast_resume(
     """Translate chunks concurrently while persisting each completed result."""
     max_workers = _translation_concurrency()
     glossary_state = load_snapshot(paths)
-    if (
-        max_workers == 1
-        or mode == "resume"
-        or test_translations is not None
-        or glossary_state.get("auto_extract")
-    ):
-        if glossary_state.get("auto_extract") and max_workers > 1 and mode != "resume":
+    glossary_mode = _glossary_mode()
+    # In-flight chunks are translated simultaneously, so no term learned from
+    # one can reach another within the same run. "inline" propagation is
+    # therefore only meaningful when translation is sequential.
+    if glossary_mode == "inline" and glossary_state.get("auto_extract"):
+        if max_workers > 1:
             print(
-                "Automatic glossary learning requires ordered chunks; "
+                "glossary_mode=inline requires ordered chunks; "
                 "using sequential translation for terminology consistency."
             )
+        max_workers = 1
+    if max_workers == 1 or mode == "resume" or test_translations is not None:
         return _process_fast_resume_sequential(
             client, all_chunks, translations, mode, from_lang, to_lang,
             paths, model, test_translations, filetype, system_prompt_text,
@@ -1469,15 +1620,6 @@ def _process_fast_resume(
     total_chunks = len(all_chunks)
     translations = _normalize_translations(translations)
     untranslated_chunks = _get_untranslated_chunks(all_chunks, translations)
-    if glossary_state.get("auto_extract"):
-        for chunk_id, chunk_text in all_chunks:
-            if stop_event is not None and stop_event.is_set():
-                raise TranslationStopped
-            if str(chunk_id) in translations:
-                learn_chunk(
-                    client, paths, chunk_id, chunk_text,
-                    translations[str(chunk_id)], model, stop_event,
-                )
 
     if not untranslated_chunks:
         return translations, None, None
@@ -1488,6 +1630,8 @@ def _process_fast_resume(
     )
 
     def translate_item(chunk_id: Any, chunk_text: str, snapshot: dict) -> tuple[Any, str, str, dict]:
+        if limiter is not None and not limiter.acquire(stop_event):
+            raise TranslationStopped
         translated_text = translate_chunk(
             client=client,
             text=chunk_text,
@@ -1495,6 +1639,7 @@ def _process_fast_resume(
             from_lang=from_lang,
             to_lang=to_lang,
             model=model,
+            rate_limiter=limiter,
             filetype=filetype,
             system_prompt_text=system_prompt_text,
             glossary_snapshot=snapshot,
@@ -1507,6 +1652,12 @@ def _process_fast_resume(
     remaining = iter(enumerate(untranslated_chunks))
     pending = {}
     completed_results = {}
+    deferred_glossary: list[tuple[Any, str, str]] = []
+    limiter = _build_rate_limiter(max_workers)
+    if limiter is not None:
+        print(
+            f"Pacing provider requests at up to {limiter.current_rpm}/min [rate_limit]"
+        )
     next_commit_index = 0
     failure = None
     stopping = False
@@ -1533,15 +1684,16 @@ def _process_fast_resume(
                     )
                 translations[str(result_id)] = translated_text
                 save_translations(paths, translations)
-                if test_translations is None and not (stop_event is not None and stop_event.is_set()):
-                    try:
-                        learn_chunk(
-                            client, paths, result_id, source_text,
-                            translated_text, model, stop_event,
-                        )
-                    except BaseException as error:
-                        failure = failure or error
-                        stopping = isinstance(error, (KeyboardInterrupt, TranslationStopped))
+                if glossary_state.get("auto_extract") and glossary_mode == "deferred" and not (
+                    stop_event is not None and stop_event.is_set()
+                ):
+                    # glossary_mode is "deferred" here by construction: "inline"
+                    # forces max_workers=1 and takes the sequential path above.
+                    # learn_chunk is its own LLM round trip, so running it in
+                    # this loop would serialise the commit and negate the
+                    # concurrency. Terms still land in the glossary and apply
+                    # from the next run onward.
+                    deferred_glossary.append((result_id, source_text, translated_text))
                 print(
                     f"✓ Chunk {result_id} translated and saved "
                     f"({len(translations)}/{total_chunks})."
@@ -1574,6 +1726,10 @@ def _process_fast_resume(
 
             if not pending:
                 fill_queue()
+
+    _flush_glossary(
+        client, paths, deferred_glossary, model, stop_event, max_workers,
+    )
 
     if failure is not None:
         raise failure
@@ -1686,7 +1842,7 @@ def process_translations(
     from_lang: str,
     to_lang: str,
     paths: Any,
-    model: str = "gpt-5.6-terra",
+    model: str | None = None,
     test_translations: dict[str, Any] | None = None,
     debug: bool = False,
     chapter_map: Any = None,
@@ -1730,6 +1886,11 @@ def process_translations(
         test:
             Use local test translations without API calls.
     """
+
+    # Signature used to default to "gpt-5.6-terra"; resolve from config instead.
+    if model is None:
+        from app.core.models import resolve_default_model
+        model = resolve_default_model()
 
     # ========================================================
     # VALIDATE MODE

@@ -73,4 +73,4 @@ def test_reader_page_exposes_translation_modes():
     page = reader_page("job-1")
     assert 'id="mode"' in page
     assert 'value="bilingual"' in page
-    assert "/blocks`" in page
+    assert "'/blocks'" in page

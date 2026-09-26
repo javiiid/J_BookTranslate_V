@@ -35,11 +35,20 @@ class Database:
         with self._lock, self.connect() as connection:
             connection.executescript(schema); self._seed_defaults(connection)
             self._migrate_library(connection)
+            self._migrate_account_portal(connection)
             connection.execute("""CREATE TABLE IF NOT EXISTS book_glossaries (
                 book_id INTEGER NOT NULL REFERENCES library_books(id) ON DELETE CASCADE,
                 source_language TEXT NOT NULL, target_language TEXT NOT NULL,
                 version INTEGER NOT NULL DEFAULT 0, terms_json TEXT NOT NULL DEFAULT '[]',
                 PRIMARY KEY(book_id, source_language, target_language)
+            )""")
+            connection.execute("""CREATE TABLE IF NOT EXISTS book_glossary_proposals (
+                book_id INTEGER NOT NULL REFERENCES library_books(id) ON DELETE CASCADE,
+                source_language TEXT NOT NULL, target_language TEXT NOT NULL,
+                origin TEXT NOT NULL DEFAULT 'preflight',
+                terms_json TEXT NOT NULL DEFAULT '[]',
+                created_at TEXT NOT NULL,
+                PRIMARY KEY(book_id, source_language, target_language, origin)
             )""")
 
     @staticmethod
@@ -74,6 +83,35 @@ class Database:
                 connection.execute(f"ALTER TABLE files ADD COLUMN {name} {definition}")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_files_book_id ON files(book_id)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_library_books_archived ON library_books(archived)")
+
+    @staticmethod
+    def _migrate_account_portal(connection):
+        """Create local account, billing, marketplace, and order tables."""
+        connection.executescript("""
+        CREATE TABLE IF NOT EXISTS accounts (id INTEGER PRIMARY KEY, display_name TEXT NOT NULL, email TEXT DEFAULT '', organization TEXT DEFAULT '', locale TEXT NOT NULL DEFAULT 'fa', plan TEXT NOT NULL DEFAULT 'free', credit_balance INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS credit_packages (id TEXT PRIMARY KEY, name_fa TEXT NOT NULL, name_en TEXT NOT NULL, credits INTEGER NOT NULL, price_usd REAL NOT NULL, bonus_percent INTEGER NOT NULL DEFAULT 0, recommended INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1);
+        CREATE TABLE IF NOT EXISTS billing_transactions (id INTEGER PRIMARY KEY AUTOINCREMENT, account_id INTEGER NOT NULL, kind TEXT NOT NULL, reference_id TEXT NOT NULL, amount_usd REAL NOT NULL DEFAULT 0, credits INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL, created_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS account_api_keys (id INTEGER PRIMARY KEY AUTOINCREMENT, account_id INTEGER NOT NULL, name TEXT NOT NULL, token_prefix TEXT NOT NULL, token_hash TEXT NOT NULL, scopes TEXT NOT NULL, created_at TEXT NOT NULL, last_used_at TEXT, revoked_at TEXT);
+        CREATE TABLE IF NOT EXISTS marketplace_items (id TEXT PRIMARY KEY, kind TEXT NOT NULL, title_fa TEXT NOT NULL, title_en TEXT NOT NULL, description_fa TEXT NOT NULL, description_en TEXT NOT NULL, owner_name TEXT NOT NULL, language_pair TEXT NOT NULL, price_usd REAL NOT NULL DEFAULT 0, rating REAL NOT NULL DEFAULT 0, installs INTEGER NOT NULL DEFAULT 0, featured INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1);
+        CREATE TABLE IF NOT EXISTS account_marketplace (account_id INTEGER NOT NULL, item_id TEXT NOT NULL, installed_at TEXT NOT NULL, PRIMARY KEY(account_id,item_id));
+        CREATE TABLE IF NOT EXISTS translation_orders (id INTEGER PRIMARY KEY AUTOINCREMENT, account_id INTEGER NOT NULL, title TEXT NOT NULL, service_type TEXT NOT NULL, source_language TEXT NOT NULL, target_language TEXT NOT NULL, word_count INTEGER NOT NULL DEFAULT 0, budget_usd REAL NOT NULL DEFAULT 0, deadline TEXT, notes TEXT DEFAULT '', status TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS business_requests (id INTEGER PRIMARY KEY AUTOINCREMENT, account_id INTEGER NOT NULL, request_type TEXT NOT NULL, company_name TEXT DEFAULT '', contact_name TEXT NOT NULL, email TEXT NOT NULL, details TEXT DEFAULT '', status TEXT NOT NULL, created_at TEXT NOT NULL);
+        """)
+        timestamp = datetime.now(UTC).isoformat()
+        connection.execute("INSERT OR IGNORE INTO accounts(id,display_name,locale,plan,created_at,updated_at) VALUES (1,'J Book User','fa','free',?,?)", (timestamp, timestamp))
+        packages = [
+            ("starter", "شروع", "Starter", 100, 5.0, 0, 0),
+            ("creator", "نویسنده", "Creator", 500, 20.0, 10, 1),
+            ("publisher", "ناشر", "Publisher", 2000, 65.0, 20, 0),
+        ]
+        connection.executemany("INSERT OR IGNORE INTO credit_packages(id,name_fa,name_en,credits,price_usd,bonus_percent,recommended) VALUES (?,?,?,?,?,?,?)", packages)
+        items = [
+            ("literary-fa", "template", "سبک ادبی فارسی", "Persian literary style", "الگوی ترجمه برای رمان و نثر ادبی", "Translation style for fiction and literary prose", "J Book", "EN→FA", 0, 4.8, 1),
+            ("medical-en-fa", "glossary", "واژه‌نامه پزشکی", "Medical glossary", "اصطلاحات ثابت پزشکی و دارویی", "Consistent medical and pharmaceutical terms", "J Book", "EN→FA", 9, 4.9, 1),
+            ("legal-en-fa", "glossary", "واژه‌نامه حقوقی", "Legal glossary", "اصطلاحات قرارداد و حقوق", "Contract and legal terminology", "J Book", "EN→FA", 7, 4.7, 0),
+            ("technical-clear", "template", "سبک فنی روان", "Clear technical style", "ترجمه دقیق و خوانا برای کتاب‌های تخصصی", "Accurate readable style for technical books", "J Book", "EN→FA", 0, 4.6, 0),
+        ]
+        connection.executemany("INSERT OR IGNORE INTO marketplace_items(id,kind,title_fa,title_en,description_fa,description_en,owner_name,language_pair,price_usd,rating,featured) VALUES (?,?,?,?,?,?,?,?,?,?,?)", items)
 
     @staticmethod
     def _seed_defaults(connection):

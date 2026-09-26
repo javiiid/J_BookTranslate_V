@@ -607,6 +607,7 @@ def _translate_epub(
                 base_name=output_path.stem,
                 filetype="epub",
                 title=input_path.stem,
+                to_lang=to_lang,
                 scorer=make_scorer(
                     output_formats,
                     client=client,
@@ -983,6 +984,7 @@ def _check_epub_batch(
             base_name=output_path.stem,
             filetype="epub",
             title=input_path.stem,
+            to_lang=to_lang,
             scorer=make_scorer(
                 output_formats,
                 client=client,
@@ -1316,6 +1318,7 @@ def _translate_pdf(
                 base_name=output_path.stem,
                 filetype="pdf",
                 title=input_path.stem,
+                to_lang=to_lang,
                 scorer=make_scorer(
                     output_formats,
                     client=client,
@@ -1463,7 +1466,7 @@ def translate(
     from_lang="EN",
     to_lang="FA",
     mode=None,
-    model="gpt-5.6-terra",
+    model=None,
     fast=False,
     resume_job_id=None,
     debug=False,
@@ -1516,6 +1519,16 @@ def translate(
         Custom/default translation prompt generated
         by app.translation.prompts.
     """
+
+    # ========================================================
+    # RESOLVE MODEL
+    # ========================================================
+    # The signature used to default to "gpt-5.6-terra", so a caller that
+    # omitted `model` silently overrode the user's choice. config.yaml is now
+    # the single source of truth, with DEFAULT_MODEL as the fallback.
+    if model is None:
+        from app.core.models import resolve_default_model
+        model = resolve_default_model()
 
     # ========================================================
     # NORMALIZE FILETYPE

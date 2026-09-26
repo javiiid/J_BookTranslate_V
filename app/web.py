@@ -5,6 +5,7 @@ import io
 import hashlib
 import json
 import mimetypes
+import re
 import shutil
 import threading
 import traceback
@@ -18,18 +19,24 @@ from email.parser import BytesParser
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 from openai import OpenAI
 from app.core.config import (
     DEFAULT_BASE_URL,
+    MAX_TRANSLATION_CONCURRENCY,
     get_openai_config,
     normalize_base_url,
     read_config_safe,
     update_openai_config,
     write_config,
 )
-from app.core.models import DEFAULT_MODEL, SUPPORTED_MODELS
+from app.core.models import (
+    DEFAULT_MODEL,
+    SUPPORTED_MODELS,
+    is_supported_model,
+    resolve_default_model,
+)
 from app.core.paths import ensure_dir
 from app.core.validation import ensure_disk_space, validate_book
 from app.core.web_i18n import inject_language_switcher
@@ -37,7 +44,7 @@ from app.pipeline.pipeline import translate
 from app.output.convert import convert_file, normalize_convert_formats
 from app.translation.prompts import get_default_prompt, with_author_voice
 from app.storage.database import db
-from app.reader.service import chapter_blocks as reader_chapter_blocks, chapters as reader_chapters, chapter as reader_chapter
+from app.reader.service import chapter_blocks as reader_chapter_blocks, chapters as reader_chapters, chapter as reader_chapter, read_asset as reader_read_asset
 from app.reader.page import reader_page
 from app.welcome.page import welcome_page
 from app.account.page import account_page
@@ -58,10 +65,25 @@ from app.account.service import (
     update_account,
 )
 from app.library.view import library_page
-from app.glossary.service import get_glossary, save_glossary
+from app.glossary.proposal import (
+    _key as _glossary_key,
+    merge_approved,
+    propose_terms,
+    propose_unapproved,
+)
+from app.glossary.service import (
+    PROPOSAL_ORIGINS,
+    clear_proposal,
+    get_glossary,
+    get_proposal,
+    save_glossary,
+    save_proposal,
+)
 from app.glossary.automatic import sync_book
-from app.jobs.state import _atomic_json
+from app.glossary.proposal_page import install_glossary_proposal
+from app.jobs.state import _atomic_json, deduplicate_chunks
 from app.jobs.dashboard import install_jobs_dashboard
+from app.jobs.detail_page import job_detail_page
 from app.jobs.workspace import install_workspace
 
 UTC = timezone.utc
@@ -381,6 +403,173 @@ def _run_job(job: Job, *, resume: bool = False) -> None:
             traceback.print_exc()
 
 
+_CHUNK_FLAG_MARKERS = ("{NOTE", "{BOUNDARY_WARNING", "{WARNING")
+
+
+def _job_chunks_payload(job: Job | None) -> dict:
+    """Return per-chunk source/target rows for the job-monitor Chunks tab.
+
+    Reads the durable pipeline files written after every chunk, so the monitor
+    reflects exactly the state that a resume would continue from. Chapter
+    labels are resolved from ``chunks.json`` when the map is available.
+    """
+    if job is None:
+        return {"error": "کار موردنظر پیدا نشد."}
+    if not job.paths:
+        return {"items": [], "total": 0, "available": False}
+    chunks_path = Path(job.paths["chunks_file"])
+    translations_path = Path(job.paths["translations_file"])
+    if not chunks_path.is_file():
+        return {"items": [], "total": 0, "available": False}
+    try:
+        with chunks_path.open(encoding="utf-8") as handle:
+            payload = json.load(handle)
+        translations: dict[str, str] = {}
+        if translations_path.is_file():
+            with translations_path.open(encoding="utf-8") as handle:
+                translations = {str(k): v for k, v in json.load(handle).items()}
+    except (OSError, json.JSONDecodeError):
+        return {"items": [], "total": 0, "available": False}
+    chapter_map = payload.get("chapter_map") or {}
+    items = []
+    for chunk_id, source in deduplicate_chunks(payload.get("chunks", [])):
+        key = str(chunk_id)
+        target = translations.get(key, "")
+        entry = chapter_map.get(key) or {}
+        items.append({
+            "id": key,
+            "chapter": str(entry.get("item", "")) if isinstance(entry, dict) else "",
+            "source": source,
+            "target": target,
+            "flagged": any(marker in (target or "") or marker in (source or "") for marker in _CHUNK_FLAG_MARKERS),
+        })
+    return {"items": items, "total": len(items), "available": True, "translated": len(translations)}
+
+
+def _book_source_chunks(book_id: int) -> tuple[list, dict]:
+    """Locate the newest chunk/translation state for a book.
+
+    The proposal samples the same durable files the pipeline reads, so it sees
+    exactly the text a translation would. Falls back to any job that holds
+    paths for the book.
+    """
+    with JOBS_LOCK:
+        candidates = [job for job in JOBS.values() if job.paths]
+    for job in candidates:
+        if _library_book_for_job(job) != book_id:
+            continue
+        _update_progress(job)
+        chunks_path = Path(job.paths["chunks_file"])
+        if not chunks_path.is_file():
+            continue
+        try:
+            with chunks_path.open(encoding="utf-8") as handle:
+                raw = json.load(handle)
+            translations = {}
+            translations_path = Path(job.paths["translations_file"])
+            if translations_path.is_file():
+                with translations_path.open(encoding="utf-8") as handle:
+                    translations = {str(k): v for k, v in json.load(handle).items()}
+        except (OSError, json.JSONDecodeError):
+            continue
+        return deduplicate_chunks(raw.get("chunks", [])), translations
+    return [], {}
+
+
+def _generate_proposal(book_id: int, body: dict) -> dict:
+    """Build a draft glossary from samples across the book. One LLM call."""
+    source = str(body.get("from_lang", "EN"))
+    target = str(body.get("to_lang", "FA"))
+    origin = str(body.get("origin", "preflight")).lower()
+    if origin not in PROPOSAL_ORIGINS:
+        raise ValueError("نوع پیشنهاد نامعتبر است.")
+    model = str(body.get("model") or DEFAULT_MODEL).strip()
+    if not model:
+        raise ValueError("مدل نامعتبر است.")
+
+    chunks, translations = _book_source_chunks(book_id)
+    if not chunks:
+        raise LookupError(
+            "برای این کتاب هنوز بخشی ساخته نشده. اول یک‌بار ترجمه را شروع و متوقف کنید "
+            "تا متن کتاب آمادهٔ نمونه‌برداری شود."
+        )
+
+    client = OpenAI(**get_openai_config())
+    if origin == "postrun":
+        existing = get_glossary(db, book_id, source, target)["terms"]
+        terms = propose_unapproved(
+            client, chunks, translations, model, source, target,
+            existing_terms=existing,
+        )
+    else:
+        terms = propose_terms(client, chunks, model, source, target)
+    return save_proposal(db, book_id, source, target, terms, origin)
+
+
+def _approve_proposal(book_id: int, body: dict) -> dict:
+    """Fold the user's decisions into the live glossary.
+
+    A proposal is a draft. Only terms the user ticked are promoted, and the
+    draft is cleared afterwards so the review panel does not offer the same
+    suggestions twice.
+    """
+    source = str(body.get("from_lang", "EN"))
+    target = str(body.get("to_lang", "FA"))
+    origin = str(body.get("origin", "preflight")).lower()
+    approved = body.get("approved")
+    if not isinstance(approved, list) or any(not isinstance(item, str) for item in approved):
+        raise ValueError("فهرست اصطلاحات تأییدشده نامعتبر است.")
+
+    proposal = get_proposal(db, book_id, source, target, origin)
+    current = get_glossary(db, book_id, source, target)
+    wanted = {key for key in (_glossary_key(term) for term in approved)}
+    merged = merge_approved(proposal["terms"], current["terms"], wanted)
+    result = save_glossary(db, book_id, {
+        "source_language": source,
+        "target_language": target,
+        "version": current["version"],
+        "terms": merged,
+    })
+    clear_proposal(db, book_id, source, target, origin)
+    return {**result, "proposal_origin": origin,
+            "approved_count": len(wanted)}
+
+
+def model_select_html(page: str) -> str:
+    """Stamp the model dropdown for the current config, at request time.
+
+    The dropdown used to be a hand-written list in the page template with the
+    preselected option baked in when the file was written. Changing
+    config.yaml then did nothing visible, which is how the form could say
+    "luna" while the pipeline sent "terra".
+
+    Rewriting the ``selected`` attribute per request keeps the two honest: the
+    list comes from SUPPORTED_MODELS, and the preselection comes from
+    config.yaml. Only the attribute changes, so the option order and labels
+    stay exactly as authored.
+
+    Scoped to the ``name="model"`` select on purpose: a page-wide rewrite
+    would strip the preselected option out of the mode and language dropdowns
+    too, silently changing what those forms submit.
+    """
+    default_model = resolve_default_model()
+    select_pattern = re.compile(r'(<select name="model"[^>]*>)(.*?)(</select>)', re.S)
+
+    def rewrite(match):
+        opening, body, closing = match.groups()
+        # re.sub hands the callback a Match, so read the value off it rather
+        # than re-matching the string.
+        return opening + re.sub(
+            r'(<option value="([^"]+)"[^>]*?)(>)',
+            lambda option: option.group(1)
+            + (" selected" if option.group(2) == default_model else "")
+            + option.group(3),
+            re.sub(r"\s+selected", "", body),
+        ) + closing
+
+    return select_pattern.sub(rewrite, page, count=1)
+
+
 def _job_payload(job: Job) -> dict:
     _update_progress(job)
     total, completed = job.progress["total"], job.progress["completed"]
@@ -509,48 +698,139 @@ def library_summary(query: str = "") -> dict:
 
 PAGE = r'''<!doctype html><html lang="fa" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>J Book Translate</title><style>
 @import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;600;700;800&display=swap');:root{--bg:#f4f7fb;--surface:#fff;--ink:#142033;--muted:#6d7a90;--line:#e3e9f2;--blue:#356df6;--purple:#7257e8;--cyan:#0ca6a6;--green:#08966c;--red:#e24a4a;--shadow:0 18px 55px rgba(38,57,93,.08)}*{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(circle at 8% 0,#e6efff 0,transparent 32%),radial-gradient(circle at 96% 11%,#eee9ff 0,transparent 27%),var(--bg);font:15px Vazirmatn,Segoe UI,Tahoma,sans-serif;color:var(--ink)}.shell{max-width:1180px;margin:auto;padding:34px 22px 62px}.top{display:flex;align-items:center;justify-content:space-between;gap:18px;margin-bottom:26px}.brand{display:flex;align-items:center;gap:14px}.logo{width:49px;height:49px;border-radius:15px;display:grid;place-items:center;background:linear-gradient(140deg,var(--blue),var(--purple));color:#fff;font-size:25px;box-shadow:0 9px 24px #506ff466}.brand h1{font-size:22px;margin:0;font-weight:800}.brand p{margin:3px 0 0;color:var(--muted);font-size:13px}.api-pill{display:flex;align-items:center;gap:8px;background:#fff;border:1px solid var(--line);border-radius:999px;padding:8px 12px;color:var(--muted);font-size:12px;box-shadow:0 4px 16px #26395a0a}.dot{width:8px;height:8px;border-radius:50%;background:#aeb8c7}.dot.ready{background:var(--green);box-shadow:0 0 0 4px #12b9811b}.dot.error{background:var(--red)}.dashboard{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:20px}.card{background:rgba(255,255,255,.92);border:1px solid rgba(224,230,240,.9);border-radius:20px;box-shadow:var(--shadow)}.form-card{padding:27px}.side{display:grid;gap:20px;align-content:start}.side .card{padding:21px}.section-title{display:flex;justify-content:space-between;align-items:center;margin-bottom:23px}.section-title h2{font-size:18px;margin:0}.step{font-size:12px;color:var(--blue);background:#edf3ff;padding:5px 10px;border-radius:999px}.drop{position:relative;border:1.5px dashed #9ab4eb;background:linear-gradient(135deg,#f8faff,#f0f5ff);border-radius:15px;min-height:136px;display:grid;place-items:center;text-align:center;padding:18px;transition:.2s}.drop.drag{border-color:var(--blue);background:#eaf1ff}.drop input{position:absolute;inset:0;width:100%;opacity:0;cursor:pointer}.upload-icon{font-size:28px;color:var(--blue)}.drop strong{display:block;margin:5px 0 3px}.drop small{color:var(--muted)}.file-info{display:none;margin-top:12px;padding:10px 12px;background:#eff8f5;border-radius:9px;color:#166b55;font-size:13px}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:13px}label{display:block;font-size:13px;font-weight:700;margin:18px 0 7px}input,select,textarea{width:100%;font:inherit;border:1px solid #d9e1ed;border-radius:10px;padding:10px 12px;background:#fff;color:var(--ink)}input:focus,select:focus,textarea:focus{outline:0;border-color:var(--blue);box-shadow:0 0 0 3px #356df61a}textarea{resize:vertical;min-height:100px}.optional{font-weight:400;color:var(--muted)}.advanced{margin-top:17px}.advanced summary{cursor:pointer;color:var(--blue);font-weight:700;font-size:13px}.check{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:13px;margin-top:14px}.check input{width:auto;accent-color:var(--blue)}button{border:0;font:700 14px Vazirmatn,Segoe UI,sans-serif;cursor:pointer;border-radius:10px;padding:12px 15px;transition:.15s}button:hover:not(:disabled){filter:brightness(.97);transform:translateY(-1px)}button:disabled{cursor:not-allowed;opacity:.55}.primary{width:100%;margin-top:21px;color:#fff;background:linear-gradient(135deg,var(--blue),#5a62e8);box-shadow:0 10px 20px #4268d338}.secondary{background:#eef3ff;color:#2d5ed4}.danger{background:#fff0f0;color:#ca3636}.intro{display:flex;gap:11px;line-height:1.8;color:#506078;font-size:13px}.intro i{font-style:normal;display:grid;place-items:center;min-width:34px;height:34px;border-radius:10px;background:#eaf1ff;color:var(--blue)}.fact{display:flex;justify-content:space-between;padding:12px 0;border-bottom:1px solid var(--line);font-size:13px}.fact span{color:var(--muted)}.job{display:none;margin-top:20px;padding:23px}.job-head{display:flex;justify-content:space-between;align-items:flex-start;gap:15px}.job-name{font-weight:800;font-size:16px;word-break:break-word}.job-meta{margin-top:4px;color:var(--muted);font-size:12px}.chip{white-space:nowrap;font-size:12px;font-weight:700;border-radius:999px;padding:6px 10px;background:#f0f3f7;color:#687587}.chip.running{background:#eaf1ff;color:#2b62df}.chip.completed{background:#e6f8f1;color:#087d5c}.chip.stopped,.chip.finished{background:#fff5df;color:#a96b00}.chip.failed{background:#fff0f0;color:#c03636}.progress-row{display:flex;justify-content:space-between;margin:21px 0 8px;font-size:13px;font-weight:700}.progress-track{height:10px;background:#e9eef7;border-radius:99px;overflow:hidden}.progress-value{height:100%;width:0;border-radius:inherit;background:linear-gradient(90deg,var(--blue),var(--cyan));transition:width .45s}.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin-top:16px}.stat{background:#f8faff;border:1px solid #edf1f7;border-radius:11px;padding:10px}.stat span{display:block;color:var(--muted);font-size:11px;margin-bottom:3px}.stat strong{font-size:13px}.job-actions{display:flex;flex-wrap:wrap;gap:9px;margin-top:18px}.job-actions button,.download{padding:9px 12px;text-decoration:none;display:inline-block}.download{border-radius:10px;background:var(--green);color:#fff;font-size:13px;font-weight:700}.error{display:none;margin-top:14px;background:#fff2f2;color:#a93434;border:1px solid #ffd9d9;border-radius:10px;padding:11px;font-size:13px}.logs{margin-top:19px}.logs summary{cursor:pointer;color:var(--muted);font-weight:700;font-size:13px}.logs pre{direction:ltr;text-align:left;white-space:pre-wrap;max-height:280px;overflow:auto;background:#101827;color:#c9f8df;border-radius:11px;padding:13px;font:12px ui-monospace,Consolas,monospace}.small{font-size:12px;color:var(--muted)}@media(max-width:850px){.dashboard{grid-template-columns:1fr}.side{grid-template-columns:1fr 1fr}.top{align-items:flex-start}}@media(max-width:570px){.shell{padding:22px 13px}.top{display:block}.api-pill{display:inline-flex;margin-top:14px}.form-card{padding:19px}.grid2,.side,.stats{grid-template-columns:1fr}.job-head{display:block}.chip{display:inline-block;margin-top:10px}}
-</style></head><body><main class="shell"><header class="top"><div class="brand"><div class="logo">文</div><div><h1>J Book Translate</h1><p>داشبورد ترجمهٔ امن EPUB و PDF</p></div></div><div class="api-pill"><i class="dot" id="api-dot"></i><span id="api-status">در حال بررسی تنظیمات API…</span><button class="secondary" id="verify-api" style="padding:5px 9px;font-size:11px">بررسی اتصال</button></div></header><div class="dashboard"><section><div class="card form-card"><div class="section-title"><h2>ترجمهٔ جدید</h2><span class="step">گام ۱ از ۱</span></div><form id="translate-form"><div class="drop" id="drop"><input required type="file" id="book" name="book" accept=".epub,.pdf"><div><div class="upload-icon">⇧</div><strong>کتاب را اینجا رها کنید یا انتخاب کنید</strong><small>فرمت‌های EPUB و PDF تا حداکثر ۱ گیگابایت</small></div></div><div class="file-info" id="file-info"></div><div class="grid2"><div><label>زبان مبدأ</label><select name="from_lang"><option value="EN" selected>انگلیسی</option><option value="FA">فارسی</option><option value="AR">عربی</option><option value="FR">فرانسوی</option><option value="DE">آلمانی</option><option value="ES">اسپانیایی</option><option value="IT">ایتالیایی</option><option value="RU">روسی</option><option value="TR">ترکی</option><option value="ZH">چینی</option><option value="JA">ژاپنی</option><option value="KO">کره‌ای</option></select></div><div><label>زبان مقصد</label><select name="to_lang"><option value="EN">انگلیسی</option><option value="FA" selected>فارسی</option><option value="AR">عربی</option><option value="FR">فرانسوی</option><option value="DE">آلمانی</option><option value="ES">اسپانیایی</option><option value="IT">ایتالیایی</option><option value="RU">روسی</option><option value="TR">ترکی</option><option value="ZH">چینی</option><option value="JA">ژاپنی</option><option value="KO">کره‌ای</option></select></div></div><div class="grid2"><div><label>مدل ترجمه</label><select name="model"><option value="gpt-5.6-luna" selected>gpt-5.6-luna</option><option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite</option></select></div><div><label>حالت اجرا</label><select name="mode"><option value="">سریع (پیشنهادی)</option><option value="batch">Batch</option><option value="pdfbilingual">PDF دوزبانه</option></select></div></div><details class="advanced"><summary>تنظیمات پیشرفته و دستور ترجمه</summary><label>دستور ترجمه <span class="optional">(اختیاری)</span></label><textarea name="prompt" placeholder="خالی بگذارید تا دستور استاندارد برنامه استفاده شود."></textarea><label class="check"><input type="checkbox" name="debug" value="true" checked>نگهداری فایل‌های موقت برای ادامهٔ امن کار</label></details><button class="primary" id="submit" type="submit">شروع ترجمه</button></form></div><section class="card job" id="job"><div class="job-head"><div><div class="job-name" id="job-name"></div><div class="job-meta" id="job-meta"></div></div><span class="chip" id="chip">در انتظار</span></div><div class="progress-row"><span id="progress-label">در حال آماده‌سازی…</span><span id="percent">۰٪</span></div><div class="progress-track"><div class="progress-value" id="progress"></div></div><div class="stats"><div class="stat"><span>Chunk تکمیل‌شده</span><strong id="completed">۰</strong></div><div class="stat"><span>زمان شروع</span><strong id="started">—</strong></div><div class="stat"><span>آخرین فعالیت</span><strong id="activity">—</strong></div></div><div class="error" id="error"></div><div id="quality-box" style="display:none;margin-top:12px;padding:14px;background:#f0f7ff;border:1px solid #356df633;border-radius:12px"><div class="section-title"><h2>گزارش کیفیت</h2></div><div id="quality-content"></div></div><div class="job-actions"><button class="danger" hidden id="stop">توقف امن</button><button class="secondary" hidden id="resume">ادامهٔ ترجمه</button><a class="download" hidden id="download">دریافت خروجی</a></div><details class="logs"><summary>نمایش لاگ فنی</summary><pre id="log"></pre></details></section></section><aside class="side"><div class="card"><div class="section-title"><h2>پیش از شروع</h2></div><div class="intro"><i>✓</i><div>کلید API هرگز به مرورگر ارسال یا در صفحه نمایش داده نمی‌شود. فایل‌ها فقط روی همین دستگاه پردازش می‌شوند.</div></div></div><div class="card"><div class="section-title"><h2>تنظیمات فعال</h2></div><div class="fact"><span>محدودهٔ اجرا</span><strong>فقط محلی</strong></div><div class="fact"><span>ذخیرهٔ پیشرفت</span><strong>بعد از هر chunk</strong></div><div class="fact"><span>ادامهٔ کار</span><strong>برای EPUB</strong></div><p class="small">برای توقف امن، درخواست در حال اجرا تمام و ذخیره می‌شود؛ سپس ترجمه پیش از chunk بعدی متوقف خواهد شد.</p></div></aside></div></main><script>
-const $=s=>document.querySelector(s),form=$('#translate-form'),submit=$('#submit'),jobBox=$('#job'),drop=$('#drop'),book=$('#book'),fileInfo=$('#file-info'),apiDot=$('#api-dot'),apiStatus=$('#api-status');let jobId,timer;const fa=n=>new Intl.NumberFormat('fa-IR').format(n||0),date=v=>v?new Intl.DateTimeFormat('fa-IR',{hour:'2-digit',minute:'2-digit',year:'numeric',month:'short',day:'numeric'}).format(new Date(v)):'—',size=n=>n<1024*1024?(n/1024).toFixed(0)+' KB':(n/1024/1024).toFixed(1)+' MB';function fileChanged(){const f=book.files[0];if(!f){fileInfo.style.display='none';return}fileInfo.textContent=`${f.name} · ${f.name.split('.').pop().toUpperCase()} · ${size(f.size)}`;fileInfo.style.display='block'}book.addEventListener('change',fileChanged);['dragenter','dragover'].forEach(e=>drop.addEventListener(e,x=>{x.preventDefault();drop.classList.add('drag')}));['dragleave','drop'].forEach(e=>drop.addEventListener(e,x=>{x.preventDefault();drop.classList.remove('drag')}));drop.addEventListener('drop',e=>{e.preventDefault();if(e.dataTransfer&&e.dataTransfer.files[0]){book.files=e.dataTransfer.files;fileChanged()}});async function health(verify=false){try{const r=await fetch('/api/health'+(verify?'?verify=1':'')),d=await r.json();apiStatus.textContent=d.message;apiDot.className='dot '+(d.status==='ready'?'ready':'error')}catch{apiStatus.textContent='وضعیت API نامشخص است';apiDot.className='dot error'}}$('#verify-api').onclick=()=>health(true);health();form.addEventListener('submit',async e=>{e.preventDefault();if(!book.files[0])return;submit.disabled=true;submit.textContent='در حال ایجاد کار…';try{const r=await fetch('/api/jobs',{method:'POST',body:new FormData(form)}),d=await r.json();if(!r.ok)throw Error(d.error||'ایجاد job ناموفق بود');jobId=d.id;jobBox.style.display='block';$('#error').style.display='none';watch()}catch(err){alert(err.message);submit.disabled=false;submit.textContent='شروع ترجمه'}});async function action(name){if(!jobId)return;const r=await fetch(`/api/jobs/${jobId}/${name}`,{method:'POST'}),d=await r.json();if(!r.ok)alert(d.error||'عملیات انجام نشد');watch()}$('#stop').onclick=()=>action('stop');$('#resume').onclick=()=>action('resume');function render(d){const p=d.progress;$('#job-name').textContent=d.filename;$('#job-meta').textContent=`${d.filetype} · ${size(d.file_size)} · ${d.id}`;$('#chip').textContent={queued:'در صف',running:'در حال ترجمه',stopping:'در حال توقف',stopped:'متوقف شده',completed:'تکمیل شد',finished:'پایان یافت',failed:'خطا'}[d.status]||d.status;$('#chip').className='chip '+d.status;$('#progress').style.width=p.percent+'%';$('#percent').textContent=fa(p.percent)+'٪';$('#progress-label').textContent=p.total?`${fa(p.completed)} از ${fa(p.total)} chunk`:'در حال آماده‌سازی chunkها…';$('#completed').textContent=p.total?`${fa(p.completed)} / ${fa(p.total)}`:fa(p.completed);$('#started').textContent=date(d.started_at);$('#activity').textContent=date(d.last_activity);$('#log').textContent=d.log||'در انتظار شروع…';const error=$('#error');error.textContent=d.error||'';error.style.display=d.error?'block':'none';const ql=document.getElementById('quality-box');if(ql){ql.style.display=d.quality?'block':'none';if(d.quality){document.getElementById('quality-content').innerHTML='<div style="padding:8px 0"><strong>Quality Report</strong><br>Total chunks: '+d.quality.total_chunks+' · Flagged: '+d.quality.flagged_count+' · Average: '+d.quality.average_composite+'</div>'}}$('#stop').hidden=!d.can_stop;$('#resume').hidden=!d.can_resume;const dl=$('#download');dl.hidden=!d.download;if(d.download)dl.href=d.download;const active=['queued','running','stopping'].includes(d.status);if(!active){clearInterval(timer);submit.disabled=false;submit.textContent='شروع ترجمه'}}function watch(){clearInterval(timer);const tick=async()=>{try{const r=await fetch('/api/jobs/'+jobId),d=await r.json();if(!r.ok)throw Error();render(d)}catch{clearInterval(timer)}};tick();timer=setInterval(tick,1000)}
+</style></head><body><main class="shell"><header class="top"><div class="brand"><div class="logo">文</div><div><h1>J Book Translate</h1><p>داشبورد ترجمهٔ امن EPUB و PDF</p></div></div><div class="api-pill"><i class="dot" id="api-dot"></i><span id="api-status">در حال بررسی تنظیمات API…</span><button class="secondary" id="verify-api" aria-label="بررسی اتصال provider" style="padding:5px 9px;font-size:11px">بررسی اتصال</button></div></header><div class="dashboard"><section><div class="card form-card"><div class="section-title"><h2>ترجمهٔ جدید</h2><span class="step">گام ۱ از ۱</span></div><form id="translate-form"><div class="drop" id="drop"><input required type="file" id="book" name="book" accept=".epub,.pdf"><div><div class="upload-icon">⇧</div><strong>کتاب را اینجا رها کنید یا انتخاب کنید</strong><small>فرمت‌های EPUB و PDF تا حداکثر ۱ گیگابایت</small></div></div><div class="file-info" id="file-info"></div><div class="grid2"><div><label>زبان مبدأ</label><select name="from_lang"><option value="EN" selected>انگلیسی</option><option value="FA">فارسی</option><option value="AR">عربی</option><option value="FR">فرانسوی</option><option value="DE">آلمانی</option><option value="ES">اسپانیایی</option><option value="IT">ایتالیایی</option><option value="RU">روسی</option><option value="TR">ترکی</option><option value="ZH">چینی</option><option value="JA">ژاپنی</option><option value="KO">کره‌ای</option></select></div><div><label>زبان مقصد</label><select name="to_lang"><option value="EN">انگلیسی</option><option value="FA" selected>فارسی</option><option value="AR">عربی</option><option value="FR">فرانسوی</option><option value="DE">آلمانی</option><option value="ES">اسپانیایی</option><option value="IT">ایتالیایی</option><option value="RU">روسی</option><option value="TR">ترکی</option><option value="ZH">چینی</option><option value="JA">ژاپنی</option><option value="KO">کره‌ای</option></select></div></div><div class="grid2"><div><label>مدل ترجمه</label><select name="model" aria-label="مدل ترجمه"><option value="gpt-5.6-terra">gpt-5.6-terra — High-quality translation model</option><option value="gpt-5.6-luna">gpt-5.6-luna — Primary translation model</option><option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite — Fast, lower-cost translation model</option></select></div><div><label>حالت اجرا</label><select name="mode"><option value="">سریع (پیشنهادی)</option><option value="batch">Batch</option><option value="pdfbilingual">PDF دوزبانه</option></select></div></div><details class="advanced"><summary>تنظیمات پیشرفته و دستور ترجمه</summary><label>دستور ترجمه <span class="optional">(اختیاری)</span></label><textarea name="prompt" placeholder="خالی بگذارید تا دستور استاندارد برنامه استفاده شود."></textarea><label class="check"><input type="checkbox" name="debug" value="true" checked>نگهداری فایل‌های موقت برای ادامهٔ امن کار</label></details><button class="primary" id="submit" type="submit">شروع ترجمه</button></form></div><section class="card job" id="job"><div class="job-head"><div><div class="job-name" id="job-name"></div><div class="job-meta" id="job-meta"></div></div><span class="chip" id="chip">در انتظار</span></div><div class="progress-row"><span id="progress-label">در حال آماده‌سازی…</span><span id="percent">۰٪</span></div><div class="progress-track"><div class="progress-value" id="progress"></div></div><div class="stats"><div class="stat"><span>Chunk تکمیل‌شده</span><strong id="completed">۰</strong></div><div class="stat"><span>زمان شروع</span><strong id="started">—</strong></div><div class="stat"><span>آخرین فعالیت</span><strong id="activity">—</strong></div></div><div class="error" id="error"></div><div id="quality-box" style="display:none;margin-top:12px;padding:14px;background:#f0f7ff;border:1px solid #356df633;border-radius:12px"><div class="section-title"><h2>گزارش کیفیت</h2></div><div id="quality-content"></div></div><div class="job-actions"><button class="danger" hidden id="stop">توقف امن</button><button class="secondary" hidden id="resume">ادامهٔ ترجمه</button><a class="download" hidden id="download">دریافت خروجی</a></div><details class="logs"><summary>نمایش لاگ فنی</summary><pre id="log"></pre></details></section></section><aside class="side"><div class="card"><div class="section-title"><h2>پیش از شروع</h2></div><div class="intro"><i>✓</i><div>کلید API هرگز به مرورگر ارسال یا در صفحه نمایش داده نمی‌شود. فایل‌ها فقط روی همین دستگاه پردازش می‌شوند.</div></div></div><div class="card"><div class="section-title"><h2>تنظیمات فعال</h2></div><div class="fact"><span>محدودهٔ اجرا</span><strong>فقط محلی</strong></div><div class="fact"><span>ذخیرهٔ پیشرفت</span><strong>بعد از هر chunk</strong></div><div class="fact"><span>ادامهٔ کار</span><strong>برای EPUB</strong></div><p class="small">برای توقف امن، درخواست در حال اجرا تمام و ذخیره می‌شود؛ سپس ترجمه پیش از chunk بعدی متوقف خواهد شد.</p></div></aside></div></main><script>
+const $=s=>document.querySelector(s),form=$('#translate-form'),submit=$('#submit'),jobBox=$('#job'),drop=$('#drop'),book=$('#book'),fileInfo=$('#file-info'),apiDot=$('#api-dot'),apiStatus=$('#api-status');let jobId,timer;const fa=n=>new Intl.NumberFormat('fa-IR').format(n||0),date=v=>v?new Intl.DateTimeFormat('fa-IR',{hour:'2-digit',minute:'2-digit',year:'numeric',month:'short',day:'numeric'}).format(new Date(v)):'—',size=n=>n<1024*1024?(n/1024).toFixed(0)+' KB':(n/1024/1024).toFixed(1)+' MB';function fileChanged(){const f=book.files[0];if(!f){fileInfo.style.display='none';return}fileInfo.textContent=`${f.name} · ${f.name.split('.').pop().toUpperCase()} · ${size(f.size)}`;fileInfo.style.display='block'}book.addEventListener('change',fileChanged);['dragenter','dragover'].forEach(e=>drop.addEventListener(e,x=>{x.preventDefault();drop.classList.add('drag')}));['dragleave','drop'].forEach(e=>drop.addEventListener(e,x=>{x.preventDefault();drop.classList.remove('drag')}));drop.addEventListener('drop',e=>{e.preventDefault();if(e.dataTransfer&&e.dataTransfer.files[0]){book.files=e.dataTransfer.files;fileChanged()}});async function health(verify=false){try{const r=await fetch('/api/health'+(verify?'?verify=1':'')),d=await r.json();apiStatus.textContent=d.message;apiDot.className='dot '+(d.status==='ready'?'ready':'error')}catch{apiStatus.textContent='وضعیت API نامشخص است';apiDot.className='dot error'}}$('#verify-api').onclick=()=>health(true);health();form.addEventListener('submit',async e=>{e.preventDefault();if(!book.files[0])return;submit.disabled=true;submit.textContent='در حال ایجاد کار…';try{const r=await fetch('/api/jobs',{method:'POST',body:new FormData(form)}),d=await r.json();if(!r.ok)throw Error(d.error||'ایجاد job ناموفق بود');jobId=d.id;if(window.jbtGlossary&&d.book_id)window.jbtGlossary.setBook(d.book_id,d.from_lang,d.to_lang);jobBox.style.display='block';$('#error').style.display='none';watch()}catch(err){alert(err.message);submit.disabled=false;submit.textContent='شروع ترجمه'}});async function action(name){if(!jobId)return;const r=await fetch(`/api/jobs/${jobId}/${name}`,{method:'POST'}),d=await r.json();if(!r.ok)alert(d.error||'عملیات انجام نشد');watch()}$('#stop').onclick=()=>action('stop');$('#resume').onclick=()=>action('resume');function render(d){const p=d.progress;$('#job-name').textContent=d.filename;$('#job-meta').textContent=`${d.filetype} · ${size(d.file_size)} · ${d.id}`;$('#chip').textContent={queued:'در صف',running:'در حال ترجمه',stopping:'در حال توقف',stopped:'متوقف شده',completed:'تکمیل شد',finished:'پایان یافت',failed:'خطا'}[d.status]||d.status;$('#chip').className='chip '+d.status;$('#progress').style.width=p.percent+'%';$('#percent').textContent=fa(p.percent)+'٪';$('#progress-label').textContent=p.total?`${fa(p.completed)} از ${fa(p.total)} chunk`:'در حال آماده‌سازی chunkها…';$('#completed').textContent=p.total?`${fa(p.completed)} / ${fa(p.total)}`:fa(p.completed);$('#started').textContent=date(d.started_at);$('#activity').textContent=date(d.last_activity);$('#log').textContent=d.log||'در انتظار شروع…';const error=$('#error');error.textContent=d.error||'';error.style.display=d.error?'block':'none';const ql=document.getElementById('quality-box');if(ql){ql.style.display=d.quality?'block':'none';if(d.quality){document.getElementById('quality-content').innerHTML='<div style="padding:8px 0"><strong>Quality Report</strong><br>Total chunks: '+d.quality.total_chunks+' · Flagged: '+d.quality.flagged_count+' · Average: '+d.quality.average_composite+'</div>'}}$('#stop').hidden=!d.can_stop;$('#resume').hidden=!d.can_resume;const dl=$('#download');dl.hidden=!d.download;if(d.download)dl.href=d.download;const active=['queued','running','stopping'].includes(d.status);if(!active){clearInterval(timer);submit.disabled=false;submit.textContent='شروع ترجمه'}}function watch(){clearInterval(timer);const tick=async()=>{try{const r=await fetch('/api/jobs/'+jobId),d=await r.json();if(!r.ok)throw Error();render(d)}catch{clearInterval(timer)}};tick();timer=setInterval(tick,1000)}
 </script></body></html>'''.replace("__DEFAULT_MODEL__", DEFAULT_MODEL)
 
 
 SIDEBAR_HTML = r'''<style>
-.app-sidebar{position:fixed;z-index:10;right:18px;top:18px;bottom:18px;width:250px;padding:18px 14px;background:rgba(255,255,255,.94);border:1px solid #e2e8f2;border-radius:20px;box-shadow:0 18px 55px rgba(38,57,93,.1);display:flex;flex-direction:column;gap:18px}.shell{margin-right:292px;max-width:calc(1180px - 292px)}.side-brand{display:flex;align-items:center;gap:10px;padding:4px 7px 15px;border-bottom:1px solid #e9edf4}.side-brand-mark{width:36px;height:36px;border-radius:11px;display:grid;place-items:center;color:#fff;background:linear-gradient(140deg,#356df6,#7257e8);font-size:18px}.side-brand strong{font-size:14px}.side-brand small{display:block;color:#78859a;font-size:10px;margin-top:2px}.side-nav{display:grid;gap:5px}.side-nav button{width:100%;border:0;background:transparent;color:#69778d;text-align:right;padding:10px 11px;border-radius:9px;font:600 12px Vazirmatn,Segoe UI,sans-serif;cursor:pointer}.side-nav button:hover,.side-nav button.active{background:#edf3ff;color:#2e62dc}.side-nav button span{display:inline-block;width:23px;color:#7890bd;font-size:15px;vertical-align:-2px}.side-section{color:#a0aabd;font-size:10px;font-weight:700;padding:8px 11px 1px}.side-summary{margin-top:auto;padding:13px;border-radius:13px;background:linear-gradient(145deg,#f4f7ff,#f4fbfa);border:1px solid #e8eef8}.side-summary-title{font-size:11px;font-weight:700;margin-bottom:9px}.side-stat{display:flex;justify-content:space-between;padding:5px 0;color:#6c7890;font-size:11px}.side-stat strong{color:#263852}.side-api{display:flex;align-items:center;gap:6px;margin-top:8px;color:#07805e;font-size:10px}.side-dot{width:7px;height:7px;border-radius:50%;background:#aeb8c7}.side-dot.ready{background:#09a174;box-shadow:0 0 0 3px #09a1741a}.side-dot.error{background:#e24a4a}.dashboard-cards{display:grid;grid-template-columns:repeat(4,1fr);gap:11px;margin-bottom:18px}.dashboard-card{padding:14px;background:#fff;border:1px solid #e5ebf4;border-radius:14px;box-shadow:0 8px 20px rgba(38,57,93,.04)}.dashboard-card label{font-size:11px;color:#7c899c;margin:0 0 7px}.dashboard-card strong{font-size:21px;color:#263b5d}.dashboard-card.blue{border-top:3px solid #356df6}.dashboard-card.orange{border-top:3px solid #e8a137}.dashboard-card.green{border-top:3px solid #08966c}.dashboard-card.red{border-top:3px solid #e24a4a}.summary-strip{display:flex;gap:12px;flex-wrap:wrap;padding:11px 14px;margin-bottom:16px;background:#f8faff;border:1px solid #e8eef7;border-radius:12px;color:#68778d;font-size:11px}.summary-strip b{color:#2e62dc}.sidebar-toast{position:fixed;right:285px;bottom:25px;background:#142033;color:#fff;border-radius:10px;padding:10px 14px;font-size:12px;display:none;z-index:20}@media(max-width:850px){.app-sidebar{position:relative;right:auto;top:auto;bottom:auto;width:auto;margin:0 13px 0;padding:12px;border-radius:15px}.shell{margin-right:auto;max-width:1180px}.side-brand{display:none}.side-nav{display:flex;overflow:auto}.side-nav button{white-space:nowrap;width:auto}.side-section,.side-summary{display:none}.dashboard-cards{grid-template-columns:repeat(2,1fr)}}@media(max-width:480px){.dashboard-cards{grid-template-columns:1fr 1fr}.dashboard-card strong{font-size:17px}}
-</style><aside class="app-sidebar" aria-label="ناوبری اصلی"><div class="side-brand"><div class="side-brand-mark">文</div><div><strong>J Book Translate</strong><small>Translation Studio</small></div></div><nav class="side-nav"><button class="active" data-scroll="dashboard-summary"><span>⌂</span>داشبورد</button><button data-scroll="translate-form"><span>＋</span>ترجمهٔ جدید</button><button data-scroll="job"><span>◷</span>Jobهای فعال</button></nav><div class="side-section">مدیریت محتوا</div><nav class="side-nav"><button data-toast="کتابخانه در مرحلهٔ بعد فعال می‌شود"><span>▣</span>کتابخانه</button><button data-toast="Glossary در مرحلهٔ بعد فعال می‌شود"><span>⌘</span>Glossary</button><button data-toast="Analytics در مرحلهٔ بعد فعال می‌شود"><span>◒</span>آمار و هزینه</button></nav><div class="side-summary"><div class="side-summary-title">خلاصهٔ سیستم</div><div class="side-stat"><span>فضای آزاد</span><strong id="sb-storage">—</strong></div><div class="side-stat"><span>هزینهٔ تقریبی</span><strong id="sb-cost">—</strong></div><div class="side-api"><i class="side-dot" id="sb-api-dot"></i><span id="sb-api">در حال بررسی provider…</span></div></div></aside><div class="sidebar-toast" id="sidebar-toast"></div><script>
+.app-sidebar{position:fixed;z-index:10;right:18px;top:18px;bottom:18px;width:250px;padding:18px 14px;background:rgba(255,255,255,.94);border:1px solid #e2e8f2;border-radius:20px;box-shadow:0 18px 55px rgba(38,57,93,.1);display:flex;flex-direction:column;gap:18px}.shell{margin-right:292px;max-width:calc(1180px - 292px)}.side-brand{display:flex;align-items:center;gap:10px;padding:4px 7px 15px;border-bottom:1px solid #e9edf4}.side-brand-mark{width:36px;height:36px;border-radius:11px;display:grid;place-items:center;color:#fff;background:linear-gradient(140deg,#356df6,#7257e8);font-size:18px}.side-brand strong{font-size:14px}.side-brand small{display:block;color:#78859a;font-size:10px;margin-top:2px}.side-nav{display:grid;gap:5px}.side-nav button{width:100%;border:0;background:transparent;color:#69778d;text-align:right;padding:10px 11px;border-radius:9px;font:600 12px Vazirmatn,Segoe UI,sans-serif;cursor:pointer}.side-nav button:hover,.side-nav button.active{background:#edf3ff;color:#2e62dc}.side-nav button span{display:inline-block;width:23px;color:#7890bd;font-size:15px;vertical-align:-2px}.side-section{color:#a0aabd;font-size:10px;font-weight:700;padding:8px 11px 1px}.side-summary{margin-top:auto;padding:13px;border-radius:13px;background:linear-gradient(145deg,#f4f7ff,#f4fbfa);border:1px solid #e8eef8}.side-summary-title{font-size:11px;font-weight:700;margin-bottom:9px}.side-stat{display:flex;justify-content:space-between;padding:5px 0;color:#6c7890;font-size:11px}.side-stat strong{color:#263852}.side-api{display:flex;align-items:center;gap:6px;margin-top:8px;color:#07805e;font-size:10px}.side-dot{width:7px;height:7px;border-radius:50%;background:#aeb8c7}.side-dot.ready{background:#09a174;box-shadow:0 0 0 3px #09a1741a}.side-dot.error{background:#e24a4a}.dashboard-cards{display:grid;grid-template-columns:repeat(4,1fr);gap:11px;margin-bottom:18px}.dashboard-card{padding:14px;background:#fff;border:1px solid #e5ebf4;border-radius:14px;box-shadow:0 8px 20px rgba(38,57,93,.06);transition:all 200ms ease;cursor:default}.dashboard-card:hover{box-shadow:0 12px 32px rgba(38,57,93,.12);transform:translateY(-2px)}.dashboard-card.blue{background:linear-gradient(135deg,#eff6ff,#dbeafe);border-color:#93c5fd}.dashboard-card.orange{background:linear-gradient(135deg,#fff7ed,#fed7aa);border-color:#fdba74}.dashboard-card.green{background:linear-gradient(135deg,#ecfdf5,#d1fae5);border-color:#6ee7b7}.dashboard-card.red{background:linear-gradient(135deg,#fef2f2,#fecaca);border-color:#f87171}.dashboard-card label{font-size:11px;color:#7c899c;margin:0 0 7px}.dashboard-card strong{font-size:21px;color:#263b5d}.dashboard-card.blue{border-top:3px solid #356df6}.dashboard-card.orange{border-top:3px solid #e8a137}.dashboard-card.green{border-top:3px solid #08966c}.dashboard-card.red{border-top:3px solid #e24a4a}.summary-strip{display:flex;gap:12px;flex-wrap:wrap;padding:11px 14px;margin-bottom:16px;background:#f8faff;border:1px solid #e8eef7;border-radius:12px;color:#68778d;font-size:11px}.summary-strip b{color:#2e62dc}.sidebar-toast{position:fixed;right:285px;bottom:25px;background:#142033;color:#fff;border-radius:10px;padding:10px 14px;font-size:12px;display:none;z-index:20}@media(max-width:850px){.app-sidebar{position:relative;right:auto;top:auto;bottom:auto;width:auto;margin:0 13px 0;padding:12px;border-radius:15px}.shell{margin-right:auto;max-width:1180px}.side-brand{display:none}.side-nav{display:flex;overflow:auto}.side-nav button{white-space:nowrap;width:auto}.side-section,.side-summary{display:none}.dashboard-cards{grid-template-columns:repeat(2,1fr)}}@media(max-width:480px){.dashboard-cards{grid-template-columns:1fr 1fr}.dashboard-card strong{font-size:17px}}
+</style><aside class="app-sidebar" aria-label="ناوبری اصلی"><div class="side-brand"><div class="side-brand-mark">文</div><div><strong>J Book Translate</strong><small>Translation Studio</small></div></div><nav class="side-nav"><button class="active" data-scroll="dashboard-summary" aria-label="داشبورد"><span>⌂</span>داشبورد</button><button data-scroll="translate-form" aria-label="ترجمهٔ جدید"><span>＋</span>ترجمهٔ جدید</button><button data-scroll="job" aria-label="Jobهای فعال"><span>◷</span>Jobهای فعال</button></nav><div class="side-section">مدیریت محتوا</div><nav class="side-nav"><button data-toast="کتابخانه در مرحلهٔ بعد فعال می‌شود" aria-label="کتابخانه"><span>▣</span>کتابخانه</button><button data-toast="Glossary در مرحلهٔ بعد فعال می‌شود" aria-label="واژه‌نامه"><span>⌘</span>Glossary</button><button data-toast="Analytics در مرحلهٔ بعد فعال می‌شود" aria-label="آمار و هزینه"><span>◒</span>آمار و هزینه</button></nav><div class="side-summary"><div class="side-summary-title">خلاصهٔ سیستم</div><div class="side-stat"><span>فضای آزاد</span><strong id="sb-storage">—</strong></div><div class="side-stat"><span>هزینهٔ تقریبی</span><strong id="sb-cost">—</strong></div><div class="side-api"><i class="side-dot" id="sb-api-dot"></i><span id="sb-api">در حال بررسی provider…</span></div></div></aside><div class="sidebar-toast" id="sidebar-toast"></div><script>
 (function(){const root=document.querySelector('.dashboard'),nav=document.querySelectorAll('.side-nav button[data-scroll]'),toast=document.querySelector('#sidebar-toast');if(root){root.id='dashboard-summary';const cards=document.createElement('div');cards.className='dashboard-cards';cards.innerHTML='<div class="dashboard-card blue"><label>ترجمه‌های فعال</label><strong id="sb-active">۰</strong></div><div class="dashboard-card orange"><label>متوقف‌شده</label><strong id="sb-paused">۰</strong></div><div class="dashboard-card green"><label>تکمیل‌شده</label><strong id="sb-completed">۰</strong></div><div class="dashboard-card red"><label>دارای خطا</label><strong id="sb-failed">۰</strong></div>';root.prepend(cards);const strip=document.createElement('div');strip.className='summary-strip';strip.innerHTML='<span>کتاب‌ها: <b id="sb-books">۰</b></span><span>فضای آزاد: <b id="sb-storage-main">—</b></span><span>Provider: <b id="sb-provider-main">—</b></span><span>هزینه: <b id="sb-cost-main">—</b></span>';root.prepend(strip)}const fa=n=>new Intl.NumberFormat('fa-IR').format(n||0),formatBytes=n=>n>=1073741824?(n/1073741824).toFixed(1)+' GB':(n/1048576).toFixed(0)+' MB';async function refresh(){try{const response=await fetch('/api/dashboard/summary');if(!response.ok)throw Error();const d=await response.json();document.querySelector('#sb-active').textContent=fa(d.active_jobs);document.querySelector('#sb-paused').textContent=fa(d.paused_jobs);document.querySelector('#sb-completed').textContent=fa(d.completed_jobs);document.querySelector('#sb-failed').textContent=fa(d.failed_jobs);document.querySelector('#sb-books').textContent=fa(d.total_books);document.querySelector('#sb-storage').textContent=formatBytes(d.storage_free);document.querySelector('#sb-storage-main').textContent=formatBytes(d.storage_free);document.querySelector('#sb-cost').textContent='$'+Number(d.estimated_cost||0).toFixed(2);document.querySelector('#sb-cost-main').textContent='$'+Number(d.estimated_cost||0).toFixed(2);document.querySelector('#sb-provider-main').textContent=d.api_status==='ready'?'آماده':'تنظیم نشده';document.querySelector('#sb-api').textContent=d.api_status==='ready'?'Provider آماده است':'Provider تنظیم نشده';document.querySelector('#sb-api-dot').className='side-dot '+(d.api_status==='ready'?'ready':'error')}catch{document.querySelector('#sb-api').textContent='خطا در دریافت وضعیت';document.querySelector('#sb-api-dot').className='side-dot error'}}nav.forEach(button=>button.addEventListener('click',()=>{nav.forEach(item=>item.classList.remove('active'));button.classList.add('active');document.getElementById(button.dataset.scroll)?.scrollIntoView({behavior:'smooth',block:'start'})}));document.querySelectorAll('[data-toast]').forEach(button=>button.addEventListener('click',()=>{toast.textContent=button.dataset.toast;toast.style.display='block';setTimeout(()=>toast.style.display='none',2400)}));refresh();setInterval(refresh,5000)})();
 </script>'''
 PAGE = PAGE.replace("</body>", SIDEBAR_HTML + r'''<style>
 @keyframes intro-rise{from{opacity:0;transform:translateY(14px) scale(.985)}to{opacity:1;transform:none}}@keyframes intro-glow{0%,100%{box-shadow:0 0 0 rgba(83,111,167,0)}50%{box-shadow:0 0 34px rgba(83,111,167,.13)}}body.app-intro .top{animation:intro-rise .55s ease both}body.app-intro .form-card{animation:intro-rise .6s .08s ease both}body.app-intro .side .card{animation:intro-rise .55s ease both}body.app-intro .side .card:nth-child(2){animation-delay:.14s}body.app-intro .job{animation:intro-rise .5s ease both}.theme-toggle{display:inline-flex;align-items:center;gap:6px;margin-inline-start:7px;padding:6px 10px!important;border:1px solid var(--line)!important;background:var(--surface)!important;color:var(--ink)!important;border-radius:999px!important;font-size:11px!important}.theme-toggle .theme-icon{font-size:14px}.theme-toggle:hover{transform:none!important;filter:brightness(.96)}body.app-dark{--bg:#17191d;--surface:#22252b;--ink:#d8d2c8;--muted:#aaa69f;--line:#343941;--shadow:0 18px 55px rgba(0,0,0,.22);background:radial-gradient(circle at 8% 0,#242c3d 0,transparent 32%),radial-gradient(circle at 96% 11%,#2b263d 0,transparent 27%),var(--bg)}body.app-dark .card,body.app-dark .app-sidebar{background:rgba(34,37,43,.96);border-color:#343941;box-shadow:var(--shadow)}body.app-dark input,body.app-dark select,body.app-dark textarea{background:#1d2025;color:var(--ink);border-color:#3b424d}body.app-dark .drop{background:linear-gradient(135deg,#252b35,#20252c);border-color:#546b92}body.app-dark .file-info{background:#1c302a;color:#a8dfca}body.app-dark .dashboard-card,body.app-dark .summary-strip,body.app-dark .stat{background:#1d2025;border-color:#343941}body.app-dark .side-nav button{color:#aaaeb8}body.app-dark .side-nav button:hover,body.app-dark .side-nav button.active{background:#29344b;color:#b8caff}body.app-dark .api-pill{background:#22252b;border-color:#343941;color:#aaa69f}body.app-dark .intro,body.app-dark .fact,body.app-dark .small{color:#aaa69f}body.app-dark .logs pre{background:#101216}body.app-dark .secondary{background:#29344b;color:#c1d0ff}body.app-dark .danger{background:#3b2427;color:#ffb7b7}
-</style><script>(function(){const body=document.body;body.classList.add('app-intro');const key='jbook-study-dark';const saved=localStorage.getItem(key)==='1';if(saved)body.classList.add('app-dark');const pill=document.querySelector('.api-pill');if(!pill)return;const button=document.createElement('button');button.type='button';button.className='theme-toggle';button.innerHTML='<span class="theme-icon">◐</span><span class="theme-label"></span>';pill.appendChild(button);const sync=()=>{const dark=body.classList.contains('app-dark');button.querySelector('.theme-icon').textContent=dark?'☀':'◐';button.querySelector('.theme-label').textContent=dark?'حالت روشن':'حالت شب';button.setAttribute('aria-pressed',dark)};button.onclick=()=>{body.classList.toggle('app-dark');localStorage.setItem(key,body.classList.contains('app-dark')?'1':'0');sync()};sync();setTimeout(()=>body.classList.remove('app-intro'),1400)})();</script><script>(function(){const routes={'کتابخانه':'/api/library','Glossary':'/api/glossaries','آمار و هزینه':'/api/analytics/overview'};document.querySelectorAll('[data-toast]').forEach(b=>b.addEventListener('click',async()=>{const key=Object.keys(routes).find(k=>b.textContent.includes(k));if(!key)return;try{const d=await (await fetch(routes[key])).json();const t=document.querySelector('#sidebar-toast');t.textContent=key+' · '+(d.items?('تعداد: '+d.items.length):'داده دریافت شد');t.style.display='block';setTimeout(()=>t.style.display='none',3000)}catch{}}));const dl=document.querySelector('#download');if(dl){const reader=document.createElement('a');reader.id='reader-link';reader.className='download';reader.textContent='مطالعه در مرورگر';reader.hidden=true;dl.parentElement.appendChild(reader);const sync=()=>{reader.hidden=dl.hidden||!dl.href;reader.href=dl.href.replace('/downloads/','/reader/')};new MutationObserver(sync).observe(dl,{attributes:true});sync()}})();</script>''' + "</body>")
+</style><script>(function(){const body=document.body;body.classList.add('app-intro');const key='jbook-study-dark';const saved=localStorage.getItem(key)==='1';if(saved)body.classList.add('app-dark');const pill=document.querySelector('.api-pill');if(!pill)return;const button=document.createElement('button');button.type='button';button.className='theme-toggle';button.innerHTML='<span class="theme-icon">◐</span><span class="theme-label"></span>';pill.appendChild(button);const sync=()=>{const dark=body.classList.contains('app-dark');button.querySelector('.theme-icon').textContent=dark?'☀':'◐';button.querySelector('.theme-label').textContent=dark?'حالت روشن':'حالت شب';button.setAttribute('aria-pressed',dark)};button.onclick=()=>{body.classList.toggle('app-dark');localStorage.setItem(key,body.classList.contains('app-dark')?'1':'0');sync()};sync();setTimeout(()=>body.classList.remove('app-intro'),1400)})();</script><script>(function(){const routes={'کتابخانه':'/api/library','Glossary':'/api/glossaries','آمار و هزینه':'/api/analytics/overview'};document.querySelectorAll('[data-toast]').forEach(b=>b.addEventListener('click',async()=>{const key=Object.keys(routes).find(k=>b.textContent.includes(k));if(!key)return;try{const d=await (await fetch(routes[key])).json();const t=document.querySelector('#sidebar-toast');t.textContent=key+' · '+(d.items?('تعداد: '+d.items.length):'داده دریافت شد');t.style.display='block';setTimeout(()=>t.style.display='none',3000)}catch{}}));const dl=document.querySelector('#download');if(dl){const reader=document.createElement('a');reader.id='reader-link';reader.className='download';reader.textContent='مطالعه در مرورگر';reader.hidden=true;dl.parentElement.appendChild(reader);const monitor=document.createElement('a');monitor.id='monitor-link';monitor.className='download';monitor.textContent='پایش تفصیلی';monitor.hidden=true;monitor.setAttribute('aria-label','باز کردن صفحهٔ پایش تفصیلی ترجمه');dl.parentElement.appendChild(monitor);const sync=()=>{reader.hidden=dl.hidden||!dl.href;reader.href=dl.href.replace('/downloads/','/reader/');monitor.hidden=dl.hidden||!dl.href;monitor.href=dl.href.replace('/downloads/','/workspace/job/')};new MutationObserver(sync).observe(dl,{attributes:true});sync()}})();</script>''' + "</body>")
 
 
-PAGE = PAGE.replace("</head>", "<style>body.app-dark .side-summary{background:linear-gradient(145deg,#20252d,#202c2b)!important;border-color:#3b4650!important;color:#d8d2c8}body.app-dark .side-summary .side-stat{color:#a9b0bb;border-bottom-color:#343941}body.app-dark .side-summary .side-stat strong{color:#e0d9cd}body.app-dark .side-summary .side-api{color:#83d0b3}body.app-dark .side-summary-title{color:#ece5d9}</style></head>")
+PAGE = PAGE.replace("</head>", "<style>body.app-dark .side-summary{background:linear-gradient(145deg,#20252d,#202c2b)!important;border-color:#3b4650!important;color:#d8d2c8}body.app-dark .side-summary .side-stat{color:#a9b0bb;border-bottom-color:#343941}body.app-dark .side-summary .side-stat strong{color:#e0d9cd}body.app-dark .side-summary .side-api{color:#83d0b3}body.app-dark .side-summary-title{color:#ece5d9}#translation-field-5{margin-right:8px;padding:6px 10px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font-size:13px}</style></head>")
 PAGE = PAGE.replace("</body>", "<script>document.addEventListener('click',function(event){const button=event.target.closest('[data-toast]');if(button&&button.textContent.includes('کتابخانه')){event.preventDefault();event.stopImmediatePropagation();location.href='/library'}},true);</script></body>")
 
 
-PAGE = PAGE.replace('<button class="primary" id="submit"', '''<label class="check"><input type="checkbox" name="auto_glossary" value="true" checked>ساخت خودکار واژه‌نامه حین ترجمه</label><p id="auto-glossary-note">برای ثبات اصطلاحات، واژه‌نامهٔ خودکار ترجمه را ترتیبی می‌کند. برای حالت Turbo و ارسال هم‌زمان چند chunk، این گزینه را خاموش کنید.</p><button class="primary" id="submit"''', 1)
+PAGE = PAGE.replace('<button class="primary" id="submit"', '''<div class="glossary-box" id="glossary-box"><div class="glossary-head"><strong>واژه‌نامهٔ کتاب</strong><span class="glossary-count" id="glossary-count">—</span></div><p class="glossary-note" id="glossary-note">واژه‌نامه پیش از ترجمه ساخته می‌شود و شما آن را تأیید می‌کنید؛ حین ترجمه چیزی خودکار اضافه نمی‌شود.</p><div class="glossary-actions"><button type="button" class="btn-secondary" id="glossary-propose" aria-label="ساخت پیشنهاد واژه‌نامه">پیشنهاد واژه‌نامه</button><button type="button" class="btn-secondary" id="glossary-review" hidden aria-label="بازبینی پیشنهادها">بازبینی پیشنهادها</button></div><div class="glossary-status" id="glossary-status" role="status" aria-live="polite"></div></div><input type="hidden" name="auto_glossary" id="auto_glossary_field" value="false"><button class="primary" id="submit"''', 1)
 PAGE = PAGE.replace('<button class="primary" id="submit"', '''<label class="check"><input type="checkbox" name="preserve_voice" value="true" checked>حفظ لحن و صدای نویسنده</label><button class="primary" id="submit"''', 1)
 PAGE = PAGE.replace('<button class="primary" id="submit"', '''<div class="grid2"><div style="grid-column:1/-1"><label>خروجی‌های اضافی پس از ترجمه (اختیاری)</label><div><label class="check"><input type="checkbox" name="outputs" value="json_segments">JSON_SEGMENTS <small>(حافظهٔ ترجمه)</small></label><label class="check"><input type="checkbox" name="outputs" value="txt_bilingual">TXT_BILINGUAL</label><label class="check"><input type="checkbox" name="outputs" value="markdown">MARKDOWN</label><label class="check"><input type="checkbox" name="outputs" value="docx">DOCX</label><label class="check"><input type="checkbox" name="outputs" value="translated_pdf">TRANSLATED_PDF</label><label class="check"><input type="checkbox" name="outputs" value="bilingual_pdf">BILINGUAL_PDF</label><label class="check"><input type="checkbox" name="outputs" value="quality_report">QUALITY_REPORT <small>(امتیاز شش‌بعدی LLM)</small></label><small style="display:block;color:#8892a0;margin-top:4px">سگمنت‌های پرچم‌شده ({NOTE:} / {BOUNDARY_WARNING}) در خروجی‌ها هایلایت شده و در QA_REPORT فهرست می‌شوند.</small></div></div></div><button class="primary" id="submit"''', 1)
-PAGE = PAGE.replace('<button class="primary" id="submit"', '''<label style="display:block;margin:8px 0"><strong>سبک ترجمه:</strong>
-<select name="style_preset" style="margin-right:8px;padding:6px 10px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font-size:13px">
+PAGE = PAGE.replace('</textarea><label class="check"><input type="checkbox" name="debug"', '''</textarea><label style="display:block;margin:6px 0"><strong>سبک ترجمه:</strong>
+<select name="style_preset" id="translation-field-5">
 <option value="literary" selected>📖 ادبی</option>
 <option value="technical">⚙️ فنی</option>
 <option value="conversational">💬 محاوره‌ای</option>
 <option value="formal">🏛️ رسمی</option>
-</select></label><button class="primary" id="submit"''', 1)
+</select></label><label class="check"><input type="checkbox" name="debug"''', 1)
 PAGE = PAGE.replace('</body>', '''<script>(()=>{const mode=document.querySelector('[name="mode"]'),auto=document.querySelector('[name="auto_glossary"]');function sync(){auto.disabled=mode.value==='batch'}mode.addEventListener('change',sync);sync()})();</script></body>''', 1)
 
 
-CONVERT_CARD_HTML = r'''<div class="card form-card" id="convert-card" style="margin-top:18px"><div class="section-title"><h2>تبدیل سریع فایل</h2><span class="step">بدون ترجمه</span></div><p class="small" style="color:var(--muted);margin:-8px 0 14px;line-height:1.7">فایل EPUB / PDF / SRT / TXT را انتخاب کنید و فرمت‌های خروجی را تیک بزنید — فایل شما بدون استفاده از هوش مصنوعی، مستقیم به فرمت‌های دیگر تبدیل می‌شود.</p><form id="convert-form"><div class="drop" id="convert-drop"><input type="file" id="convert-book" name="convert_book" accept=".epub,.pdf,.srt,.txt,.md"><div><div class="upload-icon">⇄</div><strong>فایل را اینجا رها کنید یا انتخاب کنید</strong><small>EPUB · PDF · SRT · TXT تا ۱ گیگابایت</small></div></div><div class="file-info" id="convert-file-info" style="display:none"></div><div class="grid2"><div style="grid-column:1/-1"><label>فرمت‌های خروجی</label><div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px"><label class="check"><input type="checkbox" name="convert_outputs" value="txt_bilingual">TXT</label><label class="check"><input type="checkbox" name="convert_outputs" value="markdown">Markdown</label><label class="check"><input type="checkbox" name="convert_outputs" value="docx">DOCX</label><label class="check"><input type="checkbox" name="convert_outputs" value="translated_pdf">PDF</label><label class="check"><input type="checkbox" name="convert_outputs" value="json_segments">JSON</label></div><small style="display:block;color:#8892a0;margin-top:6px">حداقل یک فرمت را انتخاب کنید. خروجی‌ها از متن اصلی فایل ساخته می‌شوند.</small></div></div><button class="primary" id="convert-submit" type="submit">تبدیل فایل</button></form><div id="convert-result" style="display:none;margin-top:16px;padding:14px;background:#f4f7ff;border:1px solid #e3e9f2;border-radius:12px"></div></div>'''
+CONVERT_CARD_HTML = r'''<div class="card form-card" id="convert-card" style="margin-top:18px"><div class="section-title"><h2>تبدیل سریع فایل</h2><span class="step">بدون ترجمه</span></div><p class="small" style="color:var(--muted);margin:-8px 0 14px;line-height:1.7">فایل EPUB / PDF / SRT / TXT را انتخاب کنید و فرمت‌های خروجی را تیک بزنید — فایل شما بدون استفاده از هوش مصنوعی، مستقیم به فرمت‌های دیگر تبدیل می‌شود.</p><form id="convert-form"><div class="drop" id="convert-drop"><input type="file" id="convert-book" name="convert_book" accept=".epub,.pdf,.srt,.txt,.md"><div><div class="upload-icon">⇄</div><strong>فایل را اینجا رها کنید یا انتخاب کنید</strong><small>EPUB · PDF · SRT · TXT تا ۱ گیگابایت</small></div></div><div class="file-info" id="convert-file-info" style="display:none"></div><div class="grid2"><div style="grid-column:1/-1"><label>فرمت‌های خروجی</label><div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px"><label class="check"><input type="checkbox" name="convert_outputs" value="txt_bilingual">TXT</label><label class="check"><input type="checkbox" name="convert_outputs" value="markdown">Markdown</label><label class="check"><input type="checkbox" name="convert_outputs" value="docx">DOCX</label><label class="check"><input type="checkbox" name="convert_outputs" value="translated_pdf">PDF</label><label class="check"><input type="checkbox" name="convert_outputs" value="json_segments">JSON</label></div><small style="display:block;color:#8892a0;margin-top:6px">حداقل یک فرمت را انتخاب کنید. خروجی‌ها از متن اصلی فایل ساخته می‌شوند.</small></div></div><button class="primary" id="convert-submit" type="submit" aria-label="تبدیل فایل به فرمت انتخاب شده">تبدیل فایل</button></form><div id="convert-result" style="display:none;margin-top:16px;padding:14px;background:#f4f7ff;border:1px solid #e3e9f2;border-radius:12px"></div></div>'''
 CONVERT_SCRIPT = r'''<script>(()=>{const form=document.getElementById('convert-form'),fileInput=document.getElementById('convert-book'),drop=document.getElementById('convert-drop'),info=document.getElementById('convert-file-info'),btn=document.getElementById('convert-submit'),result=document.getElementById('convert-result');if(!form)return;const size=n=>n<1024*1024?(n/1024).toFixed(0)+' KB':(n/1024/1024).toFixed(1)+' MB';function fileChanged(){const f=fileInput.files[0];if(!f){info.style.display='none';return}info.textContent=`${f.name} · ${f.name.split('.').pop().toUpperCase()} · ${size(f.size)}`;info.style.display='block'}fileInput.addEventListener('change',fileChanged);['dragenter','dragover'].forEach(e=>drop.addEventListener(e,x=>{x.preventDefault();drop.classList.add('drag')}));['dragleave','drop'].forEach(e=>drop.addEventListener(e,x=>{x.preventDefault();drop.classList.remove('drag')}));drop.addEventListener('drop',e=>{if(e.dataTransfer.files[0]){fileInput.files=e.dataTransfer.files;fileChanged()}});form.addEventListener('submit',async e=>{e.preventDefault();const f=fileInput.files[0];if(!f){alert('فایل را انتخاب کنید.');return}const checked=[...form.querySelectorAll('input[name="convert_outputs"]:checked')].map(i=>i.value);if(!checked.length){alert('حداقل یک فرمت خروجی انتخاب کنید.');return}btn.disabled=true;btn.textContent='در حال تبدیل…';result.style.display='none';try{const fd=new FormData();fd.append('convert_book',f);checked.forEach(v=>fd.append('convert_outputs',v));const r=await fetch('/api/convert',{method:'POST',body:fd}),d=await r.json();if(!r.ok)throw Error(d.error||'تبدیل ناموفق بود');result.innerHTML=`<strong style="color:var(--green)">تبدیل انجام شد ✓</strong><div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px">${d.versions.map(v=>`<a href="${v.download}" style="padding:7px 10px;background:#eaf1ff;color:#2d5ed4;border-radius:8px;font:700 11px Vazirmatn;text-decoration:none">دانلود ${v.name.toUpperCase()}</a>`).join('')}</div>`;result.style.display='block';}catch(err){alert(err.message)}finally{btn.disabled=false;btn.textContent='تبدیل فایل'}}})();</script>'''
 PAGE = PAGE.replace('</section><aside class="side">', CONVERT_CARD_HTML + '</section><aside class="side">', 1)
 PAGE = PAGE.replace('</body>', CONVERT_SCRIPT + '</body>', 1)
+
+# Inject aria-labels into key PAGE buttons
+PAGE = PAGE.replace('id="stop"', 'id="stop" aria-label="توقف امن ترجمه"')
+PAGE = PAGE.replace('id="resume"', 'id="resume" aria-label="ادامهٔ ترجمه از آخرین جای سالم"')
+PAGE = PAGE.replace('id="cancel"', 'id="cancel" aria-label="لغو ترجمه"')
+# Add aria-label to submit button via post-processing
+PAGE = PAGE.replace('<button class="primary" id="submit"', '<button class="primary" id="submit" aria-label="شروع ترجمه"')
+
 PAGE = install_jobs_dashboard(PAGE)
 PAGE = install_workspace(PAGE)
+PAGE = install_glossary_proposal(PAGE)
+
+
+ALLOWED_HOSTS = {"127.0.0.1:8765", "localhost:8765", "127.0.0.1", "localhost"}
+LOOPBACK_HOSTS = {"127.0.0.1", "localhost"}
+ALLOWED_ORIGINS = {"http://127.0.0.1:8765", "http://localhost:8765"}
+MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+
+
+def _loopback_authority(value: str) -> bool:
+    """True for ``127.0.0.1[:port]`` / ``localhost[:port]``.
+
+    The server binds 127.0.0.1 only, so any loopback authority is a page on the
+    user's own machine. This keeps the Vite dev proxy (localhost:5173) working
+    while still refusing pages served from the internet.
+    """
+    host, _, port = value.partition(":")
+    if host not in LOOPBACK_HOSTS:
+        return False
+    return not port or port.isdigit()
+
+
+def _origin_permitted(origin: str) -> bool:
+    origin = origin.strip().rstrip("/")
+    if origin in ALLOWED_ORIGINS:
+        return True
+    return origin.startswith(("http://", "https://")) and _loopback_authority(
+        origin.split("://", 1)[1]
+    )
 
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, format: str, *args: object) -> None: return
+
+    def _reject(self, reason: str) -> None:
+        """Refuse a request that a local page should never have issued."""
+        try:
+            self._json({"error": reason}, 403)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+
+    def _host_allowed(self) -> bool:
+        """Block DNS rebinding.
+
+        If an attacker's domain resolves to 127.0.0.1, the browser treats the
+        response as same-origin to *their* page and will happily hand over the
+        body. That leaks job filenames and provider configuration, so the Host
+        header is checked on every method, including plain GET.
+        """
+        host = (self.headers.get("Host") or "").strip().lower()
+        return not host or _loopback_authority(host)
+
+    def _origin_allowed(self) -> bool:
+        """Reject cross-origin writes.
+
+        A local server with no origin check can be driven by any web page the
+        user visits: a cross-origin POST with ``Content-Type: text/plain`` is a
+        CORS "simple request", so the browser sends it with no preflight and
+        CORS cannot stop it. That would let a page spend the user's provider
+        credits. Two independent checks guard this:
+
+        * ``Sec-Fetch-Site`` is set by the browser and cannot be forged by page
+          script, so it is checked first when present.
+        * ``Origin`` is validated for clients that omit ``Sec-Fetch-Site``
+          (curl, older browsers).
+
+        Only meaningful for state-changing methods: a top-level navigation or
+        an image load legitimately carries no Origin.
+        """
+        if not self._host_allowed():
+            return False
+        if self.command not in MUTATING_METHODS:
+            return True
+        fetch_site = (self.headers.get("Sec-Fetch-Site") or "").strip().lower()
+        if fetch_site and fetch_site not in {"same-origin", "none"}:
+            return False
+        origin = (self.headers.get("Origin") or "").strip()
+        if origin and not _origin_permitted(origin):
+            return False
+        return True
+
+    def _guarded(self) -> bool:
+        if self._origin_allowed():
+            return True
+        self._reject("این درخواست از مبدأ مجاز ارسال نشده است.")
+        return False
+
     def _json(self, payload: dict, status: int = 200) -> None:
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status); self.send_header("Content-Type", "application/json; charset=utf-8"); self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data)
@@ -565,7 +845,20 @@ class Handler(BaseHTTPRequestHandler):
             raise ValueError("JSON body must be an object.")
         return payload
     def do_GET(self) -> None:
+        if not self._host_allowed():
+            self._reject("این درخواست از مبدأ مجاز ارسال نشده است."); return
         parsed = urlparse(self.path)
+        if parsed.path.startswith('/api/library/') and '/glossary/proposal' in parsed.path:
+            query = parse_qs(parsed.query)
+            origin = (query.get('origin', ['preflight'])[0] or 'preflight').lower()
+            try:
+                self._json(get_proposal(
+                    db, int(parsed.path.split('/')[3]),
+                    query.get('from', ['EN'])[0], query.get('to', ['FA'])[0], origin,
+                ))
+            except LookupError as exc: self._json({'error': str(exc)}, 404)
+            except ValueError as exc: self._json({'error': str(exc)}, 400)
+            return
         if parsed.path.startswith('/api/library/') and parsed.path.endswith('/glossary'):
             query = parse_qs(parsed.query)
             try:
@@ -587,7 +880,7 @@ class Handler(BaseHTTPRequestHandler):
                 data = src_path.read_bytes(); self.send_response(HTTPStatus.OK); self.send_header("Content-Type", "text/html; charset=utf-8"); self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data); return
             self.send_error(404); return
         if parsed.path == "/workspace":
-            data = inject_language_switcher(PAGE).encode("utf-8"); self.send_response(HTTPStatus.OK); self.send_header("Content-Type", "text/html; charset=utf-8"); self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data); return
+            data = inject_language_switcher(model_select_html(PAGE)).encode("utf-8"); self.send_response(HTTPStatus.OK); self.send_header("Content-Type", "text/html; charset=utf-8"); self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data); return
         if parsed.path == "/account":
             data = account_page().encode("utf-8"); self.send_response(HTTPStatus.OK); self.send_header("Content-Type", "text/html; charset=utf-8"); self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data); return
         if parsed.path == "/library":
@@ -601,20 +894,47 @@ class Handler(BaseHTTPRequestHandler):
             try: self._json({"book": job.filename, "items": reader_chapters(job.output_path)})
             except (OSError, ValueError, zipfile.BadZipFile) as exc: self._json({"error": str(exc)}, 422)
             return
+        if parsed.path.startswith("/reader/") and "/asset/" in parsed.path:
+            rest = parsed.path[len("/reader/"):]
+            job_id, _, asset_path = rest.partition("/asset/")
+            job = self._job(unquote(job_id))
+            if not job or job.filetype != "epub" or not job.output_path or not job.output_path.is_file():
+                self.send_error(404); return
+            try:
+                payload, mime = reader_read_asset(job.output_path, asset_path)
+            except (FileNotFoundError, ValueError, OSError, zipfile.BadZipFile):
+                self.send_error(404); return
+            # An SVG is same-origin active content, so it is served in a
+            # sandbox that blocks script execution and outbound requests.
+            sandbox = "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:"
+            self.send_response(200)
+            self.send_header("Content-Type", mime)
+            self.send_header("Content-Length", str(len(payload)))
+            self.send_header("Content-Security-Policy", sandbox)
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Cache-Control", "private, max-age=86400")
+            if mime == "image/svg+xml":
+                self.send_header("Content-Disposition", "inline")
+            self.end_headers(); self.wfile.write(payload); return
         if parsed.path.startswith("/api/reader/") and "/chapters/" in parsed.path:
             pieces = parsed.path.split("/")
             job = self._job(pieces[3])
             if not job or job.filetype != "epub" or not job.output_path or not job.output_path.is_file(): self._json({"error": "Translated EPUB is not available yet."}, 404); return
+            asset_prefix = f"/reader/{job.id}/asset"
             try:
                 chapter_id = int(pieces[5])
                 if len(pieces) > 6 and pieces[6] == "blocks":
                     if not job.paths:
                         self._json({"error": "Original chapter data is not available."}, 404); return
-                    self._json({"items": reader_chapter_blocks(job.paths, job.output_path, chapter_id)})
+                    self._json({"items": reader_chapter_blocks(job.paths, job.output_path, chapter_id, asset_prefix=asset_prefix)})
                 else:
-                    self._json(reader_chapter(job.output_path, chapter_id))
+                    self._json(reader_chapter(job.output_path, chapter_id, asset_prefix=asset_prefix))
             except (IndexError, ValueError, OSError, zipfile.BadZipFile) as exc: self._json({"error": str(exc)}, 404)
             return
+        if parsed.path.startswith("/workspace/job/"):
+            job = self._job(parsed.path.rstrip("/").rsplit("/", 1)[-1])
+            if not job: self.send_error(404); return
+            data = job_detail_page(job.id).encode("utf-8"); self.send_response(HTTPStatus.OK); self.send_header("Content-Type", "text/html; charset=utf-8"); self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data); return
         if parsed.path.startswith("/reader/"):
             job = self._job(parsed.path.rsplit("/", 1)[-1])
             if not job or job.filetype != "epub" or not job.output_path or not job.output_path.is_file(): self.send_error(404); return
@@ -651,7 +971,7 @@ class Handler(BaseHTTPRequestHandler):
                 "base_url": config.get("base_url") or DEFAULT_BASE_URL,
                 "has_api_key": bool(config.get("api_key")),
                 "default_model": translation_config.get("default_model", DEFAULT_MODEL),
-                "max_concurrency": max(1, min(int(translation_config.get("max_concurrency", 3)), 12)),
+                "max_concurrency": max(1, min(int(translation_config.get("max_concurrency", 3)), MAX_TRANSLATION_CONCURRENCY)),
             }); return
         if parsed.path == "/api/glossaries":
             self._json({"items": db.fetch_all("SELECT g.*, COUNT(t.id) AS term_count FROM glossaries g LEFT JOIN glossary_terms t ON t.glossary_id=g.id GROUP BY g.id ORDER BY g.name")}); return
@@ -686,6 +1006,8 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path.startswith("/api/jobs/") and parsed.path.endswith("/logs"):
             job_id = parsed.path.split("/")[-2]
             self._json({"items": db.fetch_all("SELECT * FROM job_events WHERE job_id=? ORDER BY timestamp ASC", (job_id,))}); return
+        if parsed.path.startswith("/api/jobs/") and parsed.path.endswith("/chunks"):
+            self._json(_job_chunks_payload(self._job(parsed.path.split("/")[-2]))); return
         if parsed.path == "/api/health":
             try:
                 config = get_openai_config()
@@ -743,6 +1065,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         self.send_error(404)
     def do_POST(self) -> None:
+        if not self._guarded(): return
         path=urlparse(self.path).path
         if path.startswith('/api/library/') and path.endswith('/translate'):
             try:
@@ -933,6 +1256,15 @@ class Handler(BaseHTTPRequestHandler):
             job=self._job(path.split("/")[-2])
             if not job or job.filetype!="epub" or not job.pipeline_job_id or job.status not in {"paused","failed"}: self._json({"error":"این کار قابل ادامه نیست."},400); return
             job.stop_event=threading.Event(); job.cancel_requested=False; job.status="queued"; job.error=None; job.last_activity=job.updated_at=now(); _persist_job(job); _job_event(job, "resume_queued", "ادامه از آخرین جای سالم وارد صف شد."); threading.Thread(target=_run_job,args=(job,),kwargs={"resume":True},daemon=True).start(); self._json({"ok":True},202); return
+        if path.startswith('/api/library/') and path.endswith('/glossary/propose'):
+            try: body = self._request_json()
+            except (ValueError, json.JSONDecodeError) as exc: self._json({"error": str(exc)}, 400); return
+            try:
+                self._json(_generate_proposal(int(path.split('/')[3]), body), 201)
+            except LookupError as exc: self._json({'error': str(exc)}, 404)
+            except (ValueError, TypeError) as exc: self._json({'error': str(exc)}, 400)
+            except Exception as exc: self._json({'error': _friendly_error(exc)}, 502)
+            return
         if path.startswith("/api/jobs/") and path.endswith("/rescue"):
             job = self._job(path.split("/")[-2])
             if not job: self._json({"error": "Job not found."}, 404); return
@@ -967,24 +1299,52 @@ class Handler(BaseHTTPRequestHandler):
         except (OSError, ValueError) as exc:
             if input_path.exists(): input_path.unlink()
             self._json({"error":str(exc)},400); return
-        options={key:fields.get(key,"").strip() for key in ("from_lang","to_lang","model","mode","prompt","debug")}; options["preserve_voice"] = fields.get("preserve_voice", "false"); options["from_lang"]=options["from_lang"] or "EN"; options["to_lang"]=options["to_lang"] or "FA"; options["model"]=options["model"] or DEFAULT_MODEL; options["mode"]=options["mode"] or "fast"; options["outputs"]=fields.get("outputs",""); options["style_preset"]=fields.get("style_preset","literary")
+        options={key:fields.get(key,"").strip() for key in ("from_lang","to_lang","model","mode","prompt","debug")}
+        options["preserve_voice"] = fields.get("preserve_voice", "false")
+        options["from_lang"] = options["from_lang"] or "EN"
+        options["to_lang"] = options["to_lang"] or "FA"
+        # An empty model field resolves through config.yaml, not the code
+        # constant, so the form and the pipeline agree on the default.
+        options["model"] = options["model"] or resolve_default_model()
+        if not is_supported_model(options["model"]):
+            # Reject here rather than letting an unknown name reach the
+            # provider, where it would fail on the first paid chunk.
+            self._json({"error": "مدل «%s» پشتیبانی نمی‌شود." % options["model"]}, 400)
+            return
+        options["mode"] = options["mode"] or "fast"
+        options["outputs"] = fields.get("outputs", "")
+        options["style_preset"] = fields.get("style_preset", "literary")
         job=Job(job_id,filename,input_path,suffix.lstrip("."),len(upload_data),options,options["from_lang"],options["to_lang"],options["model"],options["mode"],style=options.get("style_preset","literary"))
         with JOBS_LOCK: JOBS[job_id]=job
         _persist_job(job)
         _job_event(job, "queued", "کتاب به صف ترجمه اضافه شد.")
+        book_id = None
         try:
             book_id = _ensure_library_source(job)
             snapshot = get_glossary(db, book_id, options['from_lang'], options['to_lang'])
+            # glossary_mode is the explicit switch; the form field is only a
+            # compatibility shim for clients that still send the old checkbox.
             snapshot['auto_extract'] = fields.get('auto_glossary', 'false') == 'true' and options['mode'] not in {'batch', 'resumebatch', 'batchcheck', 'test'}
             options['glossary_snapshot'] = json.dumps(snapshot, ensure_ascii=False)
             _persist_job(job)
         except Exception:
             # The translation Job remains authoritative if the library index is unavailable.
             pass
-        threading.Thread(target=_run_job,args=(job,),daemon=True).start(); self._json({"id":job_id},201)
+        threading.Thread(target=_run_job,args=(job,),daemon=True).start()
+        self._json({"id": job_id, "book_id": book_id,
+                    "from_lang": options["from_lang"], "to_lang": options["to_lang"]},201)
 
     def do_PUT(self) -> None:
+        if not self._guarded(): return
         path = urlparse(self.path).path
+        if path.startswith('/api/library/') and '/glossary/proposal/approve' in path:
+            try: body = self._request_json()
+            except (ValueError, json.JSONDecodeError) as exc: self._json({"error": str(exc)}, 400); return
+            try:
+                self._json(_approve_proposal(int(path.split('/')[3]), body))
+            except LookupError as exc: self._json({'error': str(exc)}, 404)
+            except (ValueError, TypeError) as exc: self._json({'error': str(exc)}, 400)
+            return
         if path.startswith('/api/library/') and path.endswith('/glossary'):
             try:
                 self._json(save_glossary(db, int(path.split('/')[3]), self._request_json()))
@@ -1008,8 +1368,10 @@ class Handler(BaseHTTPRequestHandler):
                 translation_config = dict(config.get("translation") or {})
                 translation_config["default_model"] = default_model
                 max_concurrency = int(body.get("max_concurrency", translation_config.get("max_concurrency", 3)))
-                if not 1 <= max_concurrency <= 12:
-                    raise ValueError("تعداد درخواست هم‌زمان باید بین 1 تا 12 باشد.")
+                if not 1 <= max_concurrency <= MAX_TRANSLATION_CONCURRENCY:
+                    raise ValueError(
+                        f"تعداد درخواست هم‌زمان باید بین 1 تا {MAX_TRANSLATION_CONCURRENCY} باشد."
+                    )
                 translation_config["max_concurrency"] = max_concurrency
                 config["translation"] = translation_config
                 write_config(config)
@@ -1060,6 +1422,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_error(404)
 
     def do_DELETE(self) -> None:
+        if not self._guarded(): return
         path = urlparse(self.path).path
         parts = path.strip("/").split("/")
         if len(parts) == 3 and parts[0:2] == ["api", "jobs"]:

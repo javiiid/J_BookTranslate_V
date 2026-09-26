@@ -173,7 +173,13 @@ class PDFHandler:
         PDFHandler.compress_pdf(temp_pdf_path, output_pdf_path)
 
     @staticmethod
-    def transcribe_pdf(client, input_pdf_path, paths, dpi=150, batch=False):
+    def transcribe_pdf(client, input_pdf_path, paths, dpi=150, batch=False, model=None):
+        # The vision call used to hardcode "gpt-5.6-terra", so every PDF paid
+        # for the transcription step with a model the user never chose. Resolve
+        # it the same way the rest of the pipeline does.
+        if model is None:
+            from app.core.models import resolve_default_model
+            model = resolve_default_model()
         input_pdf_path = Path(input_pdf_path)
         if not input_pdf_path.exists():
             print(f"Error: Input file not found: {input_pdf_path}")
@@ -245,7 +251,7 @@ class PDFHandler:
             print(f"Processing page {page_num + 1} of {len(list(output_dir.glob('*.png')))}")
 
             response = client.chat.completions.create(
-                model="gpt-5.6-terra",
+                model=model,
                 messages=[
                     {
                         "role": "user",

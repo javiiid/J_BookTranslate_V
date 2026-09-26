@@ -76,7 +76,14 @@ def test_disabled_and_stopped_jobs_make_no_extraction_request(tmp_path):
     client.chat.completions.create.assert_not_called()
 
 
-def test_new_terms_reach_next_chunk_and_resume_is_idempotent(tmp_path):
+def test_new_terms_reach_next_chunk_and_resume_is_idempotent(tmp_path, monkeypatch):
+    """glossary_mode=inline propagates terms within a run.
+
+    This is the tight-terminology path, and it is inherently sequential: chunks
+    that are in flight at the same time cannot see each other's terms, so the
+    mode forces max_workers=1. That is why it is not the default.
+    """
+    _force_glossary_mode(monkeypatch, 'inline')
     paths = paths_for(tmp_path)
     client = Mock()
     translation_prompts = []
@@ -95,6 +102,43 @@ def test_new_terms_reach_next_chunk_and_resume_is_idempotent(tmp_path):
     assert client.chat.completions.create.call_count == 4
     process_translations(client, chunks, translated, 'resume', 'EN', 'FA', paths)
     assert client.chat.completions.create.call_count == 4
+
+
+def test_deferred_mode_keeps_workers_busy_and_still_learns_terms(tmp_path, monkeypatch):
+    """glossary_mode=deferred (the default) trades within-run propagation for speed.
+
+    Terms are still learned and persisted, they just land after the translating
+    chunks instead of between them. The next run sees them.
+    """
+    _force_glossary_mode(monkeypatch, 'deferred')
+    paths = paths_for(tmp_path)
+    client = Mock()
+    order = []
+    def create(**kwargs):
+        system = kwargs['messages'][0]['content']
+        if system.startswith('Extract a concise book glossary'):
+            return response(json.dumps({'terms': [candidate()]}))
+        order.append(('translate', kwargs['messages'][1]['content'][:20]))
+        return response('آن آمد.')
+    client.chat.completions.create.side_effect = create
+    chunks = [('first', 'Ann arrives.'), ('second', 'Ann returns.')]
+
+    translated, _, _ = process_translations(client, chunks, {}, 'fast', 'EN', 'FA', paths)
+
+    # Every translation request is issued before any glossary request, which is
+    # what lets several chunks stay in flight.
+    kinds = [kind for kind, _ in order]
+    first_glossary = kinds.index('glossary') if 'glossary' in kinds else len(kinds)
+    assert kinds[:first_glossary] == ['translate'] * len(chunks), order
+
+    # The terms were still learned and saved for the next run.
+    state = json.loads((tmp_path / 'glossary_learned.json').read_text())
+    assert sorted(state['processed_chunks']) == ['first', 'second']
+    assert translated.keys() == {'first', 'second'}
+
+
+def _force_glossary_mode(monkeypatch, mode):
+    monkeypatch.setattr('app.translation.translator._glossary_mode', lambda: mode)
 
 
 def test_resume_recovers_extraction_after_translation_checkpoint(tmp_path):

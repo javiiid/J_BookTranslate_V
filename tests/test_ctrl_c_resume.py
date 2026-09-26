@@ -7,8 +7,39 @@ import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+import app.translation.translator as translator_module
 from app.translation.translator import process_translations
 import app.core.retry as retry_module
+
+
+class _PinnedConcurrency:
+    """Pin the worker count and disable pacing for the duration of a test.
+
+    These tests assert *resume semantics* - nothing is falsely marked complete,
+    and a later run picks up where the interrupted one stopped. Those properties
+    do not depend on how many chunks may be in flight, but the number of API
+    calls made before an interrupt does. Reading the ceiling from
+    config/config.yaml made the suite change behaviour when that file changed,
+    so the environment is pinned here instead.
+    """
+
+    def __init__(self, workers=1):
+        self.workers = workers
+        self._mode = None
+        self._workers = None
+        self._limiter = None
+
+    def __enter__(self):
+        self._workers = translator_module._translation_concurrency
+        self._limiter = translator_module._build_rate_limiter
+        translator_module._translation_concurrency = lambda: self.workers
+        translator_module._build_rate_limiter = lambda concurrency: None
+        return self
+
+    def __exit__(self, *exc):
+        translator_module._translation_concurrency = self._workers
+        translator_module._build_rate_limiter = self._limiter
+        return False
 
 
 # ============================================================
@@ -67,6 +98,7 @@ class FakeCompletions:
         model,
         messages,
         temperature=0.2,
+        **kwargs,
     ):
         chunk_id = messages[1]["content"]
 
@@ -296,16 +328,18 @@ def test_ctrl_c_save_and_resume():
 
         try:
 
-            process_translations(
-                client=client,
-                all_chunks=all_chunks,
-                translations=translations,
-                mode="fast",
-                from_lang="EN",
-                to_lang="FA",
-                paths=paths,
-                model="gpt-5.6-terra",
-            )
+            with _PinnedConcurrency(workers=1):
+
+                process_translations(
+                    client=client,
+                    all_chunks=all_chunks,
+                    translations=translations,
+                    mode="fast",
+                    from_lang="EN",
+                    to_lang="FA",
+                    paths=paths,
+                    model="gpt-5.6-terra",
+                )
 
         except KeyboardInterrupt:
 
@@ -398,12 +432,8 @@ def test_ctrl_c_save_and_resume():
         )
 
         assert (
-            phase1_calls
-            == [
-                "chunk-0",
-                "chunk-1",
-                "chunk-2",
-            ]
+            len(phase1_calls) == 3
+            and set(phase1_calls) == {"chunk-0", "chunk-1", "chunk-2"}
         )
 
         print(
@@ -446,16 +476,18 @@ def test_ctrl_c_save_and_resume():
         # RESUME TRANSLATION
         # ====================================================
 
-        process_translations(
-            client=resume_client,
-            all_chunks=all_chunks,
-            translations=resumed_translations,
-            mode="resume",
-            from_lang="EN",
-            to_lang="FA",
-            paths=paths,
-            model="gpt-5.6-terra",
-        )
+        with _PinnedConcurrency(workers=1):
+
+            process_translations(
+                client=resume_client,
+                all_chunks=all_chunks,
+                translations=resumed_translations,
+                mode="resume",
+                from_lang="EN",
+                to_lang="FA",
+                paths=paths,
+                model="gpt-5.6-terra",
+            )
 
         # ====================================================
         # VALIDATE FINAL STATE

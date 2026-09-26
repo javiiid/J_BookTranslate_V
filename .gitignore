@@ -30,7 +30,13 @@ ENV/
 
 # API keys / credentials
 *.key
-*.yaml
+# Named rather than a blanket `*.yaml`: a wildcard here also silently drops
+# .github/workflows/*.yaml, docker-compose.yaml, pyproject-style config and any
+# future packaging file, and nothing warns you because git just ignores them.
+# The live key lives in exactly one file, so name that file.
+config/config.yaml
+config/*.local.yaml
+config/*.local.yml
 *.pem
 secrets.json
 credentials.json
@@ -162,6 +168,15 @@ config.local.json
 # ============================================================
 
 data/
+
+# Translated books and rescue archives. Not source: a single PDF export here
+# reached 99 MB, which would bloat the repository permanently since git keeps
+# every blob forever. Note the sibling app/output/ IS source (the output
+# format modules) and stays tracked.
+output/
+
+# Editor/agent tooling that is not part of the application.
+.opencode/
 
 # ============================================================
 # Local Windows Shortcuts
