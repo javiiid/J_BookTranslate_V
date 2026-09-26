@@ -171,9 +171,14 @@ data/
 
 # Translated books and rescue archives. Not source: a single PDF export here
 # reached 99 MB, which would bloat the repository permanently since git keeps
-# every blob forever. Note the sibling app/output/ IS source (the output
-# format modules) and stays tracked.
-output/
+# every blob forever.
+#
+# The leading slash is load-bearing. A bare `output/` matches at ANY depth, so
+# it also swallowed app/output/ -- which is source, the output format modules
+# (convert, docx, pdf, markdown, ...). Verify with:
+#   git check-ignore -v app/output/convert.py
+# and it must print nothing.
+/output/
 
 # Editor/agent tooling that is not part of the application.
 .opencode/
