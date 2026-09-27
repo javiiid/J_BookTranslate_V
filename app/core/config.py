@@ -278,3 +278,65 @@ def get_translation_config():
     )
 
     return translation_config
+
+
+# ============================================================
+
+# Chunking. The defaults here describe the *old* behaviour, because turning this
+# on changes every chunk boundary in every book and that is not a decision to make
+# by default in someone's working install.
+
+SEMANTIC_CHUNKING_DEFAULT = False
+CHUNK_MAX_TOKENS_DEFAULT = 1200
+CHUNK_CONTEXT_WINDOW_DEFAULT = 2
+
+
+def get_chunking_config():
+    """
+    Return the chunking settings, with defaults filled in.
+
+    Keys, all under ``translation`` in config.yaml:
+
+        semantic_chunking   bool     use the paragraph-first chunker
+        chunk_max_tokens    int      budget per chunk, in estimated tokens
+        chunk_context_window int     preceding blocks of context to send
+
+    Why a flag at all: chunks are identified by position -- ``chunk-0``,
+    ``chunk-1`` -- and a saved translation is keyed by that id. Changing the
+    chunker changes what ``chunk-7`` *is*, so a job resumed after the change
+    would keep some translations and redo others, and the output book would mix
+    two different segmentations. This has to be a deliberate switch, taken with
+    the job history in mind.
+    """
+
+    settings = get_translation_config()
+
+    def _as_bool(value, fallback):
+        if value is None:
+            return fallback
+        if isinstance(value, bool):
+            return value
+        return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+    def _as_int(value, fallback, minimum=0):
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            return fallback
+        return max(minimum, parsed)
+
+    return {
+        "semantic_chunking": _as_bool(
+            settings.get("semantic_chunking"),
+            SEMANTIC_CHUNKING_DEFAULT,
+        ),
+        "chunk_max_tokens": _as_int(
+            settings.get("chunk_max_tokens"),
+            CHUNK_MAX_TOKENS_DEFAULT,
+            minimum=100,
+        ),
+        "chunk_context_window": _as_int(
+            settings.get("chunk_context_window"),
+            CHUNK_CONTEXT_WINDOW_DEFAULT,
+        ),
+    }

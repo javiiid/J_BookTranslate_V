@@ -2,7 +2,7 @@
 # app/pipeline/pipeline.py
 # ============================================================
 """
-Main translation pipeline for J Book Translate.
+Main translation pipeline for KALIMA.
 
 Responsibilities
 ----------------
@@ -240,6 +240,10 @@ def _translate_epub(
     chapter_map = {}
     translations = {}
 
+    # chunk_id -> plain text of the preceding chunks. Empty unless semantic
+    # chunking is enabled; see app/pipeline/semantic_chunker.py.
+    chunk_contexts = {}
+
     try:
 
         # ====================================================
@@ -380,6 +384,15 @@ def _translate_epub(
                 {},
             )
 
+            # Preceding-chunk context, keyed by chunk id. Saved with the job so a
+            # resumed run gives the model the same context the first run did --
+            # otherwise a resumed book would quietly translate its later chunks
+            # blind, which is the whole point of the feature.
+            chunk_contexts = existing_state.get(
+                "chunk_contexts",
+                {},
+            )
+
             translations = existing_state.get(
                 "translations",
                 {},
@@ -407,7 +420,7 @@ def _translate_epub(
                 "[translate]"
             )
 
-            all_chunks, chapter_map = (
+            all_chunks, chapter_map, chunk_contexts = (
                 EPUBHandler.build_chunks(
                     input_path
                 )
@@ -426,6 +439,7 @@ def _translate_epub(
                 paths,
                 all_chunks,
                 chapter_map,
+                chunk_contexts,
             )
 
             translations = {}
@@ -507,6 +521,7 @@ def _translate_epub(
                 translation_prompt=translation_prompt,
                 stop_event=stop_event,
                 style_preset=style_preset,
+                chunk_contexts=chunk_contexts,
             )
         )
 
@@ -1617,7 +1632,7 @@ def translate(
         "=" * 60
     )
     print(
-        "J BOOK TRANSLATE PIPELINE"
+        "KALIMA PIPELINE"
     )
     print(
         "=" * 60

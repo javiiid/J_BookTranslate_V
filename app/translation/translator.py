@@ -493,12 +493,20 @@ def translate_chunk(
     glossary_snapshot=None,
     style_preset: str | None = None,
     rate_limiter: Any = None,
+    context_before: str | None = None,
 ) -> str:
     """
     Translate one chunk.
 
     This function performs exactly one API request per
     invocation of api_operation().
+
+    ``context_before`` is the plain text of the preceding chunks, supplied by the
+    semantic chunker. It is sent to the model so pronouns and recurring names
+    resolve, and it is sent in a *separate* message with an explicit instruction
+    not to translate it -- concatenating it into the payload would risk the model
+    translating the context and the caller storing a translation that does not
+    correspond to the chunk it asked for.
 
     Retry behavior is controlled by retry_operation().
     """
@@ -591,19 +599,32 @@ def translate_chunk(
         from app.presets.manager import get_preset_params
         preset_params = get_preset_params(style_preset)
 
+        # The context goes in its own message, ahead of the chunk, and only when
+        # there is some. It costs no extra request -- it rides in the same one.
+        messages = [{"role": "system", "content": system_message}]
+
+        preceding = (context_before or "").strip()
+        if preceding:
+            from app.pipeline.semantic_chunker import CONTEXT_HEADER
+            messages.append(
+                {
+                    "role": "user",
+                    "content": f"{CONTEXT_HEADER}\n\n{preceding}",
+                }
+            )
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": "Understood. I will translate only the next passage.",
+                }
+            )
+
+        messages.append({"role": "user", "content": text})
+
         try:
             response = client.chat.completions.create(
                 model=model,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": system_message,
-                    },
-                    {
-                        "role": "user",
-                        "content": text,
-                    },
-                ],
+                messages=messages,
                 temperature=preset_params.get("temperature", 0.2),
                 top_p=preset_params.get("top_p", 1.0),
                 presence_penalty=preset_params.get(
@@ -1165,8 +1186,10 @@ def _process_fast_resume_sequential(
     system_prompt_text: str | None,
     stop_event: Any = None,
     style_preset: str | None = None,
+    chunk_contexts: dict[str, str] | None = None,
 ) -> tuple[dict[str, Any], None, None]:
     """
+    Sequential path. Taken when concurrency is 1, when resuming, or for tests.
     Process chunks sequentially.
 
     Every successful translation is saved immediately.
@@ -1315,6 +1338,7 @@ def _process_fast_resume_sequential(
                 system_prompt_text=system_prompt_text,
                 glossary_snapshot=glossary_snapshot,
                 style_preset=style_preset,
+                context_before=(chunk_contexts or {}).get(str(chunk_id)),
             )
 
             # ------------------------------------------------
@@ -1595,6 +1619,7 @@ def _process_fast_resume(
     system_prompt_text: str | None,
     stop_event: Any = None,
     style_preset: str | None = None,
+    chunk_contexts: dict[str, str] | None = None,
 ) -> tuple[dict[str, Any], None, None]:
     """Translate chunks concurrently while persisting each completed result."""
     max_workers = _translation_concurrency()
@@ -1614,7 +1639,7 @@ def _process_fast_resume(
         return _process_fast_resume_sequential(
             client, all_chunks, translations, mode, from_lang, to_lang,
             paths, model, test_translations, filetype, system_prompt_text,
-            stop_event, style_preset,
+            stop_event, style_preset, chunk_contexts,
         )
 
     total_chunks = len(all_chunks)
@@ -1643,6 +1668,7 @@ def _process_fast_resume(
             filetype=filetype,
             system_prompt_text=system_prompt_text,
             glossary_snapshot=snapshot,
+            context_before=(chunk_contexts or {}).get(str(chunk_id)),
         )
         translated_text = _clean_translation(translated_text)
         if not translated_text:
@@ -1851,6 +1877,7 @@ def process_translations(
     system_prompt_text: str | None = None,
     stop_event: Any = None,
     style_preset: str | None = None,
+    chunk_contexts: dict[str, str] | None = None,
 ) -> tuple[dict[str, Any], Any, Any]:
     """
     Main translation workflow dispatcher.
@@ -1885,6 +1912,11 @@ def process_translations(
 
         test:
             Use local test translations without API calls.
+
+    ``chunk_contexts`` maps a chunk id to the plain text of the chunks before it.
+    The semantic chunker produces it; it is passed straight through to the model
+    and never stored as a translation. Empty or None means every chunk is
+    translated blind, which is the historical behaviour.
     """
 
     # Signature used to default to "gpt-5.6-terra"; resolve from config instead.
@@ -1978,6 +2010,7 @@ def process_translations(
             system_prompt_text=system_prompt_text,
             stop_event=stop_event,
             style_preset=style_preset,
+            chunk_contexts=chunk_contexts,
         )
 
     # ========================================================

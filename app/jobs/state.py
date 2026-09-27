@@ -112,15 +112,30 @@ def load_job_state(paths):
         return None
 
 
-def save_chunks(paths, all_chunks, chapter_map):
+def save_chunks(paths, all_chunks, chapter_map, chunk_contexts=None):
+    """Persist the chunk list, the position map, and any per-chunk context.
+
+    ``chunk_contexts`` maps a chunk id to the plain text of the chunks before it.
+    It is written alongside the chunks so a resumed job gives the model the same
+    context the first run did. Without it a resumed book translates its later
+    chunks blind, which is the defect the semantic chunker exists to remove.
+    """
     with state_lock(paths):
         chunks = deduplicate_chunks(all_chunks)
         chunk_ids = {str(chunk_id) for chunk_id, _ in chunks}
         clean_map = {chunk_id: value for chunk_id, value in chapter_map.items() if str(chunk_id) in chunk_ids}
-        _atomic_json(paths["chunks_file"], {
+        clean_contexts = {
+            str(chunk_id): text
+            for chunk_id, text in (chunk_contexts or {}).items()
+            if str(chunk_id) in chunk_ids and text
+        }
+        payload = {
             "chunks": [(chunk_id, text) for chunk_id, text in chunks],
             "chapter_map": {chunk_id: {"item": str(item), "pos": pos} for chunk_id, (item, pos) in clean_map.items()},
-        })
+        }
+        if clean_contexts:
+            payload["chunk_contexts"] = clean_contexts
+        _atomic_json(paths["chunks_file"], payload)
 
 
 def save_system_prompt(paths, prompt):

@@ -79,9 +79,13 @@ def _make_pdf(path: Path, scanned: bool = False) -> Path:
 def test_small_epub_and_complex_unicode_html(tmp_path):
     source = _make_epub(tmp_path / "unicode.epub", "<p>سلام العربية Ελληνικά</p><div><em>nested</em></div>")
     validate_book(source)
-    chunks, chapter_map = EPUBHandler.build_chunks(source)
+    # build_chunks returns a third value, the per-chunk context map, as of the
+    # semantic chunker. It is empty while `semantic_chunking` is off, which is
+    # the default.
+    chunks, chapter_map, contexts = EPUBHandler.build_chunks(source)
     assert chunks
     assert chapter_map
+    assert contexts == {}
     assert any("سلام" in text and "العربية" in text for _, text in chunks)
 
 
