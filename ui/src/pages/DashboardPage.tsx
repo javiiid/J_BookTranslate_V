@@ -1,20 +1,41 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { api } from '@/lib/api'
-import { BADGE_CLASS, STATUS_FA, fa, faBytes, faDuration } from '@/lib/format'
+import { STATUS_FA, badgeClass, fa, faBytes, faDuration } from '@/lib/format'
 import { ApiStatus } from '@/components/ApiStatus'
+import { KalimaMark } from '@/components/AppShell'
 import { useTheme } from '@/hooks/useTheme'
 
+/**
+ * A stat tile.
+ *
+ * The old version tinted the whole card with `color-mix` on a tone colour and
+ * coloured the number. On the new palette that produced a muddy wash, and the
+ * number's colour was the only thing separating it from the label. Now the tile
+ * is a plain surface and the tone is carried by a small edge marker, which
+ * keeps the number itself at full text contrast.
+ */
 function StatCard({ label, value, tone }: { label: string; value: string; tone: string }) {
   return (
     <div
-      className="rounded-2xl border p-4 transition-shadow hover:shadow-md"
-      style={{ background: `color-mix(in srgb, ${tone} 8%, var(--surface))`, borderColor: `color-mix(in srgb, ${tone} 32%, transparent)` }}
+      className="relative overflow-hidden rounded-[var(--radius-card)] border p-[var(--spacing-4)]"
+      style={{ background: 'var(--color-surface)', borderColor: 'var(--color-border)' }}
     >
-      <span className="block text-[11px] font-semibold" style={{ color: 'var(--muted)' }}>
+      <span
+        className="absolute inset-block-0 start-0 w-[3px]"
+        style={{ background: tone }}
+        aria-hidden="true"
+      />
+      <span
+        className="block ps-2 text-[length:var(--text-caption)] font-semibold"
+        style={{ color: 'var(--color-text-muted)' }}
+      >
         {label}
       </span>
-      <strong className="mt-1 block text-2xl font-extrabold" style={{ color: tone }}>
+      <strong
+        className="mt-[var(--spacing-1)] block ps-2 text-[length:var(--text-h1)] font-extrabold tabular-nums"
+        style={{ color: 'var(--color-text-primary)' }}
+      >
         {value}
       </strong>
     </div>
@@ -29,73 +50,76 @@ export function DashboardPage() {
   const models = useQuery({ queryKey: ['models'], queryFn: api.models, staleTime: 60_000 })
 
   return (
-    <main className="px-6 py-8" dir="rtl">
-      <header className="mb-6 flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-extrabold tracking-tight">میز کار ترجمه</h1>
-          <p className="mt-1 text-sm" style={{ color: 'var(--muted)' }}>
-            رابط جدید React — روی همان API پایتون
-          </p>
+    <main className="py-[var(--spacing-8)]" dir="rtl">
+      <header className="mb-[var(--spacing-6)] flex flex-wrap items-start justify-between gap-[var(--spacing-4)]">
+        <div className="flex items-center gap-[var(--spacing-3)]">
+          <KalimaMark size={40} />
+          <div>
+            <h1 className="text-[length:var(--text-h1)] font-extrabold tracking-tight">
+              میز کار ترجمه
+            </h1>
+            <p className="mt-[var(--spacing-1)] text-[length:var(--text-small)]" style={{ color: 'var(--color-text-muted)' }}>
+              KALIMA — رابط React روی همان API پایتون
+            </p>
+          </div>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           <ApiStatus />
           <button
             type="button"
             onClick={toggle}
             aria-pressed={theme === 'dark'}
             aria-label="تغییر حالت روشن و تاریک"
-            className="grid h-10 w-10 place-items-center rounded-full border text-sm"
-            style={{ background: 'var(--surface)', borderColor: 'var(--line)' }}
+            className="btn-icon"
           >
-            {theme === 'dark' ? '☀' : '◐'}
+            <span aria-hidden="true">{theme === 'dark' ? '☀' : '◐'}</span>
           </button>
         </div>
       </header>
 
-      <section aria-label="خلاصهٔ وضعیت" className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatCard label="ترجمه‌های فعال" value={fa(summary.data?.active_jobs)} tone="var(--blue)" />
-        <StatCard label="متوقف‌شده" value={fa(summary.data?.paused_jobs)} tone="var(--amber)" />
-        <StatCard label="تکمیل‌شده" value={fa(summary.data?.completed_jobs)} tone="var(--green)" />
-        <StatCard label="دارای خطا" value={fa(summary.data?.failed_jobs)} tone="var(--red)" />
+      <section aria-label="خلاصهٔ وضعیت" className="mb-[var(--spacing-6)] grid grid-cols-2 gap-[var(--spacing-3)] lg:grid-cols-4">
+        <StatCard
+          label="ترجمه‌های فعال"
+          value={fa(summary.data?.active_jobs)}
+          tone="var(--color-primary)"
+        />
+        <StatCard label="متوقف‌شده" value={fa(summary.data?.paused_jobs)} tone="var(--color-warning)" />
+        <StatCard label="تکمیل‌شده" value={fa(summary.data?.completed_jobs)} tone="var(--color-success)" />
+        <StatCard label="دارای خطا" value={fa(summary.data?.failed_jobs)} tone="var(--color-error)" />
       </section>
 
-      <section className="mb-6 grid gap-4 sm:grid-cols-3">
-        <div className="surface-card p-4">
-          <span className="text-[11px]" style={{ color: 'var(--muted)' }}>
-            کتاب‌های کتابخانه
-          </span>
-          <strong className="mt-1 block text-xl font-extrabold">{fa(summary.data?.total_books)}</strong>
+      <section className="mb-[var(--spacing-6)] grid gap-[var(--spacing-3)] sm:grid-cols-3">
+        <div className="surface-card p-[var(--spacing-4)]">
+          <span className="data-label">کتاب‌های کتابخانه</span>
+          <strong className="data-value text-[length:var(--text-h2)]">{fa(summary.data?.total_books)}</strong>
         </div>
-        <div className="surface-card p-4">
-          <span className="text-[11px]" style={{ color: 'var(--muted)' }}>
-            فضای آزاد
-          </span>
-          <strong className="mt-1 block text-xl font-extrabold">
-            {faBytes(summary.data?.storage_free)}
-          </strong>
+        <div className="surface-card p-[var(--spacing-4)]">
+          <span className="data-label">فضای آزاد</span>
+          <strong className="data-value text-[length:var(--text-h2)]">{faBytes(summary.data?.storage_free)}</strong>
         </div>
-        <div className="surface-card p-4">
-          <span className="text-[11px]" style={{ color: 'var(--muted)' }}>
-            مدل‌های در دسترس
-          </span>
-          <strong className="mt-1 block text-xl font-extrabold">
+        <div className="surface-card p-[var(--spacing-4)]">
+          <span className="data-label">مدل‌های در دسترس</span>
+          <strong className="data-value text-[length:var(--text-h2)]">
             {models.isPending ? '—' : fa(models.data?.items.length)}
           </strong>
         </div>
       </section>
 
-      <section className="surface-card p-5" aria-labelledby="jobs-heading">
-        <div className="mb-4 flex items-center justify-between">
-          <h2 id="jobs-heading" className="text-lg font-extrabold">
+      <section className="surface-card p-[var(--spacing-5)]" aria-labelledby="jobs-heading">
+        <div className="mb-[var(--spacing-4)] flex items-center justify-between gap-[var(--spacing-3)]">
+          <h2 id="jobs-heading" className="text-[length:var(--text-h2)] font-extrabold">
             کارهای اخیر
           </h2>
-          <span className="text-xs" style={{ color: 'var(--muted)' }}>
+          <span
+            className="text-[length:var(--text-caption)]"
+            style={{ color: 'var(--color-text-muted)' }}
+          >
             {jobs.isPending ? 'در حال دریافت…' : `${fa(jobs.data?.items.length)} کار`}
           </span>
         </div>
 
         {jobs.isError ? (
-          <p role="alert" className="rounded-xl border p-4 text-sm" style={{ borderColor: 'var(--red)', color: 'var(--red)' }}>
+          <p role="alert" className="alert alert-error">
             دریافت کارها ممکن نشد. مطمئن شوید سرور پایتون روی ۸۷۶۵ اجرا است.
           </p>
         ) : (
@@ -104,22 +128,39 @@ export function DashboardPage() {
               <li key={job.id}>
                 <Link
                   to={`/jobs/${job.id}`}
-                  className="flex flex-wrap items-center gap-3 rounded-xl border p-3 transition-colors hover:border-[var(--blue)]"
-                  style={{ borderColor: 'var(--line)' }}
+                  className="flex flex-wrap items-center gap-[var(--spacing-3)] rounded-[var(--radius-control)] border p-[var(--spacing-3)] transition-colors"
+                  style={{ borderColor: 'var(--color-border)' }}
+                  onMouseEnter={(event) => {
+                    event.currentTarget.style.borderColor = 'var(--color-primary)'
+                    event.currentTarget.style.background = 'var(--color-surface-elevated)'
+                  }}
+                  onMouseLeave={(event) => {
+                    event.currentTarget.style.borderColor = 'var(--color-border)'
+                    event.currentTarget.style.background = 'transparent'
+                  }}
                 >
                   <span className="min-w-0 flex-1">
-                    <strong className="block truncate text-sm">{job.filename}</strong>
-                    <span className="text-[11px]" style={{ color: 'var(--muted)' }}>
+                    <strong
+                      className="block truncate text-[length:var(--text-body)]"
+                      style={{ color: 'var(--color-text-primary)' }}
+                    >
+                      {job.filename}
+                    </strong>
+                    <span
+                      className="block text-[length:var(--text-caption)]"
+                      style={{ color: 'var(--color-text-muted)' }}
+                    >
                       {job.filetype} · {job.source_language} → {job.target_language} ·{' '}
-                      {job.progress.total ? `${fa(job.progress.completed)}/${fa(job.progress.total)}` : '—'}
+                      {job.progress.total
+                        ? `${fa(job.progress.completed)}/${fa(job.progress.total)}`
+                        : '—'}
                     </span>
                   </span>
+                  <span className={badgeClass(job.status)}>{STATUS_FA[job.status]}</span>
                   <span
-                    className={`rounded-full border px-2.5 py-1 text-[11px] font-bold ${BADGE_CLASS[job.status]}`}
+                    className="text-[length:var(--text-caption)] tabular-nums"
+                    style={{ color: 'var(--color-text-muted)' }}
                   >
-                    {STATUS_FA[job.status]}
-                  </span>
-                  <span className="text-[11px] tabular-nums" style={{ color: 'var(--muted)' }}>
                     {faDuration(job.eta_seconds)}
                   </span>
                 </Link>

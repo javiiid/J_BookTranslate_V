@@ -1,7 +1,17 @@
 import { useCallback, useEffect, useState } from 'react'
 
 /** Storage key shared with the Python pages so the theme never resets while
- *  both UIs coexist. Do not rename without updating design-system/MASTER.md. */
+ *  both UIs coexist.
+ *
+ *  The product was renamed to KALIMA and this key was deliberately not renamed.
+ *  It is a preference already written into every existing user's
+ *  localStorage under the old name; changing it would silently reset their
+ *  theme to light, and since both UIs read the same key, changing it in one
+ *  place would desynchronise them. 31 references across the two codebases
+ *  depend on the exact string.
+ *
+ *  A rename is only safe as a migration: read the old key, write the new one.
+ *  That is a deliberate task, not a rename. */
 export const THEME_KEY = 'jbook-study-dark'
 
 export type Theme = 'light' | 'dark'

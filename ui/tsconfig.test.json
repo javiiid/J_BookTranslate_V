@@ -1,0 +1,39 @@
+{
+  /* The test project is separate because the tests run under Node, not the
+     browser: they need @types/node and node:test, while `src` must not see
+     Node globals. Putting them in one project would either leak `process` into
+     the app or force `skipLibCheck` compromises on the browser side.
+
+     This used to be missing, and `npx tsc --noEmit` passed happily while the
+     tests were never checked at all: a solution-style tsconfig with
+     `files: []` type-checks nothing by itself. `npm run typecheck` runs `tsc -b`
+     so this project is actually built.
+
+     `scripts` is deliberately NOT included. The contrast audit's build entry
+     re-exports the real page components, and including it dragged `src` into a
+     Node project with no DOM lib: `document` and `HTMLInputElement` stopped
+     resolving and produced a dozen errors that had nothing to do with the
+     audit. The audit builds through Vite, which does its own transform, so it
+     needs no type checking of its own. */
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.test.tsbuildinfo",
+    "target": "es2023",
+    "lib": ["ES2023"],
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+    "types": ["node"],
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "erasableSyntaxOnly": true,
+    "skipLibCheck": true
+  },
+  "include": ["tests"]
+}

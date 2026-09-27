@@ -48,16 +48,41 @@ export const ASSET_FA: Record<string, string> = {
   qa_report: 'گزارش کیفیت',
 }
 
-export const BADGE_CLASS: Record<JobStatus, string> = {
-  queued: 'bg-slate-100 text-slate-600 border-slate-200',
-  running: 'bg-blue-50 text-blue-700 border-blue-200',
-  stopping: 'bg-amber-50 text-amber-700 border-amber-200',
-  paused: 'bg-orange-50 text-orange-700 border-orange-200',
-  stopped: 'bg-orange-50 text-orange-700 border-orange-200',
-  completed: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-  failed: 'bg-red-50 text-red-700 border-red-200',
-  cancelled: 'bg-slate-100 text-slate-600 border-slate-200',
+/**
+ * Status presentation.
+ *
+ * These used to be Tailwind colour classes (`bg-emerald-50 text-emerald-700`
+ * and friends), which pinned the old blue/green palette into the markup and
+ * meant a brand change required editing eight strings in six files. They are
+ * now token-driven class names, so a palette change touches only tokens.css.
+ *
+ * Each entry is a `badge` variant plus a state dot, never colour alone: the
+ * label beside it is what carries the meaning.
+ */
+export type BadgeTone = 'info' | 'warning' | 'error' | 'success' | 'neutral' | 'brand'
+
+const TONE_CLASS: Record<BadgeTone, string> = {
+  info: 'badge badge-info',
+  warning: 'badge badge-warning',
+  error: 'badge badge-error',
+  success: 'badge badge-success',
+  neutral: 'badge',
+  brand: 'badge badge-accent',
 }
+
+export const BADGE_TONE: Record<JobStatus, BadgeTone> = {
+  queued: 'neutral',
+  running: 'brand',
+  stopping: 'warning',
+  paused: 'warning',
+  stopped: 'warning',
+  completed: 'success',
+  failed: 'error',
+  cancelled: 'neutral',
+}
+
+/** Kept as a function of the tone so callers never concatenate class names. */
+export const badgeClass = (status: JobStatus): string => TONE_CLASS[BADGE_TONE[status]]
 
 const faNumber = new Intl.NumberFormat('fa-IR')
 

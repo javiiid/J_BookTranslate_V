@@ -5,7 +5,12 @@ import { defineConfig } from 'vite'
 
 // The Python backend is a local HTTP API on 8765. In dev we proxy to it so the
 // browser sees a single origin and no CORS handling is needed anywhere.
-const BACKEND = process.env.JBT_API ?? 'http://127.0.0.1:8765'
+//
+// The variable was renamed with the product (JBT_API -> KALIMA_API) but the old
+// name still works: an existing shell profile or .env would otherwise break with
+// no error, just a proxy pointed at the wrong port.
+const BACKEND =
+  process.env.KALIMA_API ?? process.env.JBT_API ?? 'http://127.0.0.1:8765'
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],

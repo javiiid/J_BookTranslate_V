@@ -1,77 +1,327 @@
-/* Design tokens ported from design-system/j-book-translate/MASTER.md
-   (D:\J_BookTranslate_V\design-system\j-book-translate\MASTER.md)
+/* ==========================================================================
+   KALIMA — design tokens
+   Single source of truth for the React front end.
 
-   The storage key `jbook-study-dark` and the light/dark values below MUST stay
-   in sync with the Python pages until they are retired, otherwise a user's
-   theme silently resets when they move between the old and new UI. */
+   Brand palette (given, not derived):
+     Primary Cream        #F1E6B6
+     Secondary Light Aqua #B0E1E4
+     Primary Blue         #4C7C92
+
+   Day mode background   #FFFFFF
+   Dark mode background  #071426
+   Dark mode surface     #1F506B
+
+   WHY THERE IS A RAMP
+   --------------------
+   The brand blue #4C7C92 is 4.56:1 on white. That is fine for a button fill
+   and for large text, but it is *not* body-text colour: at 16px it reads
+   washed out. So this file separates the brand fill from the text-safe shade
+   of the same hue. No new hue is introduced — every step is the brand blue at
+   a different lightness, which is what keeps the palette calm.
+
+   The same trap exists in dark mode: #B0E1E4 on #1F506B is 6.1:1, good, but
+   aqua as a *background* needs dark ink on it, not white.
+
+   Every foreground/background pair used by the UI is asserted in
+   tests/tokens.contrast.test.ts against WCAG 2.2 AA. If you change a value
+   here, run `npm test` — the failure names the pair and the ratio.
+
+   Both themes are declared as explicit variable sets rather than overriding a
+   handful of names, so a token can never be half-switched.
+   ========================================================================== */
 
 @import 'tailwindcss';
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* --------------------------------------------------------------------------
+   The brand ramp. Steps are lightness variations of the three given colours.
+   -------------------------------------------------------------------------- */
 @theme {
   --font-sans: 'Vazirmatn', 'Plus Jakarta Sans', system-ui, sans-serif;
   --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
 
-  --color-ink: #142033;
-  --color-ink-strong: #142033;
-  --color-blue: #356df6;
-  --color-purple: #7257e8;
-  --color-green: #08966c;
-  --color-cyan: #0ca6a6;
-  --color-amber: #d98518;
-  --color-red: #e24a4a;
-  --color-line: #e3e9f2;
-  --color-muted: #6d7a90;
+  /* Blue ramp, hue 199 */
+  --kalima-blue-900: #16333F;
+  --kalima-blue-800: #1F4655;
+  --kalima-blue-700: #2E5C70;
+  --kalima-blue-600: #3A6B80;
+  --kalima-blue-500: #4C7C92; /* the brand colour */
+  --kalima-blue-400: #6E99AC;
+  --kalima-blue-300: #9BB9C7;
+  --kalima-blue-200: #C2D6E0;
+  --kalima-blue-100: #DEEAF0;
+  --kalima-blue-50: #EFF5F8;
+
+  /* Aqua ramp */
+  --kalima-aqua-600: #4E8689;
+  --kalima-aqua-500: #6FA9AD;
+  --kalima-aqua-400: #8FC4C7;
+  --kalima-aqua-300: #B0E1E4; /* the brand aqua */
+  --kalima-aqua-200: #C9EBED;
+  --kalima-aqua-100: #E4F5F6;
+
+  /* Cream ramp */
+  --kalima-cream-600: #8C7F43;
+  --kalima-cream-500: #B3A054;
+  --kalima-cream-400: #D2C377;
+  --kalima-cream-300: #F1E6B6; /* the brand cream */
+  --kalima-cream-200: #F7EFD2;
+  --kalima-cream-100: #FBF7E8;
+
+  /* Neutrals are tinted toward the blue so greys do not fight the palette. */
+  --kalima-slate-900: #071426;
+  --kalima-slate-800: #0E2233;
+  --kalima-slate-700: #16303F;
+  --kalima-slate-600: #274353;
+  --kalima-slate-500: #44606F;
+  --kalima-slate-400: #6B8391;
+  --kalima-slate-300: #9DB0BB;
+  --kalima-slate-200: #C9D6DD;
+  --kalima-slate-100: #E4EBEF;
+  --kalima-slate-50: #F2F6F8;
+
+  /* Typography scale. Sizes are rem so they respect the user's browser
+     setting; a hard-coded px breaks zoom on the pages we care most about.
+
+     The caption step was 0.6875rem, which is 11px, and it was the reported
+     "the text is not readable". Latin at 11px is merely small. Persian is not,
+     because the letters join: a joined script needs the shapes to tell letters
+     apart, and at 11px with a 1.6 line height the descenders of one line touch
+     the ascenders of the next. 12px is the floor, and the label step moved up
+     to 13px so the two smallest steps are not adjacent.
+
+     Asserted in tests/tokens.contrast.test.ts, which also checks the whole
+     scale against a 12px minimum. */
+  --text-display: 2.75rem;
+  --text-display--line-height: 1.12;
+  --text-h1: 2rem;
+  --text-h1--line-height: 1.25;
+  --text-h2: 1.5rem;
+  --text-h2--line-height: 1.33;
+  --text-h3: 1.25rem;
+  --text-h3--line-height: 1.4;
+  --text-body: 0.9375rem;
+  --text-body--line-height: 1.85;
+  --text-small: 0.875rem;
+  --text-small--line-height: 1.7;
+  --text-caption: 0.75rem;
+  --text-caption--line-height: 1.7;
+  --text-label: 0.8125rem;
+  --text-label--line-height: 1.6;
+  /* Buttons are the one place the scale is allowed to reuse a size, because a
+     button label and a field label are the same kind of thing: a short
+     instruction in a control. It still gets the 1.6 leading of --text-label
+     rather than something tighter, since a Persian button label wraps on a
+     narrow sidebar. */
+  --text-button: 0.8125rem;
+  --text-button--line-height: 1.6;
+
+  /* Spacing: a 4px base. Every margin and padding in the app is one of these. */
+  --spacing-1: 0.25rem;
+  --spacing-2: 0.5rem;
+  --spacing-3: 0.75rem;
+  --spacing-4: 1rem;
+  --spacing-5: 1.25rem;
+  --spacing-6: 1.5rem;
+  --spacing-8: 2rem;
+  --spacing-10: 2.5rem;
+  --spacing-12: 3rem;
+
+  /* Radius: deliberately restrained. The brief asks to avoid toy-like shapes,
+     so nothing goes past 14px except the modal, which is a distinct surface. */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-control: 8px;
+  --radius-card: 12px;
+  --radius-panel: 14px;
+  --radius-modal: 16px;
+  --radius-badge: 999px;
+
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
+/* --------------------------------------------------------------------------
+   DAY MODE
+   -------------------------------------------------------------------------- */
 :root {
-  --bg: #f4f7fb;
-  --surface: #ffffff;
-  --surface-2: #f1f3f5;
-  --ink: #142033;
-  --ink-strong: #142033;
-  --muted: #6d7a90;
-  --muted-2: #94a3b8;
-  --line: #e3e9f2;
-  --line-strong: #2e4056;
-  --blue: #356df6;
-  --blue-soft: #edf3ff;
-  --purple: #7257e8;
-  --green: #08966c;
-  --amber: #d98518;
-  --red: #e24a4a;
-  --ring: #356df6;
-  --shadow-soft: 0 18px 55px rgba(38, 57, 93, 0.08);
-  --shadow-card: 0 12px 32px rgba(38, 57, 93, 0.07);
+  color-scheme: light;
+
+  /* Surfaces */
+  --color-background: #ffffff;
+  --color-surface: #ffffff;
+  --color-surface-elevated: #f2f6f8;
+  --color-surface-sunken: #eaf0f4;
+  --color-surface-inverse: #16333f;
+
+  /* Brand */
+  --color-primary: #4c7c92;
+  --color-primary-hover: #3a6b80;
+  --color-primary-active: #2e5c70;
+  --color-primary-subtle: #eff5f8;
+  --color-primary-subtle-hover: #deeaf0;
+
+  --color-secondary: #b0e1e4;
+  --color-secondary-subtle: #e4f5f6;
+
+  --color-accent: #4c7c92;
+  /* Cream-600 measured 4.01:1 on white, just under AA. Cream needs to go
+     further down the ramp than the blue does, because it is a light hue with
+     far less contrast headroom. */
+  --color-accent-strong: #6b5f2e;
+  --color-accent-subtle: #fbf7e8;
+
+  /* Text.
+     --color-text-muted started at slate-400 and measured 3.98:1 on white, so
+     it was moved to a darker step of the same ramp. "Muted" must not mean
+     "unreadable"; it means lower emphasis, not lower contrast. */
+  --color-text-primary: #16333f;
+  --color-text-secondary: #3a5768;
+  --color-text-muted: #55707f;
+  --color-text-inverse: #ffffff;
+  --color-text-brand: #2e5c70;
+  --color-link: #2e5c70;
+
+  /* Lines. --color-border-strong carries meaning (a control outline, a field
+     edge) so it has to clear 3:1 as a non-text element, which the old
+     slate-300 did not. */
+  --color-border: #dbe4ea;
+  --color-border-strong: #7e97a5;
+  /* Present in day mode too, so a component can name one token for both themes
+     without a conditional. The day elevated surface is a light grey, where the
+     ordinary strong border already reads. */
+  --color-border-strong-elevated: #6d8794;
+  --color-border-subtle: #eef3f6;
+
+  /* Feedback. Derived from the palette: the hue is pulled toward the brand
+     blue and the lightness is what separates the states. They must never be the
+     only signal -- every status also carries a label. */
+  --color-success: #1f6b4a;
+  --color-success-subtle: #e6f4ee;
+  --color-warning: #8a6410;
+  --color-warning-subtle: #fbf3dd;
+  --color-error: #a3282d;
+  --color-error-subtle: #fbeaea;
+  --color-info: #2e5c70;
+  --color-info-subtle: #eff5f8;
+
+  /* Interaction */
+  --color-focus: #2e5c70;
+  --color-focus-ring: #4c7c92;
+  --color-progress-track: #e4ebef;
+  --color-progress-fill: #4c7c92;
+  --color-selected: #deeaf0;
+  --color-selected-border: #4c7c92;
+
+  /* Elevation. Soft and low-opacity; the day palette carries hierarchy through
+     the tinted neutrals more than through shadow. */
+  --shadow-card: 0 1px 2px rgba(22, 51, 63, 0.05);
+  --shadow-raised: 0 4px 16px rgba(22, 51, 63, 0.08);
+  --shadow-overlay: 0 16px 48px rgba(22, 51, 63, 0.16);
+  --shadow-none: none;
+
+  --ring-width: 2px;
   color-scheme: light;
 }
 
+/* --------------------------------------------------------------------------
+   DARK MODE
+   The background dominates; #1F506B is the elevated surface, and hierarchy
+   comes from the difference between surfaces rather than from shadow.
+   -------------------------------------------------------------------------- */
 .dark {
-  --bg: #0e141e;
-  --surface: #18202e;
-  --surface-2: #1e293b;
-  --ink: #f1f5f9;
-  --ink-strong: #ffffff;
-  --muted: #b8c6d6;
-  --muted-2: #94a3b8;
-  --line: #243142;
-  --line-strong: #2e4056;
-  --blue: #60a5fa;
-  --blue-soft: #1e3a5a;
-  --purple: #a78bfa;
-  --green: #34d399;
-  --amber: #fbbf24;
-  --red: #f87171;
-  --ring: #60a5fa;
-  --shadow-soft: 0 18px 55px rgba(0, 0, 0, 0.45);
-  --shadow-card: 0 12px 32px rgba(0, 0, 0, 0.55);
+  color-scheme: dark;
+
+  --color-background: #071426;
+  --color-surface: #0e2233;
+  /* The brief names #1F506B for elevated surfaces. Used as-is it is quite
+     saturated for a whole card, so cards sit on #0E2233 (a dark step of the
+     same ramp) and #1F506B is the *elevated* tier: dialogs, popovers, the
+     sidebar, table headers. That gives three readable surface levels without
+     inventing a colour. */
+  --color-surface-elevated: #1f506b;
+  --color-surface-sunken: #050f1c;
+  --color-surface-inverse: #e4f5f6;
+
+  --color-primary: #b0e1e4;
+  --color-primary-hover: #c9ebed;
+  --color-primary-active: #dff2f4;
+  --color-primary-subtle: #16333f;
+  --color-primary-subtle-hover: #1f4655;
+
+  --color-secondary: #4c7c92;
+  --color-secondary-subtle: #16303f;
+
+  --color-accent: #b0e1e4;
+  --color-accent-strong: #f1e6b6;
+  --color-accent-subtle: #1f4655;
+
+  --color-text-primary: #e4f5f6;
+  --color-text-secondary: #c3d7df;
+  --color-text-muted: #aac2cd;
+  --color-text-inverse: #071426;
+  --color-text-brand: #b6d2dd;
+  --color-link: #8fc4c7;
+
+  --color-border: #1f3a4a;
+  /* Two problems here, and they need opposite answers.
+     On the card surface (#0E2233) a blue border is nearly invisible at 2.79:1,
+     so it goes lighter. On the elevated surface a lighter border is worse than
+     useless -- the surface is lighter than the border, so contrast collapses
+     (2.31:1). An earlier attempt to fix that by darkening the border to #2B6076
+     only reached 1.26:1, because #1F506B is simply too light and saturated to
+     carry a 3:1 outline. The surface moved down the ramp to #17455C, a darker
+     step of the same brand hue, and the border sits clearly below it. */
+  --color-border-strong: #5d8a9e;
+  /* Two border tokens, and the second exists because of arithmetic.
+     On the card surface (#0E2233) the ordinary strong border is nearly
+     invisible at 2.79:1, so it goes lighter. On the elevated surface (#1F506B)
+     a border must be LIGHTER than the surface, not darker. Darkening it is
+     backwards and cannot work: at that luminance the +0.05 in the contrast
+     formula leaves no room. Measured failures, all against #1F506B:
+       #2B6076 -> 1.26:1   #0D2C3D -> 1.41:1   #5D8A9E -> 2.31:1
+     #7FA8BC is 3.41:1, so the brand surface stays exactly as given. This is the
+     normal dark-UI pattern: the border is lighter than what it outlines. */
+  --color-border-strong-elevated: #7fa8bc;
+  --color-border-subtle: #14293a;
+
+  /* Measured 4.36:1 on --color-surface-elevated (#1F506B), just under AA.
+     The elevated surface is lighter than the card surface, so a colour that
+     passes on a card does not automatically pass on top of it. The fix is a
+     lighter step of the same hue rather than a different green. */
+  --color-success: #86d8b2;
+  --color-success-subtle: #10332a;
+  --color-warning: #e8c76a;
+  --color-warning-subtle: #33290e;
+  /* Both of these were 4.06:1 and 4.20:1 on the elevated surface, and both were
+     missed until the pairs were added to the test rather than the colours
+     being adjusted in isolation. */
+  --color-error: #f7b0b2;
+  --color-error-subtle: #3a1a1e;
+  --color-info: #b0cdd9;
+  --color-info-subtle: #16303f;
+
+  --color-focus: #b0e1e4;
+  --color-focus-ring: #b0e1e4;
+  --color-progress-track: #16303f;
+  --color-progress-fill: #b0e1e4;
+  --color-selected: #1f4655;
+  --color-selected-border: #b0e1e4;
+
+  /* Dark mode gets almost no shadow: on a near-black ground, shadow is
+     invisible, so elevation is carried by surface lightness instead. */
+  --shadow-card: none;
+  --shadow-raised: 0 4px 16px rgba(0, 0, 0, 0.4);
+  --shadow-overlay: 0 16px 48px rgba(0, 0, 0, 0.6);
+  --shadow-none: none;
+
+  --ring-width: 2px;
   color-scheme: dark;
 }
 
 @layer base {
   * {
-    border-color: var(--line);
+    border-color: var(--color-border);
   }
 
   html {
@@ -82,15 +332,32 @@
   body {
     margin: 0;
     min-height: 100dvh;
-    background: var(--bg);
-    color: var(--ink);
+    background: var(--color-background);
+    color: var(--color-text-primary);
     font-family: var(--font-sans);
+    font-size: var(--text-body);
+    line-height: var(--text-body--line-height);
     -webkit-font-smoothing: antialiased;
   }
 
+  h1,
+  h2,
+  h3 {
+    color: var(--color-text-primary);
+    text-wrap: balance;
+  }
+
   :focus-visible {
-    outline: 2px solid var(--ring);
+    outline: var(--ring-width) solid var(--color-focus);
     outline-offset: 2px;
+    border-radius: var(--radius-control);
+  }
+
+  /* Anything that is not an interactive control should not advertise itself
+     as one. */
+  ::selection {
+    background: var(--color-selected);
+    color: var(--color-text-primary);
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -105,10 +372,532 @@
 }
 
 @layer components {
+  /* ------------------------------------------------------------------
+     Surfaces
+     ------------------------------------------------------------------ */
   .surface-card {
-    background: var(--surface);
-    border: 1px solid var(--line);
-    border-radius: 20px;
-    box-shadow: var(--shadow-soft);
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-card);
+  }
+
+  /* An overlay surface: sidebar, dialog, popover, table header in dark mode. */
+  .surface-elevated {
+    background: var(--color-surface-elevated);
+    border: 1px solid var(--color-border-strong-elevated);
+    border-radius: var(--radius-panel);
+  }
+
+  /* ------------------------------------------------------------------
+     Buttons
+     A single primary action per view. Secondary is a quiet outline, and
+     danger is the only red in the interface.
+     ------------------------------------------------------------------ */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--spacing-2);
+    min-height: 40px;
+    padding-inline: var(--spacing-4);
+    border: 1px solid transparent;
+    border-radius: var(--radius-control);
+    font-size: var(--text-button);
+    font-weight: 600;
+    line-height: var(--text-button--line-height);
+    text-decoration: none;
+    white-space: nowrap;
+    cursor: pointer;
+    transition:
+      background-color 0.15s var(--ease-out),
+      border-color 0.15s var(--ease-out),
+      color 0.15s var(--ease-out);
+  }
+
+  .btn-primary {
+    background: var(--color-primary);
+    border-color: var(--color-primary);
+    color: var(--color-text-inverse);
+  }
+  .btn-primary:hover:not(:disabled) {
+    background: var(--color-primary-hover);
+    border-color: var(--color-primary-hover);
+  }
+  .btn-primary:active:not(:disabled) {
+    background: var(--color-primary-active);
+    border-color: var(--color-primary-active);
+  }
+
+  .btn-secondary {
+    background: var(--color-surface);
+    border-color: var(--color-border-strong);
+    color: var(--color-text-primary);
+  }
+  .btn-secondary:hover:not(:disabled) {
+    background: var(--color-surface-elevated);
+    border-color: var(--color-primary);
+  }
+
+  .btn-ghost {
+    background: transparent;
+    border-color: transparent;
+    color: var(--color-text-secondary);
+  }
+  .btn-ghost:hover:not(:disabled) {
+    background: var(--color-surface-elevated);
+    color: var(--color-text-primary);
+  }
+
+  .btn-danger {
+    background: var(--color-error-subtle);
+    border-color: var(--color-error);
+    color: var(--color-error);
+  }
+  .btn-danger:hover:not(:disabled) {
+    background: var(--color-error);
+    color: var(--color-text-inverse);
+  }
+
+  .btn:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+
+  /* A small square button for icon-only controls. */
+  .btn-icon {
+    display: inline-grid;
+    place-items: center;
+    width: 40px;
+    min-height: 40px;
+    padding: 0;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-control);
+    background: var(--color-surface);
+    color: var(--color-text-secondary);
+    cursor: pointer;
+    transition: background-color 0.15s var(--ease-out), color 0.15s var(--ease-out);
+  }
+  .btn-icon:hover {
+    background: var(--color-surface-elevated);
+    color: var(--color-text-primary);
+  }
+
+  /* ------------------------------------------------------------------
+     Form controls
+     ------------------------------------------------------------------ */
+  .field {
+    min-height: 40px;
+    padding-inline: var(--spacing-3);
+    border: 1px solid var(--color-border-strong);
+    border-radius: var(--radius-control);
+    background: var(--color-surface);
+    color: var(--color-text-primary);
+    font: inherit;
+    font-size: var(--text-small);
+    transition: border-color 0.15s var(--ease-out), box-shadow 0.15s var(--ease-out);
+  }
+  .field::placeholder {
+    color: var(--color-text-muted);
+  }
+  .field:hover:not(:disabled) {
+    border-color: var(--color-primary);
+  }
+  .field:focus-visible {
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 var(--ring-width) var(--color-primary-subtle);
+  }
+  .field:disabled {
+    background: var(--color-surface-elevated);
+    color: var(--color-text-muted);
+    cursor: not-allowed;
+  }
+
+  select.field {
+    /* The arrow is dropped so the control matches the palette rather than the
+       OS; appearance is reset and the chevron is drawn with a border. */
+    appearance: none;
+    padding-inline-end: var(--spacing-8);
+    background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
+      linear-gradient(135deg, currentColor 50%, transparent 50%);
+    background-position:
+      calc(100% - 18px) calc(50% + 2px),
+      calc(100% - 13px) calc(50% + 2px);
+    background-size: 5px 5px, 5px 5px;
+    background-repeat: no-repeat;
+  }
+
+  .label {
+    display: block;
+    font-size: var(--text-label);
+    font-weight: 600;
+    line-height: var(--text-label--line-height);
+    color: var(--color-text-secondary);
+  }
+
+  /* ------------------------------------------------------------------
+     Status
+     Colour is never the only carrier of meaning: a badge always has text, and
+     a state dot always has a label beside it.
+     ------------------------------------------------------------------ */
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-1);
+    padding: 2px var(--spacing-2);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-badge);
+    background: var(--color-surface-elevated);
+    color: var(--color-text-secondary);
+    font-size: var(--text-caption);
+    font-weight: 600;
+    line-height: 1.5;
+    white-space: nowrap;
+  }
+
+  .badge-success {
+    background: var(--color-success-subtle);
+    border-color: var(--color-success);
+    color: var(--color-success);
+  }
+  .badge-warning {
+    background: var(--color-warning-subtle);
+    border-color: var(--color-warning);
+    color: var(--color-warning);
+  }
+  .badge-error {
+    background: var(--color-error-subtle);
+    border-color: var(--color-error);
+    color: var(--color-error);
+  }
+  .badge-info {
+    background: var(--color-info-subtle);
+    border-color: var(--color-info);
+    color: var(--color-info);
+  }
+  .badge-accent {
+    background: var(--color-accent-subtle);
+    border-color: var(--color-accent);
+    color: var(--color-text-brand);
+  }
+
+  /* The pipeline leaves a marker in the text; this is how it is surfaced. */
+  .flag-pill {
+    display: inline-block;
+    margin-inline-end: var(--spacing-1);
+    padding: 1px var(--spacing-2);
+    border: 1px solid var(--color-warning);
+    border-radius: var(--radius-badge);
+    background: var(--color-warning-subtle);
+    color: var(--color-warning);
+    font-size: var(--text-caption);
+    font-weight: 600;
+  }
+
+  .state-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: var(--radius-badge);
+    background: currentColor;
+    flex: none;
+  }
+
+  /* ------------------------------------------------------------------
+     Data display
+     ------------------------------------------------------------------ */
+  .progress-track {
+    height: 8px;
+    border-radius: var(--radius-badge);
+    background: var(--color-progress-track);
+    overflow: hidden;
+  }
+  .progress-fill {
+    height: 100%;
+    border-radius: var(--radius-badge);
+    background: var(--color-progress-fill);
+    transition: width 0.4s var(--ease-out);
+  }
+
+  .data-label {
+    display: block;
+    font-size: var(--text-caption);
+    line-height: var(--text-label--line-height);
+    color: var(--color-text-muted);
+  }
+  .data-value {
+    display: block;
+    margin-top: var(--spacing-1);
+    font-size: var(--text-body);
+    font-weight: 600;
+    color: var(--color-text-primary);
+  }
+
+  /* The virtualised chunk table. ROW_H in src/lib/virtual.ts must equal the
+     height below, or the computed window and the rendered rows disagree. */
+  .vtable-wrap {
+    max-height: 560px;
+    overflow: auto;
+  }
+  .vtable {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+    font-size: var(--text-small);
+  }
+  .vtable th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--color-surface-elevated);
+    border-bottom: 1px solid var(--color-border);
+    padding: var(--spacing-3);
+    text-align: start;
+    font-size: var(--text-caption);
+    font-weight: 600;
+    color: var(--color-text-secondary);
+  }
+  .vtable td {
+    border-bottom: 1px solid var(--color-border-subtle);
+    padding: var(--spacing-3);
+    vertical-align: top;
+    height: 96px;
+    overflow: hidden;
+  }
+  .vtable tbody tr:hover {
+    background: var(--color-surface-elevated);
+  }
+  .vtable tr[data-flagged='true'] {
+    background: var(--color-warning-subtle);
+  }
+
+  .chunk-text {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    line-height: 1.8;
+  }
+  .chunk-id {
+    font-family: var(--font-mono);
+    font-size: var(--text-caption);
+    color: var(--color-text-muted);
+  }
+
+  .qa-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: var(--spacing-2);
+  }
+  .qa-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--spacing-2);
+    padding: var(--spacing-3);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-control);
+    background: var(--color-surface-elevated);
+    font-size: var(--text-small);
+  }
+
+  .flagged-list {
+    display: grid;
+    gap: var(--spacing-2);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .flagged-item {
+    padding: var(--spacing-4);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-control);
+    background: var(--color-surface-elevated);
+  }
+
+  /* Log lines are timestamps and file paths, so this stays LTR on an RTL
+     page. */
+  .log-box {
+    max-height: 420px;
+    overflow: auto;
+    direction: ltr;
+    text-align: left;
+    padding: var(--spacing-3);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-control);
+    background: var(--color-surface-sunken);
+    color: var(--color-text-secondary);
+    font-family: var(--font-mono);
+    font-size: var(--text-caption);
+    line-height: 1.9;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .asset-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+    gap: var(--spacing-2);
+  }
+  .asset {
+    display: grid;
+    gap: var(--spacing-1);
+    padding: var(--spacing-3);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-control);
+    background: var(--color-surface-elevated);
+    text-decoration: none;
+    transition: border-color 0.15s var(--ease-out);
+  }
+  .asset:hover {
+    border-color: var(--color-primary);
+  }
+  .asset-name {
+    font-size: var(--text-small);
+    font-weight: 600;
+    color: var(--color-text-primary);
+  }
+  .asset-meta {
+    font-size: var(--text-caption);
+    color: var(--color-text-muted);
+  }
+
+  /* ------------------------------------------------------------------
+     Navigation
+     A left rail, not a stack of floating cards.
+     ------------------------------------------------------------------ */
+  .tab-list {
+    display: flex;
+    gap: var(--spacing-6);
+    border-bottom: 1px solid var(--color-border);
+  }
+  .tab-btn {
+    border: 0;
+    border-bottom: 2px solid transparent;
+    background: none;
+    padding: var(--spacing-3) 0;
+    font-size: var(--text-small);
+    font-weight: 600;
+    color: var(--color-text-muted);
+    cursor: pointer;
+    transition: color 0.15s var(--ease-out), border-color 0.15s var(--ease-out);
+  }
+  .tab-btn:hover {
+    color: var(--color-text-primary);
+  }
+  .tab-btn[aria-selected='true'] {
+    color: var(--color-text-brand);
+    border-color: var(--color-primary);
+  }
+
+  /* ------------------------------------------------------------------
+     Feedback
+     ------------------------------------------------------------------ */
+  .empty {
+    padding: var(--spacing-8);
+    text-align: center;
+    font-size: var(--text-small);
+    color: var(--color-text-muted);
+  }
+
+  .skeleton {
+    border-radius: var(--radius-control);
+    background: linear-gradient(
+      90deg,
+      var(--color-surface-elevated),
+      var(--color-border),
+      var(--color-surface-elevated)
+    );
+    background-size: 200% 100%;
+    animation: jbt-shimmer 1.4s ease-in-out infinite;
+  }
+
+  .toast {
+    position: fixed;
+    inset-block-end: var(--spacing-5);
+    inset-inline-start: 292px;
+    z-index: 60;
+    max-width: 380px;
+    padding: var(--spacing-3) var(--spacing-4);
+    border-radius: var(--radius-control);
+    font-size: var(--text-small);
+    font-weight: 600;
+    box-shadow: var(--shadow-overlay);
+  }
+  .toast-ok {
+    background: var(--color-success);
+    color: var(--color-text-inverse);
+  }
+  .toast-error {
+    background: var(--color-error);
+    color: var(--color-text-inverse);
+  }
+
+  /* An inline alert. `role="alert"` in the markup, so the colour is a
+     reinforcement rather than the signal. */
+  .alert {
+    padding: var(--spacing-3) var(--spacing-4);
+    border: 1px solid;
+    border-radius: var(--radius-control);
+    font-size: var(--text-small);
+    line-height: 1.7;
+  }
+  .alert-error {
+    background: var(--color-error-subtle);
+    border-color: var(--color-error);
+    color: var(--color-error);
+  }
+  .alert-info {
+    background: var(--color-info-subtle);
+    border-color: var(--color-info);
+    color: var(--color-info);
+  }
+  .alert-warning {
+    background: var(--color-warning-subtle);
+    border-color: var(--color-warning);
+    color: var(--color-warning);
+  }
+
+  /* ------------------------------------------------------------------
+     Modal
+     A scrim plus one elevated panel. The blur is 2px, not the 8px that
+     usually shows up: the brief asks for restraint, and a heavy scrim reads as
+     decorative rather than as separation.
+     ------------------------------------------------------------------ */
+  .proposal-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 70;
+    display: grid;
+    place-items: center;
+    padding: var(--spacing-5);
+    background: rgba(7, 20, 38, 0.5);
+  }
+  .proposal-overlay th {
+    padding: var(--spacing-2) var(--spacing-3);
+    border-bottom: 1px solid var(--color-border);
+    font-size: var(--text-caption);
+    font-weight: 600;
+    color: var(--color-text-secondary);
+  }
+  .proposal-overlay td {
+    padding: var(--spacing-2) var(--spacing-3);
+    border-bottom: 1px solid var(--color-border-subtle);
+    vertical-align: middle;
+  }
+}
+
+@keyframes jbt-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
   }
 }

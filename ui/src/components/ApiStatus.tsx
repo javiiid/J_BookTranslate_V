@@ -3,21 +3,22 @@ import { api } from '@/lib/api'
 
 type Tone = 'pending' | 'ready' | 'error'
 
-const TONE_STYLE: Record<Tone, string> = {
-  pending: 'bg-slate-400',
-  ready: 'bg-emerald-500 shadow-[0_0_0_4px_rgba(16,185,129,0.12)]',
-  error: 'bg-red-500',
-}
-
-const TONE_TEXT: Record<Tone, string> = {
-  pending: 'text-slate-500',
-  ready: 'text-emerald-700',
-  error: 'text-red-600',
+/**
+ * Token-driven rather than Tailwind colour classes.
+ *
+ * The old version hardcoded `bg-emerald-500` and a hand-written rgba() glow,
+ * which meant two things: it carried the previous green, and it was the only
+ * place in the app with a hardcoded shadow value. Both are now tokens.
+ */
+const TONE: Record<Tone, { dot: string; text: string; ring: string }> = {
+  pending: { dot: 'var(--color-text-muted)', text: 'var(--color-text-muted)', ring: 'transparent' },
+  ready: { dot: 'var(--color-success)', text: 'var(--color-success)', ring: 'var(--color-success-subtle)' },
+  error: { dot: 'var(--color-error)', text: 'var(--color-error)', ring: 'var(--color-error-subtle)' },
 }
 
 /**
- * Provider readiness indicator. Mirrors the dot + label pattern the Python
- * pages use, so the dashboard keeps the same affordance after the port.
+ * Provider readiness indicator. The dot is aria-hidden and the label carries
+ * the meaning, so the state is not communicated by colour alone.
  */
 export function ApiStatus() {
   const { data, isPending, isError } = useQuery({
@@ -29,15 +30,23 @@ export function ApiStatus() {
 
   const tone: Tone = isPending ? 'pending' : isError ? 'error' : data?.status === 'ready' ? 'ready' : 'error'
   const message = isError ? 'ارتباط با سرور قطع است' : (data?.message ?? 'در حال بررسی…')
+  const palette = TONE[tone]
 
   return (
-    <div
-      className="flex items-center gap-2 rounded-full border border-[var(--line)] bg-[var(--surface)] px-3 py-2 text-xs"
+    <span
+      className="badge"
+      style={{ paddingInline: 'var(--spacing-3)', paddingBlock: 'var(--spacing-2)' }}
       role="status"
       aria-live="polite"
     >
-      <span className={`h-2 w-2 rounded-full ${TONE_STYLE[tone]}`} aria-hidden="true" />
-      <span className={TONE_TEXT[tone]}>{message}</span>
-    </div>
+      <span
+        className="state-dot"
+        // The ring is what replaced the old glow, and it is a surface colour so
+        // it needs no separate shadow token.
+        style={{ color: palette.dot, boxShadow: `0 0 0 3px ${palette.ring}` }}
+        aria-hidden="true"
+      />
+      <span style={{ color: palette.text }}>{message}</span>
+    </span>
   )
 }

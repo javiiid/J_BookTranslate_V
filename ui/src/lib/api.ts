@@ -119,6 +119,58 @@ export interface ChapterBlock {
   translation_html: string
 }
 
+/* ------------------------------------------------------------------ */
+/* Library                                                             */
+/* ------------------------------------------------------------------ */
+
+export interface LibraryVariant {
+  id: number
+  job_id: string
+  path: string
+  kind: string
+  size_bytes: number
+  created_at: string
+  archived: number
+  book_id: number
+  display_name: string
+  extension: string
+  mime_type: string
+  language: string
+  checksum: string
+  is_readable: number
+  page_count: number
+  chapter_count: number
+  last_opened_at: string | null
+  last_read_location: string | null
+  status: string
+  progress: { completed: number; total: number }
+  error: string | null
+  download: string
+  reader: string
+}
+
+export interface LibraryBook {
+  id: number
+  title: string
+  author: string
+  cover_path: string | null
+  created_at: string
+  updated_at: string
+  status: string
+  variants: LibraryVariant[]
+  size_bytes: number
+  translated: boolean
+  readable: boolean
+}
+
+export interface LibraryListResponse {
+  items: LibraryBook[]
+  total: number
+  page: number
+  limit: number
+  storage: { used: number; free: number }
+}
+
 export interface Model {
   id: string
   provider: string
@@ -139,6 +191,113 @@ export interface ReadingSettings {
   reading_width: number
   reading_direction: 'auto' | 'ltr' | 'rtl'
   reading_last_location: string | null
+}
+
+/* ------------------------------------------------------------------ */
+/* Glossary — the propose / review / approve flow                      */
+/* ------------------------------------------------------------------ */
+
+/** An approved glossary entry. `origin` is 'approved' for terms the user
+ *  promoted and 'proposed' for ones that reached the table by another route. */
+export interface GlossaryTerm {
+  source_term: string
+  target_term: string
+  kind: string
+  notes: string
+  origin?: string
+}
+
+export interface Glossary {
+  book_id: number
+  source_language: string
+  target_language: string
+  version: number
+  terms: GlossaryTerm[]
+}
+
+export interface GlossaryProposal {
+  book_id: number
+  source_language: string
+  target_language: string
+  origin: 'preflight' | 'postrun'
+  created_at: string | null
+  terms: GlossaryTerm[]
+}
+
+/* ------------------------------------------------------------------ */
+/* Provider configuration                                              */
+/* ------------------------------------------------------------------ */
+
+export interface ProviderConfig {
+  base_url: string
+  has_api_key: boolean
+  default_model: string
+  max_concurrency: number
+}
+
+export interface AnalyticsOverview {
+  jobs: number
+  completed_chunks: number
+  input_tokens: number
+  output_tokens: number
+  /** Always 0.0: the provider layer does not persist token usage, so any
+   *  number here would be invented. Surfaced honestly as absent, not as zero
+   *  that reads like "free". */
+  estimated_cost: number
+  retries: number
+}
+
+/* ------------------------------------------------------------------ */
+/* Account portal                                                      */
+/* ------------------------------------------------------------------ */
+
+export interface PortalAccount {
+  id: number
+  display_name: string
+  email: string
+  locale: string
+  plan: string
+  organization: string
+  role: string
+  credit_balance: number
+  created_at: string
+  updated_at: string
+}
+
+export interface PortalPlan {
+  id: string
+  name_fa: string
+  name_en: string
+  monthly_price: number
+  features: string[]
+}
+
+export interface Transaction {
+  id: number
+  kind: string
+  reference_id: string
+  amount_usd: number
+  credits: number
+  status: string
+  created_at: string
+}
+
+export interface AccountPortal {
+  overview: {
+    account: PortalAccount
+    plan: PortalPlan
+    counts: {
+      books: number
+      jobs: number
+      completed_jobs: number
+      glossaries: number
+      memory_entries: number
+      api_keys: number
+      open_orders: number
+    }
+    transactions: Transaction[]
+  }
+  plans: PortalPlan[]
 }
 
 export class ApiError extends Error {
@@ -193,4 +352,69 @@ export const api = {
 
   models: () => request<{ items: Model[] }>('/api/models'),
   languages: () => request<{ items: Language[] }>('/api/languages'),
+  providerConfig: () => request<ProviderConfig>('/api/provider-config'),
+
+  /* --- library ------------------------------------------------------ */
+  library: (page: number, limit: number, query = '') => {
+    const params = new URLSearchParams({ page: String(page), limit: String(limit) })
+    if (query.trim()) params.set('q', query.trim())
+    return request<LibraryListResponse>(`/api/library?${params}`)
+  },
+  book: (id: number) => request<LibraryBook>(`/api/library/${id}`),
+  archiveBook: (id: number) =>
+    request<{ ok: boolean }>(`/api/library/${id}`, { method: 'DELETE' }),
+
+  /* --- glossary ----------------------------------------------------- */
+  /**
+   * Upload a book and start translating it.
+   *
+   * The backend takes multipart form data rather than JSON, and the response
+   * carries `book_id`, which is what the glossary flow needs. FormData is built
+   * by hand rather than by `request` because that helper always sends JSON.
+   */
+  createJob: async (form: FormData): Promise<{ id: string; book_id: number | null; from_lang: string; to_lang: string }> => {
+    const response = await fetch('/api/jobs', { method: 'POST', body: form })
+    const text = await response.text()
+    const body: unknown = text ? JSON.parse(text) : null
+    if (!response.ok) {
+      const message =
+        body && typeof body === 'object' && 'error' in body && typeof body.error === 'string'
+          ? body.error
+          : `HTTP ${response.status}`
+      throw new ApiError(message, response.status)
+    }
+    return body as { id: string; book_id: number | null; from_lang: string; to_lang: string }
+  },
+
+  glossary: (bookId: number, from: string, to: string) =>
+    request<Glossary>(`/api/library/${bookId}/glossary?from=${from}&to=${to}`),
+  proposal: (bookId: number, from: string, to: string, origin: 'preflight' | 'postrun' = 'preflight') =>
+    request<GlossaryProposal>(
+      `/api/library/${bookId}/glossary/proposal?from=${from}&to=${to}&origin=${origin}`,
+    ),
+  /** One LLM call over samples from across the book. Slow: 20-60 seconds. */
+  proposeTerms: (bookId: number, body: { from_lang: string; to_lang: string; model?: string; origin?: 'preflight' | 'postrun' }) =>
+    request<GlossaryProposal>(`/api/library/${bookId}/glossary/propose`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  /** Promote the ticked terms into the live glossary; the draft is cleared. */
+  approveProposal: (
+    bookId: number,
+    body: { from_lang: string; to_lang: string; origin?: 'preflight' | 'postrun'; approved: string[] },
+  ) =>
+    request<Glossary & { proposal_origin: string; approved_count: number }>(
+      `/api/library/${bookId}/glossary/proposal/approve`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+    ),
+
+  /* --- account ------------------------------------------------------ */
+  accountPortal: () => request<AccountPortal>('/api/account/portal'),
+  analytics: () => request<AnalyticsOverview>('/api/analytics/overview'),
+  logs: () => request<{ items: JobEvent[] }>('/api/logs'),
 }
