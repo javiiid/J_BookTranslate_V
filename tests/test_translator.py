@@ -159,7 +159,7 @@ def load_first_chunk(chunks_file):
 def main():
 
     print("=" * 60)
-    print("J Book Translate - Single Chunk Translator Test")
+    print("KALIMA - Single Chunk Translator Test")
     print("=" * 60)
 
     # ========================================================

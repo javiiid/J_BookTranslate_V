@@ -1,6 +1,6 @@
 # Library Page Overrides
 
-> **PROJECT:** J Book Translate
+> **PROJECT:** KALIMA
 > **Generated:** 2026-09-26
 > **Page Type:** Library / Content Management
 > **Source File:** `app/library/view.py` → `library_page()`

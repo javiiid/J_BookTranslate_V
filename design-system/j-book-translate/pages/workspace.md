@@ -1,8 +1,8 @@
 # Workspace Page Overrides
 
-> **PROJECT:** J Book Translate
+> **PROJECT:** KALIMA
 > **Generated:** 2026-09-26
-> **Page Type:** Workspace / Translation Studio
+> **Page Type:** Workspace / Word by word, book by book
 > **Source File:** `app/jobs/workspace.py` → `install_workspace()`
 
 > ⚠️ Rules here **override** `MASTER.md`. For all other rules, refer to Master.

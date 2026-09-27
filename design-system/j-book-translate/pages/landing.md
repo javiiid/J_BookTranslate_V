@@ -1,6 +1,6 @@
 # Landing Page Overrides
 
-> **PROJECT:** J Book Translate
+> **PROJECT:** KALIMA
 > **Generated:** 2026-09-26
 > **Page Type:** Landing / Marketing — synced to Library/Workspace theme
 > **Source File:** `landing.html` (served at `GET /landing`)
@@ -16,7 +16,7 @@
 - **Goal:** Landing feels like the same product as `/library` and `/workspace`, not a separate marketing skin.
 - **Background:** `radial-gradient(circle at 8% 0,#e6efff 0,transparent 32%),radial-gradient(circle at 96% 11%,#eee9ff 0,transparent 27%),var(--bg)` with `--bg:#f4f7fb`
 - **Dark:** `body.app-dark` with `--bg:#0e141e;--surface:#18202e;--ink:#f1f5f9;--muted:#b8c6d6;--line:#243142;--shadow:0 18px 55px rgba(0,0,0,.45)` + same gradients `#1e293b`/`#1e1b4b`
-- **Storage key:** `jbook-study-dark` (`'1'` = dark) — **same as library/workspace**, so theme persists across `/`, `/landing`, `/library`, `/workspace`. Do NOT use `jbt-theme` or `html.dark`.
+- **Storage key:** `jbook-study-dark` (`'1'` = dark) — **same as library/workspace**, so theme persists across `/`, `/landing`, `/library`, `/workspace`. Do NOT use `kalima-theme` or `html.dark`.
 
 ### Color Overrides
 
@@ -58,7 +58,7 @@ Mapping is done via CSS overrides: `.bg-[#F8FAFC]{background:var(--bg)!important
 - ❌ Do NOT use different theme key than `jbook-study-dark`
 - ❌ Do NOT use emoji as icons (already replaced with SVG in current code)
 - ❌ Do NOT hardcode hex values in HTML classes — use CSS variable overrides
-- ❌ Do NOT use `html.dark` or `jbt-theme` for dark mode
+- ❌ Do NOT use `html.dark` or `kalima-theme` for dark mode
 - ❌ Do NOT break RTL — `dir="ltr"` is correct for landing (English-first marketing)
 - ❌ Do NOT use `z-[9999]` — use Tailwind `z-*` scale
 - ❌ Do NOT use `100vh` for full-height — use `min-h-dvh`
@@ -95,7 +95,7 @@ Mapping is done via CSS overrides: `.bg-[#F8FAFC]{background:var(--bg)!important
 - Init script runs before paint, checks `localStorage.getItem('jbook-study-dark')==='1'` → `document.body.classList.add('app-dark')`
 - Toggle script updates same key and syncs sun/moon `display` styles.
 - Testimonial carousel with keyboard navigation, pause on hover/focus, reduced-motion support
-- No `jbt-theme` key — removed.
+- No `kalima-theme` key — removed.
 - All SVG icons must use Lucide/Phosphor, not emoji characters
 
 ---

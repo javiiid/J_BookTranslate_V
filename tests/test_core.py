@@ -16,7 +16,7 @@ from app.core.client import create_client
 def main():
 
     print("=" * 60)
-    print("J Book Translate - Core Test")
+    print("KALIMA - Core Test")
     print("=" * 60)
 
     # ========================================================

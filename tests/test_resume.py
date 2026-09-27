@@ -387,7 +387,7 @@ def translate_selected_chunks(
 def main():
 
     print("=" * 60)
-    print("J Book Translate - Resume Test")
+    print("KALIMA - Resume Test")
     print("=" * 60)
 
     # ========================================================

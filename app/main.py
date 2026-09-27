@@ -25,7 +25,7 @@ from app.output.formats import (
 
 def main():
     """
-    Main entry point for J Book Translate.
+    Main entry point for KALIMA.
 
     Responsibilities:
         1. Parse command-line arguments.
@@ -51,7 +51,7 @@ def main():
 
         print()
         print("=" * 60)
-        print("J BOOK TRANSLATE")
+        print("KALIMA")
         print("=" * 60)
 
         print(f"Input    : {args.input}")

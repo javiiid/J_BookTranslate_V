@@ -1,1 +1,1 @@
-"""Persistence services for the J Book Translate web application."""
+"""Persistence services for the KALIMA web application."""

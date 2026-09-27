@@ -25,7 +25,7 @@ _TEMPLATE = r'''<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<title>پایش ترجمه | J Book Translate</title>
+<title>پایش ترجمه | KALIMA</title>
 __FONTS__
 <script src="https://cdn.tailwindcss.com"></script>
 <script>
@@ -702,7 +702,7 @@ async function refresh(force){
     renderOverview();
     if(force || !wasRunning || job.status === 'running') loadChunks();
     if(selectedTab === 'logs') loadLogs();
-    document.title = (STATUS_FA[job.status] || job.status) + ' · ' + job.filename + ' | J Book Translate';
+    document.title = (STATUS_FA[job.status] || job.status) + ' · ' + job.filename + ' | KALIMA';
   }catch(error){
     if(!job) toast(error.message, 'error');
   }finally{

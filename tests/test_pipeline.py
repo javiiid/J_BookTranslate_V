@@ -33,7 +33,7 @@ MODEL = "gpt-5.6-terra"
 def main():
 
     print("=" * 60)
-    print("J Book Translate - Pipeline Offline Test")
+    print("KALIMA - Pipeline Offline Test")
     print("=" * 60)
 
     # ========================================================

@@ -10,7 +10,7 @@ import json
 from app.core.fonts import embedded_vazirmatn_font_faces
 
 
-_READER_TEMPLATE = r"""<!doctype html><html lang="fa" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><title>مطالعهٔ کتاب | J Book Translate</title>__FONTS__<style>
+_READER_TEMPLATE = r"""<!doctype html><html lang="fa" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><title>مطالعهٔ کتاب | KALIMA</title>__FONTS__<style>
 :root{--app:#eef2f8;--surface:#fff;--surface-2:#f7f9fc;--text:#16202e;--muted:#69788e;--accent:#356df6;--accent-2:#7257e8;--accent-soft:#356df614;--line:#e2e8f1;--shadow:0 20px 50px rgba(30,48,80,.10);--font-size:18px;--line-height:1.9;--reading-width:760px;--radius:22px}
 body.theme-night{--app:#14161a;--surface:#1e2126;--surface-2:#24272d;--text:#ddd8ce;--muted:#9b978f;--accent:#c9ad74;--accent-2:#b08d55;--accent-soft:#c9ad7420;--line:#33383f;--shadow:0 16px 44px rgba(0,0,0,.35)}
 body.theme-sepia{--app:#efe3cd;--surface:#fbf4e4;--surface-2:#f5ead4;--text:#41341f;--muted:#8b785a;--accent:#a8763e;--accent-2:#8f5f2c;--accent-soft:#a8763e1f;--line:#e6d8bd;--shadow:0 18px 46px rgba(90,64,30,.12)}

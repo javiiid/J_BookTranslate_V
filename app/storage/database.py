@@ -9,6 +9,10 @@ from typing import Any
 from app.core.paths import ensure_dir
 
 UTC = timezone.utc
+# The product was renamed to KALIMA, and this file name was deliberately left
+# alone. It holds every job, book, glossary and billing row the user has; a
+# rename here would point the app at an empty database and orphan the real one
+# with no error, just an app that has forgotten everything.
 DB_PATH = ensure_dir("data") / "jbooktranslate.db"
 
 class Database:

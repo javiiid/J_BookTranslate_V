@@ -1,6 +1,6 @@
 # Dashboard Page Overrides
 
-> **PROJECT:** J Book Translate
+> **PROJECT:** KALIMA
 > **Generated:** 2026-09-26
 > **Page Type:** Dashboard / Workspace
 > **Source File:** `app/web.py` → `PAGE` and `SIDEBAR_HTML`

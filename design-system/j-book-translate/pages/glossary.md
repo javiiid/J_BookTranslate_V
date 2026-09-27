@@ -1,6 +1,6 @@
 # Glossary Page Overrides
 
-> **PROJECT:** J Book Translate
+> **PROJECT:** KALIMA
 > **Generated:** 2026-09-26
 > **Page Type:** Glossary / Term Management
 > **Source File:** `app/glossary/service.py` → `get_glossary()`, `save_glossary()` and `app/glossary/automatic.py` → `sync_book()`

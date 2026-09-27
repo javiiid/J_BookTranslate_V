@@ -6,7 +6,7 @@
 
 ---
 
-**Project:** J Book Translate
+**Project:** KALIMA
 **Generated:** 2026-09-26
 **Category:** Translation Tool / Book Publisher
 
@@ -288,7 +288,7 @@ body.app-dark .app-sidebar {
 
 **Keywords:** Clean, simple, spacious, functional, white space, high contrast, geometric, sans-serif, grid-based, essential, RTL-native
 
-**Best For:** Professional tools, dashboards, translation studios, documentation sites, publisher platforms
+**Best For:** Professional tools, dashboards, word by word, book by books, documentation sites, publisher platforms
 
 **Key Effects:** Subtle hover (200-250ms), smooth transitions, sharp shadows, clear type hierarchy, fast loading, RTL-aware animations
 
@@ -345,7 +345,7 @@ body.app-dark {
 - Storage key: `jbook-study-dark` (`'1'` = dark)
 - Same key used across landing, dashboard, library, workspace
 - Toggle button: `#theme-toggle` with sun/moon SVGs
-- **Do NOT use** `jbt-theme` or `html.dark`
+- **Do NOT use** `kalima-theme` or `html.dark`
 
 ### Dark Mode Anti-patterns (Do NOT Use)
 - ❌ Pure black (#000000) backgrounds — use deep navy (#0e141e) for OLED comfort
@@ -380,7 +380,7 @@ body.app-dark {
 ## Z-Index Scale
 - Use Tailwind `z-*` scale consistently: `z-0 z-10 z-20 z-30 z-40 z-50`
 - **Don't:** Arbitrary z-index values like `z-[9999]`
-- **Stack for J Book Translate:**
+- **Stack for KALIMA:**
   - `z-10` — Sidebar (`app-sidebar`)
   - `z-20` — Global language switcher (`#global-language`)
   - `z-30` — Modal overlay

@@ -1,6 +1,6 @@
 # Reader Page Overrides
 
-> **PROJECT:** J Book Translate
+> **PROJECT:** KALIMA
 > **Generated:** 2026-09-26
 > **Page Type:** Reader / Study Center
 > **Source File:** `app/reader/page.py` → `reader_page()` and `app/reader/service.py`
