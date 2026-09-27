@@ -1,4 +1,4 @@
-﻿from app.pipeline.epub_handler import EPUBHandler
+from app.pipeline.epub_handler import EPUBHandler
 
 
 def reassemble_translation(
@@ -13,16 +13,16 @@ def reassemble_translation(
     Parameters
     ----------
     input_epub_path : str or Path
-        Ù…Ø³ÛŒØ± EPUB Ø§ØµÙ„ÛŒ
+        مسیر EPUB اصلی
 
     output_epub_path : str or Path
-        Ù…Ø³ÛŒØ± EPUB Ø®Ø±ÙˆØ¬ÛŒ
+        مسیر EPUB خروجی
 
     chapter_map : dict
-        Ù†Ù‚Ø´Ù‡ Ù…Ø­Ù„ Ù‚Ø±Ø§Ø±Ú¯ÛŒØ±ÛŒ ChunkÙ‡Ø§
+        نقشه محل قرارگیری Chunkها
 
     translations : dict
-        ØªØ±Ø¬Ù…Ù‡ ChunkÙ‡Ø§
+        ترجمه Chunkها
     """
 
     EPUBHandler.save_translated_epub(
