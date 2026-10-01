@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ChunkRow } from '@/lib/chunks'
 import { fa } from '@/lib/format'
 import { FALLBACK_VIEWPORT, ROW_H, computeWindow } from '@/lib/virtual'
+import { CHUNK_COLUMNS } from '@/lib/chunks-columns'
 
 /**
  * Windowed chunk table.
@@ -43,16 +44,16 @@ function Row({ row }: { row: ChunkRow }) {
   const translated = row.target !== ''
   return (
     <tr style={{ height: ROW_H }} data-flagged={row.flagged}>
-      <td style={{ width: '18%' }}>
+      <td data-label={CHUNK_COLUMNS.id.label} style={{ width: CHUNK_COLUMNS.id.width }}>
         <span className="chunk-id">{row.id}</span>
         {row.chapter ? <div className="chunk-id" style={{ marginTop: 4 }}>{row.chapter}</div> : null}
       </td>
-      <td style={{ width: '36%' }}>
+      <td data-label={CHUNK_COLUMNS.source.label} style={{ width: CHUNK_COLUMNS.source.width }}>
         <div className="chunk-text" dir="ltr">
           {row.source}
         </div>
       </td>
-      <td style={{ width: '36%' }}>
+      <td data-label={CHUNK_COLUMNS.target.label} style={{ width: CHUNK_COLUMNS.target.width }}>
         {translated ? (
           <div className="chunk-text" dir="rtl">
             {row.target}
@@ -61,7 +62,7 @@ function Row({ row }: { row: ChunkRow }) {
           <span style={{ color: 'var(--color-text-muted)' }}>—</span>
         )}
       </td>
-      <td style={{ width: '10%' }}>
+      <td data-label={CHUNK_COLUMNS.status.label} style={{ width: CHUNK_COLUMNS.status.width }}>
         {row.flagged ? (
           <span className="flag-pill">پرچم</span>
         ) : translated ? (
@@ -148,10 +149,10 @@ export function VirtualChunkTable({
       <table className="vtable">
         <thead>
           <tr>
-            <th scope="col">شناسه</th>
-            <th scope="col">مبدأ</th>
-            <th scope="col">ترجمه</th>
-            <th scope="col">وضعیت</th>
+            <th scope="col">{CHUNK_COLUMNS.id.label}</th>
+            <th scope="col">{CHUNK_COLUMNS.source.label}</th>
+            <th scope="col">{CHUNK_COLUMNS.target.label}</th>
+            <th scope="col">{CHUNK_COLUMNS.status.label}</th>
           </tr>
         </thead>
         <tbody>
@@ -181,7 +182,6 @@ export function VirtualChunkTable({
 }
 
 /** Exposed so the count readout and the table cannot drift apart. */
-export { ROW_H as CHUNK_ROW_HEIGHT, OVERSCAN as CHUNK_OVERSCAN } from '@/lib/virtual'
 
 /** A short summary for the QA tab, matching the Python `flagged.slice(0, 50)`. */
 export function FlaggedList({ rows }: { rows: ChunkRow[] }) {

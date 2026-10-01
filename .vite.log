@@ -1,0 +1,44 @@
+  fonts: generated CSS and 5 weights present
+  ok  favicon.svg  (2.3 KB)
+  ok  kalima-mark-light.svg  (3.7 KB)
+  ok  kalima-mark-dark.svg  (3.2 KB)
+
+  [32m[1mVITE[22m v8.3.1[39m  [2mready in [0m[1m423[22m[2m[0m ms[22m
+
+  [32m➜[39m  [1mLocal[22m:   [36mhttp://localhost:[1m5173[22m/[39m
+[2m  [32m➜[39m  [1mNetwork[22m[2m: use [22m[1m--host[22m[2m to expose[22m
+[2m4:48:58 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/styles/tokens.css, /src/pages/JobListPage.tsx, /src/pages/JobDetailPage.tsx, /src/pages/AccountPage.tsx, /src/pages/DashboardPage.tsx, /src/pages/LibraryPage.tsx, /src/pages/ReaderPage.tsx, /src/components/monitor/AssetsTab.tsx, /src/components/monitor/OverviewTab.tsx, /src/components/estimate/EstimateModal.tsx, /src/components/monitor/LogsTab.tsx, /src/components/monitor/QaTab.tsx, /src/components/glossary/GlossaryReview.tsx, /src/components/glossary/GlossaryPanel.tsx and 2 more[22m
+[2m4:48:58 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [33mhmr invalidate [39m[2m/src/pages/JobListPage.tsx[22m Could not Fast Refresh ("BADGE_TONE" export is incompatible). Learn more at https://github.com/vitejs/vite-plugin-react/tree/main/packages/plugin-react#consistent-components-exports
+[2m4:48:58 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/App.tsx[22m
+[2m4:48:58 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [33mhmr invalidate [39m[2m/src/pages/JobDetailPage.tsx[22m Could not Fast Refresh ("ACTION_LABELS" export is incompatible). Learn more at https://github.com/vitejs/vite-plugin-react/tree/main/packages/plugin-react#consistent-components-exports
+[2m4:48:58 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/App.tsx[22m
+[2m4:48:58 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [33mhmr invalidate [39m[2m/src/components/monitor/OverviewTab.tsx[22m Could not Fast Refresh ("STATUS_FA" export is incompatible). Learn more at https://github.com/vitejs/vite-plugin-react/tree/main/packages/plugin-react#consistent-components-exports
+[2m4:48:58 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/JobDetailPage.tsx[22m
+[2m4:49:07 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/styles/tokens.css[22m
+[2m4:49:54 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/styles/tokens.css, /src/pages/WorkspacePage.tsx, /src/pages/JobListPage.tsx, /src/pages/JobDetailPage.tsx, /src/pages/AccountPage.tsx, /src/pages/DashboardPage.tsx, /src/pages/LibraryPage.tsx, /src/pages/ReaderPage.tsx, /src/components/estimate/EstimateModal.tsx, /src/components/glossary/GlossaryReview.tsx, /src/components/glossary/GlossaryPanel.tsx, /src/components/ApiStatus.tsx[22m
+[2m4:49:54 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [33mhmr invalidate [39m[2m/src/pages/JobDetailPage.tsx[22m Could not Fast Refresh ("ACTION_LABELS" export is incompatible). Learn more at https://github.com/vitejs/vite-plugin-react/tree/main/packages/plugin-react#consistent-components-exports
+[2m4:49:54 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/App.tsx[22m
+[2m4:50:05 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/styles/tokens.css, /src/pages/WorkspacePage.tsx, /src/pages/JobListPage.tsx, /src/pages/JobDetailPage.tsx, /src/pages/AccountPage.tsx, /src/pages/DashboardPage.tsx, /src/pages/LibraryPage.tsx, /src/pages/ReaderPage.tsx, /src/components/estimate/EstimateModal.tsx, /src/components/glossary/GlossaryReview.tsx, /src/components/glossary/GlossaryPanel.tsx, /src/components/ApiStatus.tsx[22m
+[2m4:50:05 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [33mhmr invalidate [39m[2m/src/pages/JobDetailPage.tsx[22m Could not Fast Refresh ("ACTION_LABELS" export is incompatible). Learn more at https://github.com/vitejs/vite-plugin-react/tree/main/packages/plugin-react#consistent-components-exports
+[2m4:50:05 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/App.tsx[22m
+[2m4:50:13 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/styles/tokens.css, /src/pages/WorkspacePage.tsx[22m
+[2m4:50:20 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/styles/tokens.css, /src/pages/WorkspacePage.tsx[22m
+[2m4:50:25 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/styles/tokens.css, /src/pages/WorkspacePage.tsx[22m
+[2m4:50:35 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/styles/tokens.css, /src/pages/WorkspacePage.tsx[22m
+[2m4:50:42 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/styles/tokens.css, /src/pages/WorkspacePage.tsx[22m
+[2m4:50:59 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/styles/tokens.css, /src/pages/WorkspacePage.tsx[22m
+[2m4:51:06 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/styles/tokens.css, /src/pages/WorkspacePage.tsx[22m
+[2m4:51:36 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/styles/tokens.css, /src/pages/WorkspacePage.tsx, /src/pages/JobListPage.tsx, /src/pages/JobDetailPage.tsx, /src/pages/AccountPage.tsx, /src/pages/DashboardPage.tsx, /src/pages/LibraryPage.tsx, /src/pages/ReaderPage.tsx, /src/components/estimate/EstimateModal.tsx, /src/components/glossary/GlossaryReview.tsx, /src/components/glossary/GlossaryPanel.tsx, /src/components/ApiStatus.tsx[22m
+[2m4:51:36 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [33mhmr invalidate [39m[2m/src/pages/JobDetailPage.tsx[22m Could not Fast Refresh ("ACTION_LABELS" export is incompatible). Learn more at https://github.com/vitejs/vite-plugin-react/tree/main/packages/plugin-react#consistent-components-exports
+[2m4:51:36 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/App.tsx[22m
+[2m4:51:55 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/styles/tokens.css[22m
+[2m4:52:05 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/styles/tokens.css[22m
+[2m4:52:13 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mpage reload [39m[2mscripts/preview/estimate-known.html[22m
+[2m4:52:13 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mpage reload [39m[2mscripts/preview/estimate-unknown.html[22m
+[2m4:52:13 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mpage reload [39m[2mscripts/preview/estimate-resume.html[22m
+[2m4:52:13 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mpage reload [39m[2mscripts/preview/estimate-sub-cent.html[22m
+[2m4:52:31 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/styles/tokens.css[22m
+[2m4:53:10 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mpage reload [39m[2mscripts/preview/estimate-known.html[22m
+[2m4:53:10 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mpage reload [39m[2mscripts/preview/estimate-unknown.html[22m
+[2m4:53:10 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mpage reload [39m[2mscripts/preview/estimate-resume.html[22m
+[2m4:53:10 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mpage reload [39m[2mscripts/preview/estimate-sub-cent.html[22m

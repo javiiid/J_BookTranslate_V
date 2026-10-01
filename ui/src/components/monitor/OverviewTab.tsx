@@ -3,7 +3,6 @@ import {
   ASSET_FA,
   HEALTH_FA,
   MODE_FA,
-  STATUS_FA,
   STYLE_FA,
   fa,
   faBytes,
@@ -137,4 +136,3 @@ export function OverviewTab({ job }: { job: Job }) {
 }
 
 // Re-exported for the tabs that render a status chip.
-export { STATUS_FA }

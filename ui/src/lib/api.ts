@@ -298,7 +298,220 @@ export interface AccountPortal {
     transactions: Transaction[]
   }
   plans: PortalPlan[]
+  /** Present in the response. Optional in the type because an older backend
+   *  that predates the key table would omit it, and the page handles that by
+   *  treating absence as an empty list rather than crashing. */
+  api_keys?: PortalApiKey[]
+  /** See `api_keys` for why these are optional. */
+  marketplace?: MarketplaceItem[]
+  orders?: unknown[]
+  packages?: unknown[]
+  publisher?: {
+    books: number
+    active_projects: number
+    delivered: number
+    estimated_spend: number
+    languages?: unknown
+  }
 }
+
+/**
+ * An API key row from the portal.
+ *
+ * `name` is whatever is in the database column, and the endpoint returns it
+ * verbatim. In this installation that column holds a string beginning with
+ * `sk-`, which is shaped like a provider secret -- so the UI masks any name
+ * that looks like one rather than printing it. See `maskSecretLike` in
+ * `lib/format.ts`, and the note there about why the value should be fixed on
+ * the server instead.
+ */
+export interface PortalApiKey {
+  id: number
+  name: string
+  token_prefix: string
+  scopes: string
+  created_at: string
+  last_used_at: string | null
+  revoked_at: string | null
+}
+
+export type MarketplaceKind = 'glossary' | 'preset' | 'style' | string
+
+/**
+ * An installable pack from the marketplace.
+ *
+ * These are real files, not purchases: installing one copies a glossary into
+ * this install. `installed` says whether that has already happened, and
+ * `price_usd` is displayed but there is no checkout in a local install, so the
+ * page does not offer to buy anything.
+ */
+export interface MarketplaceItem {
+  id: string
+  kind: MarketplaceKind
+  title_fa: string
+  title_en: string
+  description_fa: string
+  description_en: string
+  owner_name: string
+  language_pair: string
+  price_usd: number
+  rating: number
+  installs: number
+  featured: number
+  active: number
+  installed: number
+}
+
+/** The result of POST /api/provider-config/test. */
+export interface ProviderTestResult {
+  message: string
+  base_url: string
+  model: string
+  /** Whether the chosen model appears in the provider's own list. */
+  model_available?: boolean
+  models?: string[]
+}
+
+/**
+ * The pre-translation estimate, from POST /api/jobs/estimate.
+ *
+ * `estimated_cost.known` is the field that matters. The endpoint this replaced
+ * returned a hardcoded `0.0`, which beside a "start translating" button reads as
+ * "free" rather than "unknown". A model with no price on file now comes back with
+ * `known: false`, and the UI has to say the price is unknown instead of printing
+ * a number nobody can stand behind.
+ *
+ * `chunk_count_exact` says the count came from actually chunking the book. It is
+ * false for a PDF or an unreadable file, where the count is derived from the page
+ * count or the byte size, and the dialog says which it is.
+ */
+export interface TranslationEstimate {
+  /** Chunks that will actually be billed. Less than `chunk_count_total` on a resume. */
+  chunk_count: number
+  /** Every chunk the book chunks into, translated or not. */
+  chunk_count_total: number
+  /** Chunks an unfinished job already has. 0 when there is no resume. */
+  chunks_already_done: number
+  token_count: number
+  estimated_cost: {
+    min: number
+    max: number
+    /**
+     * The two parts summed, before the band. Carried at four decimals so the
+     * breakdown on screen adds up to it: at cents, 0.05 + 0.03 is 0.08, not 0.09.
+     *
+     * The dialog used to render the total beside a badge reading
+     * `+$0.12 شامل واژه‌نامه` -- a total that already included the glossary, beside
+     * a sign inviting it to be added again. A reader who believed the badge got
+     * a total $0.12 above the one on screen. These two fields are what make the
+     * total checkable instead.
+     */
+    base: number
+    /** The token cost alone. */
+    translation: number
+    /** The second LLM pass over every chunk. Zero when the glossary is off. */
+    glossary: number
+    currency: string
+    known: boolean
+  }
+  /** Kept for callers that only want the glossary share. Mirrors `estimated_cost.glossary`. */
+  glossary_cost: number
+  /** A Persian duration, generated server-side. */
+  estimated_time: string
+  estimated_time_seconds: number
+  source_lang: string
+  target_lang: string
+  model: string
+  mode: string
+  concurrency: number
+  has_resume: boolean
+  /** 0–1 when `has_resume`, else null. */
+  resume_progress: number | null
+  /** Chunks still to send on a resume. 0 when there is no resume. */
+  resume_remaining: number
+  chunk_count_exact: boolean
+}
+
+/** What `POST /api/jobs/upload` returns. */
+export interface UploadedBook {
+  file_path: string
+  filename: string
+  size: number
+}
+
+/**
+ * What `POST /api/jobs/rescue/import` returns.
+ *
+ * The chunk field names match `/api/jobs/estimate` on purpose, so the page reads
+ * one vocabulary from both. A page that had to learn two spellings of "how many
+ * chunks are in this book" would eventually read the wrong one -- and here the two
+ * numbers differ, because one is the whole book and the other is what a resume
+ * will actually bill.
+ */
+export interface RescueImport {
+  id: string
+  filename: string
+  file_path: string
+  from_lang: string
+  to_lang: string
+  model: string
+  mode: string
+  /** Always `paused`. Nothing is sent until the reader confirms the estimate. */
+  status: string
+  chunk_count_total: number
+  chunks_already_done: number
+  chunks_remaining: number
+  /** The temp directory the resume reads. Useful in an error message. */
+  resumed_from: string
+}
+
+/**
+ * A book is already on the server, and the caller did not say to replace it.
+ *
+ * A distinct type rather than a flag on `ApiError`, because this one is a
+ * question and the rest are failures. A rescue carries the settings it ran with,
+ * so importing it over a queued book would silently change its language pair,
+ * model or glossary -- and a different model means a different bill. The reader
+ * decides.
+ */
+export class RescueConflictError extends Error {
+  readonly conflict: RescueConflict
+
+  constructor(message: string, conflict: RescueConflict) {
+    super(message)
+    this.name = 'RescueConflictError'
+    this.conflict = conflict
+  }
+}
+
+export interface RescueConflict {
+  id: string
+  status: string
+  progress: { completed: number; total: number }
+  rescued: { chunks_already_done: number; chunk_count_total: number }
+  /**
+   * Per setting, what the rescue says and what the server has. A `rescue` equal
+   * to its `server` means nothing differs, and the page says so rather than
+   * listing four identical lines.
+   */
+  differences: Record<string, { rescue: string; server: string }>
+}
+
+export interface EstimateRequest {
+  file_path: string
+  /** Every optional field admits `undefined` on purpose: this project compiles
+   * with `exactOptionalPropertyTypes`, and "not specified" is the meaningful
+   * value for all of them. The server then falls back to what is in
+   * config.yaml, which is the honest request -- better than the client sending a
+   * default it invented. */
+  model?: string | undefined
+  concurrency?: number | undefined
+  mode?: 'fast' | 'batch' | undefined
+  glossary_auto?: boolean | undefined
+  from_lang?: string | undefined
+  to_lang?: string | undefined
+}
+
 
 export class ApiError extends Error {
   readonly status: number
@@ -417,4 +630,122 @@ export const api = {
   accountPortal: () => request<AccountPortal>('/api/account/portal'),
   analytics: () => request<AnalyticsOverview>('/api/analytics/overview'),
   logs: () => request<{ items: JobEvent[] }>('/api/logs'),
+
+  /**
+   * Ask the provider whether it is reachable, and whether the chosen model is in
+   * its own list.
+   *
+   * This is the only way to turn "a key is present" into "translation will work".
+   * Both fields are optional, so an empty body means "test what is saved".
+   */
+  testProvider: (body: { base_url?: string; api_key?: string; default_model?: string } = {}) =>
+    request<ProviderTestResult>('/api/provider-config/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+
+  /** Install a marketplace pack. Copies a glossary into this install. */
+  installMarketplaceItem: (itemId: string) =>
+    request<{ ok: boolean; id: string }>(
+      `/api/account/marketplace/${encodeURIComponent(itemId)}/install`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' },
+    ),
+
+  /** Revoke an API key. The row stays, so the history is auditable. */
+  revokeApiKey: (id: number) =>
+    request<{ ok: boolean }>(`/api/account/api-keys/${id}/revoke`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    }),
+
+  /**
+   * Store an uploaded book without translating it, and return where it landed.
+   *
+   * This exists because `POST /api/jobs` uploads *and* starts a worker thread in
+   * the same request, so there was no moment at which the browser held a file the
+   * server had not already begun paying to translate. Without this the estimate
+   * dialog had no path to measure.
+   */
+  uploadBook: async (file: File) => {
+    const form = new FormData()
+    form.set('book', file, file.name)
+    const response = await fetch('/api/jobs/upload', { method: 'POST', body: form })
+    const text = await response.text()
+    const body: unknown = text ? JSON.parse(text) : null
+    if (!response.ok) {
+      const message =
+        body && typeof body === 'object' && 'error' in body && typeof body.error === 'string'
+          ? body.error
+          : `HTTP ${response.status}`
+      throw new ApiError(message, response.status)
+    }
+    return body as UploadedBook
+  },
+
+  /**
+   * Import a rescue archive and put the book back into a resumable state.
+   *
+   * `POST /api/jobs/{id}/rescue` has always produced a portable archive of a job's
+   * state. There was no route that read one, so a rescue could be downloaded and
+   * never used -- a backup nobody could act on. This is the way back in.
+   *
+   * The archive carries its own settings, so the languages, the model and the
+   * glossary come from it rather than from the form. The job lands `paused`, not
+   * queued: the caller is expected to show the estimate for the *remaining* chunks
+   * and then resume, so nothing is spent before it is priced.
+   *
+   * `force` is the answer to "this book is already on the server -- replace it?",
+   * not a default. The first call omits it and gets a 409 describing what differs.
+   */
+  importRescue: async (
+    file: File,
+    options?: { /** `undefined` is "not specified", which is the first call. */
+      force?: boolean | undefined },
+  ) => {
+    const form = new FormData()
+    form.set('file', file, file.name)
+    if (options?.force) form.set('force', 'true')
+    const response = await fetch('/api/jobs/rescue/import', { method: 'POST', body: form })
+    const text = await response.text()
+    const body: unknown = text ? JSON.parse(text) : null
+
+    if (response.status === 409 && body && typeof body === 'object' && 'conflict' in body) {
+      throw new RescueConflictError(
+        (body as { error?: string }).error ?? 'این کتاب از قبل روی سرور هست.',
+        (body as { conflict: RescueConflict }).conflict,
+      )
+    }
+    if (!response.ok) {
+      const message =
+        body && typeof body === 'object' && 'error' in body && typeof body.error === 'string'
+          ? body.error
+          : `HTTP ${response.status}`
+      throw new ApiError(message, response.status)
+    }
+    return body as RescueImport
+  },
+
+  /**
+   * Continue a job that was imported, paused, or stopped.
+   *
+   * A separate call from `importRescue` on purpose: the import stages the book and
+   * the estimate dialog prices what is left, and only then is anything sent.
+   */
+  resumeJob: (id: string) => request<{ ok: true }>(`/api/jobs/${encodeURIComponent(id)}/resume`, { method: 'POST' }),
+
+  /**
+   * Estimate a translation run before it starts.
+   *
+   * Chunking the file to answer this is not free -- it reads the whole book and
+   * runs the real chunker -- so the dialog is opened on the assumption the user
+   * wants to translate, not on every keystroke.
+   */
+  estimate: (body: EstimateRequest) =>
+    request<TranslationEstimate>('/api/jobs/estimate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
 }

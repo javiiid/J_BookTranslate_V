@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { api } from '@/lib/api'
-import { BADGE_TONE, STATUS_FA, badgeClass, fa, faDate, faDuration } from '@/lib/format'
+import { STATUS_FA, badgeClass, fa, faDate, faDuration } from '@/lib/format'
 
 /**
  * The job list.
@@ -26,7 +26,7 @@ export function JobListPage() {
   const running = items.filter((job) => job.status === 'running').length
 
   return (
-    <main className="py-8" dir="rtl">
+    <main className="page" dir="rtl">
       <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-[length:var(--text-h1)] font-extrabold tracking-tight">
@@ -78,8 +78,16 @@ export function JobListPage() {
                     event.currentTarget.style.borderColor = 'var(--color-border)'
                   }}
                 >
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div className="min-w-0 flex-1">
+                  {/* Stacked below `lg`, one line above it.
+
+                      As a `flex-wrap` row the title took the full width and the
+                      badge and the counter dropped to the second line at the far
+                      edge, leaving a gap the width of the title beside them --
+                      the same "too little here, too much there" the dashboard
+                      had. A grid gives each its own row on a phone and puts
+                      them back on one line on a desktop. */}
+                  <div className="grid gap-[var(--spacing-2)] lg:grid-cols-[minmax(0,1fr)_auto_auto] lg:items-center lg:gap-3">
+                    <div className="min-w-0">
                       <strong className="block truncate text-[length:var(--text-body)]">
                         {job.filename}
                       </strong>
@@ -91,20 +99,28 @@ export function JobListPage() {
                         {faDate(job.created_at)}
                       </span>
                     </div>
-                    <span className={badgeClass(job.status)}>{STATUS_FA[job.status]}</span>
-                    <span
-                      className="text-[length:var(--text-label)] tabular-nums"
-                      style={{ color: 'var(--color-text-muted)' }}
-                    >
-                      {job.progress.total
-                        ? `${fa(job.progress.completed)}/${fa(job.progress.total)}`
-                        : faDuration(job.eta_seconds)}
+                    {/* The badge and the counter travel together, tight, on one
+                        line, rather than as two siblings of a wrapping row. */}
+                    <span className="flex items-center gap-[var(--spacing-2)]">
+                      <span className={badgeClass(job.status)}>{STATUS_FA[job.status]}</span>
+                      <span
+                        className="text-[length:var(--text-label)] tabular-nums"
+                        style={{ color: 'var(--color-text-muted)' }}
+                      >
+                        {job.progress.total
+                          ? `${fa(job.progress.completed)}/${fa(job.progress.total)}`
+                          : faDuration(job.eta_seconds)}
+                      </span>
                     </span>
                   </div>
 
                   {job.progress.total > 0 ? (
-                    <div className="mt-3 flex items-center gap-3">
-                      <div className="progress-track flex-1">
+                    /* The bar and its percentage are one unit: a 12px gap
+                       between them on a 361px line is a third of the content
+                       width spent on air. The gap drops to the smallest token
+                       below `lg`. */
+                    <div className="mt-3 flex items-center gap-[var(--spacing-2)] lg:gap-3">
+                      <div className="progress-track min-w-0 flex-1">
                         <div className="progress-fill" style={{ width: `${percent}%` }} />
                       </div>
                       <span
@@ -135,4 +151,3 @@ export function JobListPage() {
 }
 
 // Re-exported so the tone map stays discoverable from one place.
-export { BADGE_TONE }

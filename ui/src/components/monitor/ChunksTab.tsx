@@ -82,7 +82,7 @@ export function ChunksTab({ items, available, isPending, isError, onRetry }: Chu
           }}
           placeholder="جست‌وجو در مبدأ و ترجمه…"
           aria-label="جست‌وجو در بخش‌ها"
-          className="field min-w-[220px] flex-1"
+          className="field min-w-0 flex-1 basis-[14rem]"
           style={{ background: 'var(--color-surface)', borderColor: 'var(--color-border)', color: 'var(--color-text-primary)' }}
         />
         <label className="flex items-center gap-2 text-[length:var(--text-label)]">

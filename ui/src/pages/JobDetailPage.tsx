@@ -69,10 +69,19 @@ function Toast({ message, tone, onDone }: { message: string; tone: 'ok' | 'error
   )
 }
 
-export function JobDetailPage() {
+/**
+ * @param initialTab Which tab to open on. Defaults to the overview.
+ *
+ * Exists so a render or a test can open a specific tab. The tab was `useState`
+ * with a hardcoded `'overview'` and no way in, so the chunk table -- the widest
+ * surface in the app, and the one the width work was done on -- could not be
+ * rendered outside a click, and a layout that is only ever seen after a click
+ * is a layout that does not get looked at.
+ */
+export function JobDetailPage({ initialTab = 'overview' }: { initialTab?: TabId } = {}) {
   const { id = '' } = useParams()
   const client = useQueryClient()
-  const [tab, setTab] = useState<TabId>('overview')
+  const [tab, setTab] = useState<TabId>(initialTab)
   const [pending, setPending] = useState<ActionName | null>(null)
   const [toast, setToast] = useState<{ message: string; tone: 'ok' | 'error' } | null>(null)
 
@@ -134,7 +143,7 @@ export function JobDetailPage() {
 
   if (job.isPending) {
     return (
-      <main className="py-[var(--spacing-8)]" dir="rtl">
+      <main className="page" dir="rtl">
         <div className="grid gap-[var(--spacing-4)]">
           <div className="skeleton" style={{ height: 76 }} />
           <div className="skeleton" style={{ height: 320 }} />
@@ -145,7 +154,7 @@ export function JobDetailPage() {
 
   if (job.isError) {
     return (
-      <main className="py-[var(--spacing-8)]" dir="rtl">
+      <main className="page" dir="rtl">
         <div className="surface-card p-[var(--spacing-5)]">
           <h1 className="text-[length:var(--text-h2)] font-extrabold">پایش ترجمه</h1>
           <p role="alert" className="mt-[var(--spacing-3)] text-[length:var(--text-small)]" style={{ color: 'var(--color-error)' }}>
@@ -168,7 +177,7 @@ export function JobDetailPage() {
   const busy = pending !== null
 
   return (
-    <main className="py-[var(--spacing-8)]" dir="rtl">
+    <main className="page" dir="rtl">
       <header className="mb-[var(--spacing-5)]">
         <Link
           to="/"
@@ -266,4 +275,3 @@ export function JobDetailPage() {
   )
 }
 
-export { ACTION_LABELS }

@@ -1,6 +1,9 @@
 import { NavLink } from 'react-router-dom'
 import type { ReactNode } from 'react'
 import { useTheme } from '@/hooks/useTheme'
+import { NAV } from './nav'
+import { NavIcon } from './NavIcon'
+import { MobileNav } from './MobileNav'
 
 /**
  * The KALIMA mark.
@@ -29,20 +32,31 @@ export function KalimaMark({ size = 34 }: { size?: number }) {
   )
 }
 
-interface NavItem {
-  to: string
-  label: string
-  icon: string
+/**
+ * The theme switch.
+ *
+ * It lives here, in the chrome that is on every page, rather than being copied
+ * into individual pages. It used to appear on both the dashboard and the account
+ * page, which meant two places to keep in step and no way to switch theme from
+ * anywhere else -- the reader, the library and the workspace had no control at
+ * all.
+ */
+export function ThemeToggle() {
+  const { theme, toggle } = useTheme()
+  const dark = theme === 'dark'
+  return (
+    <button
+      type="button"
+      onClick={toggle}
+      aria-pressed={dark}
+      title={dark ? 'حالت روشن' : 'حالت تاریک'}
+      aria-label={dark ? 'روشن کردن حالت روشن' : 'روشن کردن حالت تاریک'}
+      className="btn-icon"
+    >
+      <span aria-hidden="true">{dark ? '☀' : '◐'}</span>
+    </button>
+  )
 }
-
-const NAV: NavItem[] = [
-  { to: '/', label: 'داشبورد', icon: '◧' },
-  { to: '/workspace', label: 'افزودن کتاب', icon: '＋' },
-  { to: '/jobs', label: 'پایش ترجمه', icon: '◷' },
-  { to: '/library', label: 'کتابخانه', icon: '▣' },
-  { to: '/reader', label: 'مطالعه', icon: '❐' },
-  { to: '/account', label: 'پنل کاربری', icon: '◈' },
-]
 
 /**
  * The rail.
@@ -55,11 +69,16 @@ const NAV: NavItem[] = [
  *
  * In RTL the active edge belongs on the right, where the reading direction
  * starts. `insetInlineStart` handles that without a second rule.
+ *
+ * It is `hidden` below `lg`, where `MobileNav` takes over. Both are in the DOM
+ * at every width and the inactive one is `display: none`, which is what a screen
+ * reader and a keyboard user need: a hidden landmark is skipped, and a
+ * `visibility`-hidden one is still focusable and announces itself.
  */
 export function Sidebar() {
   return (
     <aside
-      className="fixed inset-y-0 end-0 z-40 flex w-60 flex-col border-s bg-[var(--color-surface)] pe-4 ps-3"
+      className="fixed inset-y-0 end-0 z-40 hidden w-60 flex-col border-s bg-[var(--color-surface)] pe-4 ps-3 lg:flex"
       style={{ borderColor: 'var(--color-border)' }}
       aria-label="ناوبری اصلی"
     >
@@ -92,22 +111,25 @@ export function Sidebar() {
               boxShadow: isActive ? 'inset -2px 0 0 0 var(--color-primary)' : 'none',
             })}
           >
-            <span className="w-4 flex-none text-center text-[length:var(--text-small)]" aria-hidden="true">
-              {icon}
+            <span className="flex flex-none items-center justify-center" aria-hidden="true">
+              <NavIcon name={icon} size={18} />
             </span>
             {label}
           </NavLink>
         ))}
       </nav>
 
-      <p
-        className="mt-auto pb-4 text-[length:var(--text-caption)] leading-5"
-        style={{ color: 'var(--color-text-muted)' }}
-      >
-        رابط React روی همان API پایتون.
-        <br />
-        بک‌اند دست‌نخورده است.
-      </p>
+      <div className="mt-auto flex items-center justify-between gap-2 pb-3">
+        <ThemeToggle />
+        <p
+          className="text-[length:var(--text-caption)] leading-5"
+          style={{ color: 'var(--color-text-muted)' }}
+        >
+          رابط React روی همان API پایتون.
+          <br />
+          بک‌اند دست‌نخورده است.
+        </p>
+      </div>
     </aside>
   )
 }
@@ -116,8 +138,22 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className="min-h-dvh" style={{ background: 'var(--color-background)' }}>
       <Sidebar />
-      {/* end-4 rather than a fixed px value, so the gutter survives RTL. */}
-      <div className="me-60 min-h-dvh pe-6">{children}</div>
+      <MobileNav />
+      {/*
+        The shell owns two things and no more: the offset for the rail, and the
+        space the fixed bottom bar needs. The gutter is the page's own, via
+        `.page` -- it used to be `pe-6` here, so the horizontal padding lived in
+        this file while the vertical lived in each page, and only on one side.
+
+        `lg:me-60` clears the rail and `lg:pb-0` gives the bar's space back once
+        the bar is not rendered. Without it every desktop page carries dead
+        space at the bottom for a bar that is not there.
+      */}
+      <div
+        className="me-0 min-h-dvh pb-[calc(var(--mobile-nav-height)+env(safe-area-inset-bottom,0px))] lg:me-60 lg:pb-0"
+      >
+        {children}
+      </div>
     </div>
   )
 }

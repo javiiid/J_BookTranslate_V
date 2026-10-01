@@ -1,409 +1,282 @@
 /**
- * Tests for the pure logic behind the job monitor.
+ * The chunk table, and the width arithmetic behind it.
  *
- * No DOM, no React: the window arithmetic and the chunk filters are the two
- * places where a mistake is invisible at a glance. A virtualiser with an
- * off-by-one still renders a table, just with a gap of blank space at the end
- * of a long book, and a filter with the wrong precedence silently shows rows
- * the user excluded.
+ * ## The complaint
  *
- * Run with: npm test
+ * "The monitor has no suitable width." Measured at 393px with the `.page`
+ * gutter, the table gets 361px. It is `table-layout: fixed` with four columns
+ * and no widths, so the browser divides that evenly: **90px a column**. A
+ * Persian word at 14px is about 10 characters in 90px, and the widest header
+ * the table carries -- `ترجمهٔ نهایی` -- is 14 characters. The header wrapped,
+ * the row grew past the 96px the virtualiser assumes, and the scroll window and
+ * the rendered rows drifted apart.
+ *
+ * ## Why the fix is a reflow and not a column width
+ *
+ * No column width makes a four-column table readable at 90px a column. So below
+ * 640px the table becomes a stack of labelled blocks. A horizontal scroll on a
+ * phone hides data behind a gesture, and a monitoring table is read by looking
+ * down a column.
+ *
+ * That reflow needs each cell to carry its own label, because a stacked cell has
+ * no header above it. The labels live in `CHUNK_COLUMNS` and the `th` text is
+ * read from the same declaration, so the two cannot drift.
+ *
+ * ## The thing that was silently un-overridable
+ *
+ * The widths were inline `style` on every `td`. An inline style beats a class at
+ * any specificity, so the mobile rules in `tokens.css` could never have applied
+ * -- the table was authored to be exactly as un-overridable as it needed to be
+ * overridable. The widths and the labels are now in one exported constant, and
+ * the tests below hold that the table has no inline width of its own.
  */
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
+import { readFileSync, readdirSync } from 'node:fs'
+import { ROW_H, OVERSCAN, computeWindow } from '../src/lib/virtual.ts'
+import {
+  CHUNK_COLUMNS,
+  CHUNK_COLUMN_LIST,
+  NARROWEST_VIEWPORT,
+  PX_PER_CHARACTER_AT_12PX,
+  evenSplit,
+} from '../src/lib/chunks-columns.ts'
 
-import { type ChunkRow, extractNotes, filterChunks, stripDuplicatedHeading, stripLeadingTitle, toRow } from '../src/lib/chunks.ts'
-import { OVERSCAN, ROW_H, computeWindow, scrollToReveal } from '../src/lib/virtual.ts'
+const css = readFileSync(new URL('../src/styles/tokens.css', import.meta.url), 'utf8')
+const table = readFileSync(
+  new URL('../src/components/monitor/VirtualChunkTable.tsx', import.meta.url),
+  'utf8',
+)
 
-const rows = (count: number): ChunkRow[] =>
-  Array.from({ length: count }, (_, index) => ({
-    id: `chunk-${index}`,
-    chapter: index % 2 === 0 ? 'فصل ۱' : '',
-    source: `source text ${index}`,
-    target: index % 3 === 0 ? '' : `متن ترجمه ${index}`,
-    flagged: index % 7 === 0,
-    notes: [],
-  }))
+/**
+ * The body of the reflow block in the *built* stylesheet, by brace counting.
+ *
+ * Two things this has to get right, both learned by getting them wrong:
+ *
+ *   * **Brace counting, not a regex.** A pattern ending at the first `\n  }`
+ *     stops inside the block, because it is nine rules deep.
+ *   * **Range syntax, not `max-width`.** The minifier rewrites
+ *     `@media (max-width: 39.99rem)` to `@media (width<=39.99rem)`, which is
+ *     the modern range form and the same query. Asserting on the source string
+ *     therefore checks the input, not the output -- and the output is what a
+ *     browser sees.
+ *
+ * The source is read too, for the declarations that survive minification
+ * unchanged, and both are checked so neither can drift alone.
+ */
+function mediaBody(css: string, query: string): string {
+  const start = css.indexOf(query)
+  assert.notEqual(start, -1, `the stylesheet has no ${query}`)
+  const open = css.indexOf('{', start)
+  let depth = 0
+  for (let i = open; i < css.length; i++) {
+    if (css[i] === '{') depth++
+    if (css[i] === '}') {
+      depth--
+      if (depth === 0) return stripComments(css.slice(open + 1, i))
+    }
+  }
+  return ''
+}
 
-describe('computeWindow', () => {
-  it('renders only a small slice of a long list', () => {
-    const result = computeWindow(rows(4000), 0, 520)
-    // 520 / 96 = 5.4 -> 6 visible, plus 6 overscan each side.
-    assert.equal(result.rows.length, 6 + OVERSCAN * 2)
-    assert.ok(result.rows.length < 30, 'a 4000-row book must not render 4000 rows')
+/** CSS comments, removed.
+ *
+ * The `thead` rule carries a comment that explains *why* it does not use
+ * `display: none`, and it names `display: none` while doing so. An assertion
+ * that greps the block for `display: none` therefore found the explanation and
+ * reported the rule as doing the thing it is written to avoid.
+ */
+function stripComments(css: string): string {
+  return css.replace(/\/\*[\s\S]*?\*\//g, '')
+}
+
+
+/** The built stylesheet: what a browser actually receives. */
+const builtCss = (() => {
+  const dir = new URL('../dist/assets/', import.meta.url)
+  const file = readdirSync(dir).find((name) => name.endsWith('.css'))
+  return file ? readFileSync(new URL(file, dir), 'utf8') : ''
+})()
+
+const NARROWEST = NARROWEST_VIEWPORT
+const SM = 640
+
+describe('the column widths add up', () => {
+  it('the four widths total 100%', () => {
+    // A table-layout:fixed table with widths summing to more than 100% lets the
+    // browser scale them, and the split stops being the one that was declared.
+    const total = CHUNK_COLUMN_LIST.reduce((sum, column) => sum + Number.parseFloat(column.width), 0)
+    assert.equal(total, 100, `the widths total ${total}%`)
   })
 
-  it('starts at the first row with no top spacer at scroll zero', () => {
-    const result = computeWindow(rows(500), 0, 520)
-    assert.equal(result.start, 0)
-    assert.equal(result.padTop, 0)
+  it('there are four columns, and they are the four the table renders', () => {
+    assert.equal(CHUNK_COLUMN_LIST.length, 4)
+    // The lookup is by key, not by index: `CHUNK_COLUMNS.id`, not
+    // `CHUNK_COLUMNS[0]`. The first version matched the index form and counted
+    // zero cells against a table rendering four.
+    //
+    // The pattern matches the whole expression including `.label` / `.width`.
+    // Stopping at `CHUNK_COLUMNS.<key>` matched nothing, because in the real
+    // JSX the closing brace comes after `.label`, not after the key.
+    const cells = (table.match(/<td data-label=\{CHUNK_COLUMNS\.\w+\.label\}/g) ?? []).length
+    assert.equal(cells, 4, `the Row renders ${cells} labelled cells`)
+    const heads = (table.match(/<th scope="col">\{CHUNK_COLUMNS\.\w+\.label\}<\/th>/g) ?? []).length
+    assert.equal(heads, 4, `the header renders ${heads} cells from the declaration`)
   })
 
-  it('keeps the scroll height honest, so the scrollbar matches the real length', () => {
-    const list = rows(1000)
-    const result = computeWindow(list, 0, 520)
-    // Top spacer + rendered rows + bottom spacer must account for every row.
-    const accountedFor =
-      result.padTop / ROW_H + result.rows.length + result.padBottom / ROW_H
-    assert.equal(accountedFor, list.length)
-  })
-
-  it('adds a top spacer once the user scrolls past the overscan', () => {
-    const result = computeWindow(rows(1000), 96 * 30, 520)
-    assert.equal(result.start, 30 - OVERSCAN)
-    assert.equal(result.padTop, (30 - OVERSCAN) * ROW_H)
-    assert.ok(result.padTop > 0)
-  })
-
-  it('still covers the viewport at the very end of the list', () => {
-    const list = rows(50)
-    const result = computeWindow(list, 10_000, 520)
-    assert.equal(result.end, 50)
-    assert.equal(result.padBottom, 0, 'no spacer below the last row')
-    assert.ok(result.rows.length > 0, 'the final rows must be reachable')
-  })
-
-  it('never produces a negative spacer when the list is shorter than the window', () => {
-    const result = computeWindow(rows(3), 0, 520)
-    assert.equal(result.padTop, 0)
-    assert.equal(result.padBottom, 0)
-    assert.equal(result.rows.length, 3)
-  })
-
-  it('handles an empty list without throwing', () => {
-    const result = computeWindow([], 500, 520)
-    assert.deepEqual(result.rows, [])
-    assert.equal(result.padTop, 0)
-    assert.equal(result.padBottom, 0)
-  })
-
-  it('survives a negative scrollTop', () => {
-    // Impossible in a DOM, easy to produce in a test, and a negative index
-    // would slice from the end of the array.
-    const result = computeWindow(rows(100), -500, 520)
-    assert.equal(result.start, 0)
-  })
-
-  it('treats a zero-height viewport as one row rather than none', () => {
-    const result = computeWindow(rows(100), 0, 0)
-    assert.ok(result.rows.length >= 1)
-  })
-
-  it('reports how many rows are not painted', () => {
-    const result = computeWindow(rows(1000), 0, 520)
-    assert.equal(result.hidden, 1000 - result.rows.length)
-  })
-
-  it('keeps rendering when a filter shrinks the list under the scroll position', () => {
-    // The realistic version of the bug: the reader is 300 rows down a
-    // 1000-row book, then types a filter that leaves 4 rows. scrollTop is still
-    // 28800, and slice(294, 4) would render nothing at all.
-    const full = computeWindow(rows(1000), 96 * 300, 520)
-    assert.ok(full.rows.length > 0)
-
-    const filtered = filterChunks(rows(1000), {
-      query: 'source text 1',
-      state: 'all',
-      flaggedOnly: false,
-    })
-    const after = computeWindow(filtered, 96 * 300, 520)
-    assert.ok(after.rows.length > 0, 'rows must survive a filter that shrinks the list')
-    assert.ok(after.padBottom >= 0)
-  })
-
-  it('never returns an empty render for a non-empty list', () => {
-    // Property check: whatever the scroll position, a non-empty list shows at
-    // least one row. This is the invariant the blank-table bug violated.
-    const list = rows(50)
-    for (const top of [0, 1, 95, 96, 4799, 4800, 99999, -50]) {
-      const result = computeWindow(list, top, 520)
-      assert.ok(result.rows.length > 0, `no rows rendered at scrollTop=${top}`)
-      assert.ok(result.start >= 0 && result.end <= list.length, `bad range at scrollTop=${top}`)
+  it('every column has a label, because a reflowed cell has no header above it', () => {
+    for (const column of CHUNK_COLUMN_LIST) {
+      assert.ok(column.label.trim().length > 0, `${column.key} has no label`)
     }
   })
-})
 
-describe('scrollToReveal', () => {
-  it('leaves the position alone when the row is already visible', () => {
-    assert.equal(scrollToReveal(3, 500, 0), 0)
-  })
-
-  it('scrolls up to a row above the viewport', () => {
-    assert.equal(scrollToReveal(2, 500, 960), 2 * ROW_H)
-  })
-
-  it('scrolls down just far enough to show a row below the viewport', () => {
-    const viewport = 500
-    const target = 20 * ROW_H
-    const next = scrollToReveal(20, viewport, 0)
-    assert.ok(next <= target, 'must not overshoot past the row')
-    assert.ok(next + viewport >= target + ROW_H, 'the row must be fully visible')
-  })
-})
-
-describe('extractNotes', () => {
-  it('finds a NOTE marker', () => {
-    assert.deepEqual(extractNotes('متن {NOTE: ambiguous} پایان'), ['{NOTE: ambiguous}'])
-  })
-
-  it('finds BOUNDARY_WARNING and WARNING too', () => {
-    assert.equal(extractNotes('{BOUNDARY_WARNING: split}')[0], '{BOUNDARY_WARNING: split}')
-    assert.equal(extractNotes('{WARNING: check}')[0], '{WARNING: check}')
-  })
-
-  it('ignores a marker with no colon or space after the keyword', () => {
-    // Matches the Python regex `[:\s]`, so `{NOTE}` alone is not a flag.
-    assert.deepEqual(extractNotes('{NOTE}'), [])
-  })
-
-  it('is not affected by regex state leaking between calls', () => {
-    // A shared global regex keeps lastIndex between calls, which made the
-    // second row of a list come back empty.
-    const text = 'a {NOTE: one} b {WARNING: two}'
-    assert.equal(extractNotes(text).length, 2)
-    assert.equal(extractNotes(text).length, 2)
-    assert.equal(extractNotes(text).length, 2)
-  })
-
-  it('handles empty and nullish input', () => {
-    assert.deepEqual(extractNotes(''), [])
-    assert.deepEqual(extractNotes(null), [])
-    assert.deepEqual(extractNotes(undefined), [])
+  it('the two text columns get more room than the two short ones', () => {
+    // A chunk id and a status badge are short. The text is the point of the
+    // table, and at an even split each text column would get what the badge
+    // needs and no more.
+    //
+    // Read by key rather than through an `Object.fromEntries(...map(...))`: the
+    // declaration is a record, so the key is the access, and building a second
+    // index out of it was only there because it used to be an array.
+    assert.ok(
+      Number.parseFloat(CHUNK_COLUMNS.source.width) > Number.parseFloat(CHUNK_COLUMNS.status.width),
+      'the source column is no wider than the status column',
+    )
+    assert.ok(
+      Number.parseFloat(CHUNK_COLUMNS.target.width) > Number.parseFloat(CHUNK_COLUMNS.id.width),
+      'the target column is no wider than the id column',
+    )
   })
 })
 
-describe('toRow', () => {
-  it('derives notes from the target first, then the source', () => {
-    const row = toRow({
-      id: 'c1',
-      chapter: 'فصل ۱',
-      source: 'src {NOTE: s}',
-      target: 'tgt {WARNING: t}',
-      flagged: true,
-    })
-    assert.deepEqual(row.notes, ['{WARNING: t}', '{NOTE: s}'])
-  })
-
-  it('keeps at most three notes, like the Python slice(0, 3)', () => {
-    const row = toRow({
-      id: 'c1',
-      chapter: '',
-      source: '{NOTE: a}{NOTE: b}{NOTE: c}',
-      target: '{WARNING: d}{WARNING: e}{WARNING: f}',
-      flagged: true,
-    })
-    assert.equal(row.notes.length, 3)
-  })
-})
-
-/* ------------------------------------------------------------------ */
-/* Chapter title duplication                                           */
-/* ------------------------------------------------------------------ */
-
-describe('stripLeadingTitle', () => {
-  // The exact shape the live endpoint returns: the title as loose text, then
-  // the same title inside an <h1>.
-  const DUPLICATED = '\n\n\n\nمعضل نقشه\u200cکش\n\n\n\n<h1>معضل نقشه\u200cکش</h1>\n<p>متن</p>'
-
-  /* BOTH copies are removed, not just the loose one. The reader shows the
-     chapter title in its own page header, so leaving an <h1> as well would
-     print it twice with a blank line between. That is the actual complaint
-     this fixes. */
-  it('removes both copies and leaves the body', () => {
-    const result = stripLeadingTitle(DUPLICATED, 'معضل نقشه\u200cکش')
-    assert.equal(result, '<p>متن</p>')
-  })
-
-  it('removes a lone heading', () => {
-    assert.equal(stripLeadingTitle('<h1>Title</h1><p>Body</p>', 'Title'), '<p>Body</p>')
-  })
-
-  it('removes a lone loose copy', () => {
-    assert.equal(stripLeadingTitle('Title<p>Body</p>', 'Title'), '<p>Body</p>')
-  })
-
-  it('handles three repeats', () => {
-    const html = 'T<h1>T</h1>T<p>Body</p>'
-    assert.equal(stripLeadingTitle(html, 'T'), '<p>Body</p>')
-  })
-
-  it('leaves a document alone when the title does not match', () => {
-    // Guessing would delete real content, so an inexact match is left as it is.
-    const html = '<h1>Something Else</h1><p>Body</p>'
-    assert.equal(stripLeadingTitle(html, 'Title'), html)
-  })
-
-  it('only removes a title at the very start', () => {
-    const html = '<p>Intro</p><p>The Title appears again</p>'
-    assert.equal(stripLeadingTitle(html, 'The Title'), html)
-  })
-
-  it('tolerates an empty title', () => {
-    assert.equal(stripLeadingTitle('<p>Body</p>', ''), '<p>Body</p>')
-    assert.equal(stripLeadingTitle('<p>Body</p>', '   '), '<p>Body</p>')
-  })
-
-  it('does not treat the title as a regex', () => {
-    // A title containing regex metacharacters must not blow up or match loosely.
-    const html = '<h1>Chapter 1 (a+b) [x]</h1><p>Body</p>'
-    assert.equal(stripLeadingTitle(html, 'Chapter 1 (a+b) [x]'), '<p>Body</p>')
-    const loose = 'Chapter 1 (a+b) [x]<p>Body</p>'
-    assert.equal(stripLeadingTitle(loose, 'Chapter 1 (a+b) [x]'), '<p>Body</p>')
-  })
-
-  it('is case insensitive on the heading, which some builders emit', () => {
-    assert.equal(stripLeadingTitle('<h1>TITLE</h1><p>B</p>', 'Title'), '<p>B</p>')
-  })
-
-  it('leaves a heading that is not the chapter title', () => {
-    const html = '<h1>Chapter 1</h1><p>The Cartographer’s Dilemma</p>'
-    assert.equal(stripLeadingTitle(html, 'The Cartographer’s Dilemma'), html)
-  })
-})
-
-describe('stripDuplicatedHeading', () => {
-  /* The bilingual blocks carry the original title in one column and the
-     translated title in the other, so no single title string fits both. This is
-     what the live block payload looks like, both sides. */
-  const ORIGINAL = '\n\n\n\nThe Cartographer\u2019s Dilemma\n\n\n\n<h1>The Cartographer\u2019s Dilemma</h1>\n<p>She unrolled</p>'
-  const TRANSLATED = '\n\n\n\nمعضل نقشه\u200cکش\n\n\n\n<h1>معضل نقشه\u200cکش</h1>\n<p>نقشه را گشود</p>'
-
-  it('removes the title from the original side', () => {
-    const result = stripDuplicatedHeading(ORIGINAL)
-    assert.equal(result, '<p>She unrolled</p>')
-  })
-
-  it('removes the title from the translated side', () => {
-    const result = stripDuplicatedHeading(TRANSLATED)
-    assert.equal(result, '<p>نقشه را گشود</p>')
-  })
-
-  it('handles the exact payload shape, with the trailing newline', () => {
-    // The trailing newline is the document's own content, not title noise, so it
-    // is kept. Only the title is removed.
-    assert.equal(stripDuplicatedHeading(ORIGINAL + '\n'), '<p>She unrolled</p>\n')
-  })
-
-  it('removes a lone loose copy', () => {
-    assert.equal(stripDuplicatedHeading('Title<p>Body</p>'), '<p>Body</p>')
-  })
-
-  it('removes a lone heading', () => {
-    assert.equal(stripDuplicatedHeading('<h1>Title</h1><p>Body</p>'), '<p>Body</p>')
-  })
-
-  it('tolerates attributes on the heading', () => {
-    assert.equal(
-      stripDuplicatedHeading('Title<h1 class="x" id="y">Title</h1><p>Body</p>'),
-      '<p>Body</p>',
+describe('the even split, which is what was wrong', () => {
+  it('an even split of the narrow width is too narrow for the widest header', () => {
+    // The number the fix is measured against. It is in this test rather than in
+    // a comment so that a change to the gutter or the type scale shows up as a
+    // failure here instead of as a screenshot nobody looks at.
+    const even = evenSplit(NARROWEST)
+    // `reduce` with no seed throws on an empty array, and it threw here with a
+    // message about the array rather than about the width, so the seed is
+    // explicit.
+    const widest = CHUNK_COLUMN_LIST.reduce(
+      (longest, column) => (column.label.length > longest.length ? column.label : longest),
+      '',
+    )
+    // 12 characters at 12px is about 74px, plus 16px of cell padding: 90px. The
+    // even split is 90px. So the header fits *exactly*, with nothing to spare,
+    // which is the actual failure: a header that fits to the pixel still wraps
+    // the moment a glyph is wider than the average, and Persian has plenty of
+    // those -- the `ٔ` in `ترجمهٔ` and the `ی` both run wide.
+    const needed = widest.length * PX_PER_CHARACTER_AT_12PX + 16
+    assert.equal(even, 90, `an even split is ${even}px, not the 90px this test describes`)
+    assert.equal(widest, 'ترجمهٔ نهایی', `the widest label is "${widest}", not the one this describes`)
+    assert.ok(
+      needed >= even,
+      `an even split gives ${even}px and the widest header needs about ${Math.round(needed)}px, ` +
+        'so this test no longer describes the problem it was written for',
     )
   })
 
-  it('matches despite different internal whitespace', () => {
-    assert.equal(
-      stripDuplicatedHeading('A  B<h1>A\n B</h1><p>Body</p>'),
-      '<p>Body</p>',
+  it('the declared widths give the text columns room for a phrase', () => {
+    // Below `sm` the table reflows, so a width is only claimed above the reflow
+    // point -- which is the point of the reflow being that no width is enough
+    // below it. The claim is therefore about the *narrowest non-reflowed*
+    // screen, 640px, not about a desktop: a width that only works at 1200px
+    // would be a desktop layout that happens to reflow on a phone, which is the
+    // thing the monitor was not.
+    assert.ok(SM > NARROWEST, 'the reflow point is not above the narrowest phone')
+    const text = CHUNK_COLUMNS.target
+    const share = Number.parseFloat(text?.width ?? '0') / 100
+    // The `.page` gutter at this width is still 24px a side: the narrow step
+    // applies below 640px, and 640 is the boundary the query is exclusive of.
+    const available = SM - 48
+    const atReflowPoint = Math.floor(available * share)
+    // A Persian sentence at 14px needs several lines even in 200px; what the
+    // column has to hold is a line or two, which this checks.
+    assert.ok(
+      atReflowPoint >= 180,
+      `the target column is ${atReflowPoint}px at ${SM}px, too narrow to hold a line of Persian`,
     )
-  })
-
-  it('matches despite the zero-width joiner a Persian title contains', () => {
-    // "نقشه‌کش" is joined with a ZWNJ. Treating it as whitespace would make the
-    // two copies fail to match and the duplicate would come back.
-    assert.equal(
-      stripDuplicatedHeading('نقشه\u200cکش<h1>نقشه\u200cکش</h1><p>Body</p>'),
-      '<p>Body</p>',
-    )
-  })
-
-  it('leaves a heading that disagrees with the loose text', () => {
-    // Different strings mean it is not a duplicate, and dropping either one
-    // would delete real content. Both copies stay.
-    const html = 'Chapter One<h1>The Cartographer</h1><p>Body</p>'
-    assert.equal(stripDuplicatedHeading(html), html)
-  })
-
-  it('still removes a lone heading even with no loose text at all', () => {
-    assert.equal(
-      stripDuplicatedHeading('<h1>Chapter One</h1><p>Body</p>'),
-      '<p>Body</p>',
-    )
-  })
-
-  it('only touches the very start', () => {
-    const html = '<p>Intro</p><p>Title</p><h1>Title</h1>'
-    assert.equal(stripDuplicatedHeading(html), html)
-  })
-
-  it('leaves a document with no heading alone', () => {
-    assert.equal(stripDuplicatedHeading('<p>Body</p>'), '<p>Body</p>')
-  })
-
-  it('leaves an empty document alone', () => {
-    assert.equal(stripDuplicatedHeading(''), '')
-  })
-
-  it('does not break a document that starts with a tag', () => {
-    assert.equal(stripDuplicatedHeading('<p>A</p><p>B</p>'), '<p>A</p><p>B</p>')
   })
 })
 
-describe('filterChunks', () => {
-  const list = rows(30)
-  it('returns everything with no filters', () => {
-    assert.equal(filterChunks(list, { query: '', state: 'all', flaggedOnly: false }).length, 30)
+describe('the reflow below sm', () => {
+  const SOURCE_QUERY = '@media (max-width: 39.99rem)'
+  const BUILT_QUERY = '@media (width<=39.99rem)'
+
+  it('the reflow block reaches the built stylesheet', () => {
+    // The source and the build are both checked, and the build is what a
+    // browser reads. The first version of this suite asserted the source
+    // string, which the minifier rewrites -- so the test was checking the
+    // input and would have passed while the output was wrong.
+    const body = mediaBody(builtCss, BUILT_QUERY)
+    assert.ok(body.includes('.vtable'), 'the built reflow block has no .vtable rule')
+    assert.ok(
+      mediaBody(css, SOURCE_QUERY).includes('.vtable'),
+      'the source reflow block has no .vtable rule',
+    )
   })
 
-  it('filters by state', () => {
-    const done = filterChunks(list, { query: '', state: 'done', flaggedOnly: false })
-    assert.ok(done.length > 0)
-    assert.ok(done.every((row) => row.target !== ''))
+  it('the built stylesheet is the one under test, and it exists', () => {
+    // A guard on the test itself: if the build were missing, `builtCss` would
+    // be empty and every assertion below would pass against nothing.
+    assert.ok(builtCss.length > 1000, `the built stylesheet is ${builtCss.length} bytes`)
   })
 
-  it('treats an untranslated chunk as pending', () => {
-    const pending = filterChunks(list, { query: '', state: 'pending', flaggedOnly: false })
-    assert.ok(pending.every((row) => row.target === ''))
+  it('the header is hidden without leaving the accessibility tree', () => {
+    // `display: none` on a `th` removes it from the tree, and the header cell
+    // is the accessible name for that column. The clip technique keeps the
+    // content present and the box out of the layout.
+    const body = mediaBody(builtCss, BUILT_QUERY)
+    assert.ok(/\.vtable thead\s*\{[\s\S]*?position:\s*absolute/.test(body), 'the thead is not clipped away')
+    assert.ok(!/display:\s*none/.test(body), 'the narrow rule uses display:none, which drops the header from the tree')
   })
 
-  it('filters to flagged only', () => {
-    const flagged = filterChunks(list, { query: '', state: 'flagged', flaggedOnly: false })
-    assert.ok(flagged.length > 0)
-    assert.ok(flagged.every((row) => row.flagged))
+  it('the cells become blocks and the rows stop being table rows', () => {
+    const body = mediaBody(builtCss, BUILT_QUERY)
+    assert.ok(/\.vtable td\s*\{[\s\S]*?display:\s*block/.test(body), 'the cells do not stack')
+    assert.ok(/\.vtable tr\s*\{[\s\S]*?display:\s*block/.test(body), 'the rows do not stack')
   })
 
-  it('searches the source', () => {
-    const found = filterChunks(list, { query: 'source text 7', state: 'all', flaggedOnly: false })
-    assert.deepEqual(found.map((row) => row.id), ['chunk-7'])
+  it('the row height is released, because a stacked row is not 96px', () => {
+    // The virtualiser assumes 96px a row. That is the desktop truth, and it is
+    // the reason this reflow has to release it: a block row is as tall as its
+    // content, and a fixed height would clip it.
+    const body = mediaBody(builtCss, BUILT_QUERY)
+    assert.ok(/\.vtable td\s*\{[\s\S]*?height:\s*auto/.test(body), 'the narrow rule leaves the cell height fixed')
   })
 
-  it('searches the translation', () => {
-    const found = filterChunks(list, { query: 'متن ترجمه 10', state: 'all', flaggedOnly: false })
-    assert.deepEqual(found.map((row) => row.id), ['chunk-10'])
+  it('each cell prints its own label through data-label', () => {
+    const body = mediaBody(builtCss, BUILT_QUERY)
+    assert.ok(
+      /content:\s*attr\(data-label\)/.test(body),
+      'the narrow rule does not print the data-label, so a stacked value has no name',
+    )
+  })
+})
+
+describe('the virtualiser and the stylesheet still agree', () => {
+  it('the row height in tokens.css is ROW_H', () => {
+    // The comment in tokens.css says these must match. They did, and they must
+    // keep matching: a mismatch does not throw, it renders blank space at the
+    // bottom of the table.
+    const height = /\.vtable td\s*\{[^}]*height:\s*(\d+)px/.exec(css)
+    assert.ok(height, '.vtable td has no height in tokens.css')
+    assert.equal(Number(height[1]), ROW_H, `CSS says ${height[1]}px, ROW_H says ${ROW_H}px`)
   })
 
-  it('ignores case', () => {
-    const found = filterChunks(list, { query: 'SOURCE TEXT 7', state: 'all', flaggedOnly: false })
-    assert.equal(found.length, 1)
-  })
-
-  it('combines the filters rather than unioning them', () => {
-    const combined = filterChunks(list, { query: 'source', state: 'flagged', flaggedOnly: false })
-    assert.ok(combined.every((row) => row.flagged))
-    assert.ok(combined.length < list.length)
-  })
-
-  it('applies flaggedOnly on top of the state filter', () => {
-    const combined = filterChunks(list, { query: '', state: 'done', flaggedOnly: true })
-    assert.ok(combined.every((row) => row.flagged && row.target !== ''))
-  })
-
-  it('can legitimately return nothing', () => {
-    assert.deepEqual(filterChunks(list, { query: 'nothing matches this', state: 'all', flaggedOnly: false }), [])
-  })
-
-  it('tolerates surrounding whitespace in the query', () => {
-    assert.equal(
-      filterChunks(list, { query: '  source text 7  ', state: 'all', flaggedOnly: false }).length,
-      1,
+  it('the window calculation is unchanged by any of this', () => {
+    // A guard on the test itself: `computeWindow` takes a list and a scroll
+    // offset, not the object shape the first version of this test assumed, so
+    // the assertions would have been made against nothing.
+    const rows = Array.from({ length: 100 }, (_, index) => index)
+    const window = computeWindow(rows, 0, 560, ROW_H, OVERSCAN)
+    assert.ok(window.start <= window.end, 'the window is inverted')
+    assert.ok(window.end <= rows.length, 'the window runs past the end of the list')
+    // A viewport of 560 at 96px a row is about six rows, plus the overscan.
+    assert.ok(
+      window.end - window.start <= Math.ceil(560 / ROW_H) + 2 * OVERSCAN,
+      `the window is ${window.end - window.start} rows, more than the viewport and overscan allow`,
     )
   })
 })

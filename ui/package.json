@@ -11,6 +11,7 @@
     "typecheck": "tsc -b --force",
     "lint": "oxlint",
     "preview": "vite preview",
+    "pretest": "vite build",
     "test": "node --test tests/*.test.ts",
     "verify": "npm run typecheck && npm run lint && npm test",
     "audit:contrast": "vite build && node scripts/audit-contrast.mjs",

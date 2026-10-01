@@ -213,6 +213,19 @@
   --color-selected: #deeaf0;
   --color-selected-border: #4c7c92;
 
+  /* The mobile bottom bar.
+     Two tokens, because the indicator is not one colour in both themes and the
+     difference is a real constraint rather than taste. In day mode a solid fill
+     would be a 40px blue dot on every screen; the wash plus brand ink is quieter
+     and the same pairing the sidebar's active row already uses. In dark mode
+     the wash is *darker* than the bar it sits on, so it disappears -- there the
+     fill has to be the aqua, with the near-black ink on top, which is the
+     primary-button pairing. Both pairs are already asserted in
+     tests/tokens.contrast.test.ts; the day one is "brand text on the subtle
+     wash", the dark one is "label on an aqua primary button". */
+  --color-nav-indicator: #eff5f8;
+  --color-nav-indicator-ink: #2e5c70;
+
   /* Elevation. Soft and low-opacity; the day palette carries hierarchy through
      the tinted neutrals more than through shadow. */
   --shadow-card: 0 1px 2px rgba(22, 51, 63, 0.05);
@@ -220,8 +233,23 @@
   --shadow-overlay: 0 16px 48px rgba(22, 51, 63, 0.16);
   --shadow-none: none;
 
+  /* The dimmed backdrop behind a modal. A token rather than a literal because it
+     has to differ per theme: on the light theme a 50% black scrim reads as a
+     shadow over white paper, and on the dark theme the same value is barely
+     visible against a near-black ground, so the panel appears to float with
+     nothing behind it. */
+  --color-scrim: rgba(7, 20, 38, 0.5);
+
   --ring-width: 2px;
   color-scheme: light;
+}
+
+/* The mobile bar's height, as a token rather than a number typed twice.
+   A fixed bottom bar that overlaps the last row of a page is the classic way to
+   make a form unusable, so the shell's bottom padding reads this same value --
+   one number, and the bar and the space it reserves cannot drift apart. */
+:root {
+  --mobile-nav-height: 3.5rem;
 }
 
 /* --------------------------------------------------------------------------
@@ -308,12 +336,21 @@
   --color-selected: #1f4655;
   --color-selected-border: #b0e1e4;
 
+  /* The mobile bottom bar, dark side. See the day block for why this pair is
+     the primary-button pair and not a wash. */
+  --color-nav-indicator: #b0e1e4;
+  --color-nav-indicator-ink: #071426;
+
   /* Dark mode gets almost no shadow: on a near-black ground, shadow is
      invisible, so elevation is carried by surface lightness instead. */
   --shadow-card: none;
   --shadow-raised: 0 4px 16px rgba(0, 0, 0, 0.4);
   --shadow-overlay: 0 16px 48px rgba(0, 0, 0, 0.6);
   --shadow-none: none;
+
+  /* Heavier than the day scrim: the ground is already dark, so the backdrop has
+     to do more work to separate the panel from it. */
+  --color-scrim: rgba(2, 8, 16, 0.66);
 
   --ring-width: 2px;
   color-scheme: dark;
@@ -387,6 +424,50 @@
     background: var(--color-surface-elevated);
     border: 1px solid var(--color-border-strong-elevated);
     border-radius: var(--radius-panel);
+  }
+
+  /* ------------------------------------------------------------------
+     The page gutter
+
+     One owner. Every page used to carry its own `py-8` while the shell
+     carried `pe-6`, which meant the horizontal gutter lived in one file and
+     the vertical in another -- and only on one side, so content sat against
+     the screen edge on the reading-start side and 24px away on the other.
+     A page now says `class="page"` and nothing else.
+
+     The two steps are measured against the narrowest phone the app claims to
+     support. 16px at 393px wide is a comfortable thumb margin; 24px from 640px
+     up, where there is room for it and the content is no longer edge to edge.
+     Vertical padding drops for the same reason: 32px top *and* bottom is a
+     third of a phone's viewport height spent on nothing.
+     ------------------------------------------------------------------ */
+  .page {
+    padding-block: var(--spacing-6);
+    padding-inline: var(--spacing-4);
+  }
+
+  @media (min-width: 40rem) {
+    .page {
+      padding-block: var(--spacing-8);
+      padding-inline: var(--spacing-6);
+    }
+  }
+
+  /* A row of controls that has to survive a narrow screen. `flex-wrap` so it
+     can break, and `flex: 1 1 12rem` on the field so it takes the free width
+     rather than forcing its sibling off the edge. A fixed rem width on a phone
+     is an overflow, not a layout: 16rem of input plus a button is wider than a
+     393px viewport. */
+  .control-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--spacing-2);
+  }
+
+  .control-row > .field {
+    flex: 1 1 12rem;
+    min-width: 0;
   }
 
   /* ------------------------------------------------------------------
@@ -632,8 +713,32 @@
     color: var(--color-text-primary);
   }
 
-  /* The virtualised chunk table. ROW_H in src/lib/virtual.ts must equal the
-     height below, or the computed window and the rendered rows disagree. */
+  /* ------------------------------------------------------------------
+     The chunk table
+
+     ROW_H in src/lib/virtual.ts must equal the height below, or the computed
+     window and the rendered rows disagree. They are both 96, and
+     tests/monitor.test.ts asserts it.
+
+     The width is the part that was reported as unusable. The table is
+     `table-layout: fixed` with four columns and no widths, so the browser
+     divides the space evenly: at 393px, minus the 16px gutter on each side,
+     that is 361px / 4 = 90px a column. A Persian word at 14px is about 10
+     characters in 90px, and the widest header the table carries --
+     "ترجمهٔ نهایی" -- is 14. So the header wrapped to two lines, the row grew
+     past the 96px the virtualiser assumed, and the scroll window and the
+     rendered rows drifted apart.
+
+     Two fixes, and both are needed:
+
+       * Below 640px the whole table becomes a list of stacked cards instead --
+         a four-column table at 90px a column is not a table, it is four
+         unreadable slivers, and no column width makes that readable.
+       * Each cell carries its own label, because a stacked cell has no header
+         above it. The labels live in `CHUNK_COLUMNS` in the component, and the
+         `th` text is read from the same declaration, so a header and a cell
+         label cannot disagree.
+     ------------------------------------------------------------------ */
   .vtable-wrap {
     max-height: 560px;
     overflow: auto;
@@ -643,6 +748,66 @@
     border-collapse: collapse;
     table-layout: fixed;
     font-size: var(--text-small);
+  }
+
+  /* Below `sm` the table is replaced by stacked rows. The markup is the same
+     table, restyled: a `td` becomes a block with its header from `data-label`,
+     so the four columns stack and each is as wide as the screen. This is the
+     one place a table is reflowed rather than scrolled, because a horizontal
+     scroll on a phone hides the data behind a gesture, and a monitoring table
+     is read by looking down a column. */
+  @media (max-width: 39.99rem) {
+    .vtable {
+      min-width: 0;
+      display: block;
+    }
+    .vtable thead {
+      /* Visually hidden, not removed: the header cells are the accessible name
+         for each field, and `display: none` on a `th` takes it out of the
+         accessibility tree along with the visual. */
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+      white-space: nowrap;
+    }
+    .vtable tbody,
+    .vtable tr,
+    .vtable td {
+      display: block;
+      width: auto;
+    }
+    .vtable tr {
+      border-bottom: 1px solid var(--color-border);
+      padding: var(--spacing-2) 0;
+    }
+    .vtable td {
+      height: auto;
+      min-height: 0;
+      border: 0;
+      padding: var(--spacing-1) var(--spacing-3);
+    }
+    /* The chunk id is the row's heading, so it reads first and in the primary
+       text colour; the two text columns are the same rank as each other. */
+    .vtable td:nth-child(1) {
+      font-weight: 700;
+      color: var(--color-text-primary);
+    }
+    /* A label before each value, taken from the matching `th` through the
+       `data-label` the component already sets on every cell. */
+    .vtable td[data-label]::before {
+      content: attr(data-label);
+      display: block;
+      font-size: var(--text-caption);
+      color: var(--color-text-muted);
+    }
+    /* The clamp is what the desktop cell had; a stacked row has the width of
+       the screen, so the three lines are a choice rather than a constraint. */
+    .vtable .chunk-text {
+      -webkit-line-clamp: 4;
+      line-clamp: 4;
+    }
   }
   .vtable th {
     position: sticky;
@@ -677,6 +842,20 @@
     -webkit-box-orient: vertical;
     overflow: hidden;
     line-height: 1.8;
+    /* Chunks are not prose. A book segment is a few hundred characters, but a
+       chunk can also be a machine-readable file -- the JSON of a translation
+       memory, an XML spine -- and a single unbroken run of 11,000 characters in
+       a `dir="ltr"` cell does not wrap at all: the box scrolls horizontally
+       inside its own `overflow: hidden`, so the cell shows the first 200px of
+       the first line and the rest is gone with no way to reach it.
+
+       `break-word` plus `anywhere` is the pair that handles both: the first
+       breaks a word too long for the line, the second gives the browser
+       permission to break inside one when even that is not enough. Neither
+       changes the wrapping of ordinary Persian, which breaks at spaces. */
+    overflow-wrap: break-word;
+    word-break: normal;
+    line-break: anywhere;
   }
   .chunk-id {
     font-family: var(--font-mono);
@@ -812,17 +991,107 @@
     animation: jbt-shimmer 1.4s ease-in-out infinite;
   }
 
+  /* ------------------------------------------------------------------
+     Modal
+     ------------------------------------------------------------------
+     Two pieces, and the reason they are separate: the overlay handles the
+     backdrop, the fade and the blur, while the panel handles the scale. A
+     single element cannot do both, because `transform` on the overlay would
+     scale the backdrop with it.
+
+     `aria-modal` and the focus move are in the component; nothing here is
+     load-bearing for a keyboard user, which is deliberate.
+     ------------------------------------------------------------------ */
+
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 80;
+    display: grid;
+    place-items: center;
+    padding: var(--spacing-4);
+    background: var(--color-scrim);
+    backdrop-filter: blur(4px);
+    animation: jbt-fade-in 200ms ease-out;
+  }
+
+  .modal-panel {
+    width: min(56rem, 100%);
+    max-height: calc(100dvh - var(--spacing-8));
+    overflow-y: auto;
+    padding: var(--spacing-5);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-modal);
+    background: var(--color-surface);
+    box-shadow: var(--shadow-overlay);
+    animation: jbt-scale-in 200ms ease-out;
+  }
+
+  .modal-panel:focus-visible {
+    outline: 2px solid var(--color-focus);
+    outline-offset: 2px;
+  }
+
+  /* Collapsible, animated with grid rows rather than max-height.
+
+     `max-height` has to be guessed, and when the guess is short the content is
+     clipped at the end of the transition. `grid-template-rows` goes from 0fr to
+     1fr, which is the content's own height, so nothing is clipped and no magic
+     number is involved. The inner div is the one that must have
+     `overflow: hidden` or the content does not collapse at all. */
+  .collapsible {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows 150ms ease;
+  }
+
+  .collapsible[data-open='true'] {
+    grid-template-rows: 1fr;
+  }
+
+  .collapsible > div {
+    overflow: hidden;
+    min-height: 0;
+  }
+
+  @keyframes jbt-fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  @keyframes jbt-scale-in {
+    from { opacity: 0; transform: scale(0.97) translateY(4px); }
+    to { opacity: 1; transform: none; }
+  }
+
   .toast {
     position: fixed;
     inset-block-end: var(--spacing-5);
-    inset-inline-start: 292px;
+    /* The 292px was the rail's width plus its gutter, so a toast cleared the rail
+       on the desktop. It has no such job on a phone, where there is no rail --
+       and at that inset a 380px toast starts 292px from the right edge of a 393px
+       screen, so it was pushed almost entirely off the display. Full width with
+       a margin below `lg`, offset again above it. */
+    inset-inline: var(--spacing-4);
     z-index: 60;
     max-width: 380px;
+    margin-inline-start: auto;
     padding: var(--spacing-3) var(--spacing-4);
     border-radius: var(--radius-control);
     font-size: var(--text-small);
     font-weight: 600;
     box-shadow: var(--shadow-overlay);
+  }
+
+  /* Above `lg` the rail is back, so the toast goes back beside it -- and above
+     the bottom bar, which is not rendered at that width but is still `fixed` in
+     the tree, so its space is still reserved by the shell. */
+  @media (min-width: 64rem) {
+    .toast {
+      inset-inline-start: 292px;
+      inset-inline-end: auto;
+      margin-inline-start: 0;
+    }
   }
   .toast-ok {
     background: var(--color-success);

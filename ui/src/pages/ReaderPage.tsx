@@ -109,7 +109,7 @@ export function ReaderPage() {
   const items = chapters.data?.items ?? []
 
   return (
-    <main className="py-8" dir="rtl">
+    <main className="page" dir="rtl">
       <header className="mb-5">
         <h1 className="text-[length:var(--text-h1)] font-extrabold tracking-tight">
           {chapters.data?.book ?? 'مطالعه'}

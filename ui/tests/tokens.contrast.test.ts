@@ -179,6 +179,31 @@ const PAIRS: Pair[] = [
   ['dark', '--color-accent', '--color-surface', AA_NON_TEXT, 'dark: accent on a card'],
   ['dark', '--color-progress-fill', '--color-progress-track', AA_NON_TEXT, 'dark: progress fill against its track'],
   ['dark', '--color-accent', '--color-surface-elevated', AA_NON_TEXT, 'dark: accent on a panel'],
+
+  // The mobile bottom bar. The indicator fill and the ink inside it are one pair
+  // and not two, because the fill is meaningless without the ink: what a reader
+  // actually sees is the icon on the circle, so only the ratio between those two
+  // says whether the selected item is legible. Checked against the bar's own
+  // surface rather than the page, because that is what it is drawn on.
+  ['day', '--color-nav-indicator-ink', '--color-nav-indicator', AA, 'day: the selected bar icon on its fill'],
+  ['dark', '--color-nav-indicator-ink', '--color-nav-indicator', AA, 'dark: the selected bar icon on its fill'],
+  // And the unselected label, which is the other thing on the bar.
+  ['day', '--color-text-muted', '--color-surface', AA, 'day: an unselected bar label on the bar'],
+  // The primary action's resting wash: a muted icon on `--color-primary-subtle`,
+  // which is what the bar actually draws for the one item that is neither
+  // selected nor plain.
+  ['day', '--color-text-muted', '--color-primary-subtle', AA, 'day: the resting primary icon on its wash'],
+  ['dark', '--color-text-muted', '--color-primary-subtle', AA, 'dark: the resting primary icon on its wash'],
+  // NOT `--color-text-muted` on `--color-nav-indicator`: that pair is 1.30:1 in
+  // the dark theme, because the selection fill is the aqua there. It is left out
+  // on purpose and the constraint is recorded, because it is the mistake the
+  // indicator invites -- using one fill for both "selected" and "at rest" -- and
+  // it is invisible until the dark theme is rendered. The bar keeps two
+  // distinguishable unselected fills for exactly this reason.
+  // The rule under the selected label carries the selection without relying on
+  // the fill being distinguishable, so it is held to the non-text threshold.
+  ['day', '--color-accent-strong', '--color-surface', AA_NON_TEXT, 'day: the selection rule on the bar'],
+  ['dark', '--color-accent-strong', '--color-surface', AA_NON_TEXT, 'dark: the selection rule on the bar'],
 ]
 
 /**

@@ -50,8 +50,16 @@ function BookRow({ book }: { book: LibraryBook }) {
 
   return (
     <li className="surface-card p-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
+      {/* Stacked, not side by side, below `lg`.
+
+          As a `flex-wrap` row the title took the full width and the badges
+          dropped underneath at the far edge, so a book with three badges had a
+          line of title, a line of badges, and a gap between them the width of
+          the screen. A grid gives the title its own row and the badges their
+          own, and above `lg` they sit on one line again with the badges pushed
+          to the end. */}
+      <div className="grid gap-2 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start lg:gap-3">
+        <div className="min-w-0">
           <strong className="block truncate text-[length:var(--text-body)]">{book.title}</strong>
           <span
             className="block text-[length:var(--text-caption)]"
@@ -150,7 +158,7 @@ export function LibraryPage() {
   const pages = Math.max(1, Math.ceil(total / (books.data?.limit ?? 12)))
 
   return (
-    <main className="py-8" dir="rtl">
+    <main className="page" dir="rtl">
       <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-[length:var(--text-h1)] font-extrabold tracking-tight">کتابخانه</h1>
@@ -162,10 +170,14 @@ export function LibraryPage() {
             {books.data ? ` · ${faBytes(books.data.storage.free)} فضای آزاد` : ''}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        {/* `control-row` rather than a plain flex row: this carried a `w-64`
+            field, which is 16rem of input plus a button inside a row that could
+            not wrap -- wider than a 393px viewport, so the button ran off the
+            edge. The field now takes the free width and the row breaks instead. */}
+        <div className="control-row">
           <input
             type="search"
-            className="field w-64"
+            className="field"
             value={rawQuery}
             onChange={(event) => onQuery(event.target.value)}
             placeholder="جست‌وجوی کتاب…"

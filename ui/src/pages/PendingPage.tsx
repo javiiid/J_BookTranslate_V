@@ -9,7 +9,7 @@ const PENDING: { path: string; label: string; note: string }[] = [
 
 export function PendingPage({ title }: { title: string }) {
   return (
-    <main className="py-[var(--spacing-8)]" dir="rtl">
+    <main className="page" dir="rtl">
       <div className="surface-card p-8">
         <h1 className="text-[length:var(--text-h1)] font-extrabold">{title}</h1>
         <p
@@ -28,7 +28,7 @@ export function PendingPage({ title }: { title: string }) {
 
 export function NotFoundPage() {
   return (
-    <main className="py-[var(--spacing-8)]" dir="rtl">
+    <main className="page" dir="rtl">
       <div className="surface-card p-8">
         <h1 className="text-[length:var(--text-h1)] font-extrabold">صفحه پیدا نشد</h1>
         <p
