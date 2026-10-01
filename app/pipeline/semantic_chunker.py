@@ -568,21 +568,36 @@ _DOT_SENTINEL = "\x00DOT\x00"
 _SENTENCE_BREAK = re.compile(r"(?<=[.!?؟!۔])\s+(?=[\"'«“(\[]?[A-ZÀ-ɏ؀-ۿ])")
 
 
-def split_markup_sentences(html: str) -> list[str]:
-    """Split a fragment at sentence ends, never inside a tag.
+def _plain_with_offsets(html: str) -> tuple[str, list[int]]:
+    """The visible text, plus where each of its characters sits in the markup.
 
-    The existing ``split_sentences`` runs on a string that includes the markup and
-    rejoins with a single space, which is how a paragraph over the limit ended up
-    22 characters short with its words welded together. Here a cut is only ever
-    made at a position in a *text node*, and each piece keeps the tags that
-    opened before it, so ``"".join(split_markup_sentences(x)) == x`` modulo the
-    whitespace at the cut points.
+    Every character of the result maps to exactly one index in ``html``, so a
+    position in the text can be turned back into a position in the markup. The
+    tag text itself is not included: a sentence boundary is a property of prose,
+    and letting the splitter reason about ``class="indent"`` is how a cut ends up
+    inside an attribute.
     """
-    if not html:
-        return []
+    characters: list[str] = []
+    offsets: list[int] = []
+    for tok in _token_stream(html):
+        if tok.kind != "text":
+            continue
+        for offset in range(tok.start, tok.end):
+            characters.append(html[offset])
+            offsets.append(offset)
+    return "".join(characters), offsets
 
-    # Find the cut offsets in the plain text, then map them back to the markup.
-    protected = html
+
+def _sentence_ends(plain: str) -> list[int]:
+    """Indices in ``plain`` just past the end of each sentence.
+
+    Found on the protected copy for the *test* only -- a cut must not be
+    suggested after "Dr." or inside "3.14" -- and then reported as positions in
+    the original. Working on the protected copy and slicing the original is what
+    broke the offsets: the sentinel is longer than what it replaced, so every
+    position after the first substitution was wrong.
+    """
+    protected = plain
     for abbreviation in _ABBREVIATIONS:
         protected = re.sub(
             re.escape(abbreviation),
@@ -592,20 +607,76 @@ def split_markup_sentences(html: str) -> list[str]:
         )
     protected = re.sub(r"(?<=\d)\.(?=\d)", _DOT_SENTINEL, protected)
 
-    cuts: list[int] = []
+    # Walk the two strings together, tracking how many sentinel characters have
+    # been substituted, so a match position in `protected` can be expressed as a
+    # position in `plain`.
+    ends: list[int] = []
+    shift = 0
+    pi = 0
+    pj = 0
     for match in _SENTENCE_BREAK.finditer(protected):
-        cuts.append(match.start())
+        target = match.start()
+        while pi < len(plain) and pj < target:
+            if protected[pj] == _DOT_SENTINEL[0] and plain[pi] == ".":
+                # A run of sentinel characters standing in for one dot.
+                pj += 1
+                while pj < len(protected) and protected[pj] == _DOT_SENTINEL[0]:
+                    pj += 1
+                shift -= 1
+                continue
+            pi += 1
+            pj += 1
+        # `match.start()` is on the whitespace. The sentence ends before it, so
+        # back off to the last non-space character -- that is the cut.
+        end = pi
+        while end > 0 and plain[end - 1].isspace():
+            end -= 1
+        if end > 0 and (not ends or ends[-1] < end):
+            ends.append(end)
+    return ends
 
-    if not cuts:
+
+def split_markup_sentences(html: str) -> list[str]:
+    """Split a fragment at sentence ends, never inside a tag.
+
+    A cut is only ever made at a position in a *text node*, and each piece keeps
+    the tags that opened before it, so ``"".join(split_markup_sentences(x)) == x``
+    exactly -- whitespace at the cut included. That equality is the whole point:
+    the chunker packs pieces back together with ``"".join`` and the save path
+    reassembles the document from the chunks, so anything a cut drops is gone for
+    good. It is what welded "A. B." into "A.B." in a shipped book.
+    """
+    if not html:
+        return []
+
+    plain, offsets = _plain_with_offsets(html)
+    if not plain:
+        return [html]
+
+    ends = _sentence_ends(plain)
+    if not ends:
         return [html]
 
     pieces: list[str] = []
     previous = 0
-    for cut in cuts:
-        if cut <= previous:
+    for end in ends:
+        if end <= previous:
             continue
-        pieces.append(html[previous:cut])
-        previous = cut
+        # The piece runs from the last boundary to the end of this sentence's
+        # text. The whitespace that follows stays with the *next* piece, which is
+        # where it belongs -- the source had it there, and the source is what the
+        # reassembled document has to match.
+        stop = offsets[end]
+        # Extend past any closing tags that follow immediately, so the element is
+        # closed in the piece that opened it.
+        while stop < len(html) and html[stop] == "<":
+            close = html.find(">", stop)
+            if close == -1:
+                break
+            stop = close + 1
+        pieces.append(html[previous:stop])
+        previous = stop
+
     pieces.append(html[previous:])
     return [piece for piece in pieces if piece]
 

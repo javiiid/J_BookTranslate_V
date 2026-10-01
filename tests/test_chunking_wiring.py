@@ -88,9 +88,28 @@ class _Recorder:
 class TestFlag:
 
     def test_default_is_off(self):
-        # Not a preference: switching the chunker changes what each positional
-        # chunk id means, so it must be a deliberate act.
-        assert get_chunking_config()["semantic_chunking"] is False
+        # The *code* default, not the value in config.yaml. Those are different
+        # questions: the constant is what a fresh install gets, and a user is
+        # entitled to turn the flag on in their own config. Asserting the live
+        # value here made this test fail the moment anyone enabled it, which
+        # trains people to ignore it.
+        #
+        # Why the default is off at all: chunks are identified by position and a
+        # saved translation is keyed by that id, so switching chunkers mid-project
+        # mixes two segmentations. See config.py.
+        from app.core import config as config_module
+
+        assert config_module.SEMANTIC_CHUNKING_DEFAULT is False
+
+    def test_the_config_default_survives_a_nonsense_value(self, monkeypatch):
+        from app.core import config as config_module
+
+        monkeypatch.setattr(
+            config_module, "get_translation_config", lambda: {"semantic_chunking": "maybe"}
+        )
+        # "maybe" is not a yes, so the code default stands rather than enabling a
+        # chunker by typo.
+        assert config_module.get_chunking_config()["semantic_chunking"] is False
 
     def test_reads_the_four_settings(self):
         settings = get_chunking_config()

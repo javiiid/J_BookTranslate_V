@@ -21,7 +21,7 @@ from pathlib import Path
 from app.core.client import create_client
 from app.core.models import get_default_model
 from app.core.paths import ensure_dir
-from app.translation.translator import translate_chunk
+from app.translation.translator import _clean_translation, translate_chunk
 
 
 # ============================================================
@@ -360,3 +360,52 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+class TestLeadingSeparator:
+    """The whitespace between two translations, which the save path relies on.
+
+    Chunks are rejoined with ``"".join``, so the separator between one chunk's
+    translation and the next has to live inside one of them. It used to be
+    stripped away, and a 60-chunk book came out with 26 paragraph boundaries
+    welded shut -- which is what "the texts get glued together" turned out to be.
+    """
+
+    def test_a_paragraph_translation_comes_back(self) -> None:
+        # The first version of the fix put the return inside the code-fence
+        # branch, so an ordinary translation -- no fence, the normal case -- fell
+        # off the end of the function and returned None. Every chunk then failed
+        # as "became empty after cleanup".
+        assert _clean_translation("سلام دنیا.", "<p>Hello</p>") == "سلام دنیا."
+
+    def test_surrounding_whitespace_is_still_removed(self) -> None:
+        # The point of the cleanup: the model's own padding goes.
+        assert _clean_translation("  ترجمه  ", "<p>x</p>").strip() == "ترجمه"
+
+    def test_a_leading_newline_is_restored(self) -> None:
+        # The source chunk began with the newline that followed the previous
+        # chunk's closing tag, and that newline is the paragraph break.
+        out = _clean_translation("متن", "\n\n<p>Something</p>")
+        assert out.startswith("\n\n")
+        assert out.strip() == "متن"
+
+    def test_a_source_with_no_leading_whitespace_adds_none(self) -> None:
+        assert _clean_translation("متن", "<p>Something</p>") == "متن"
+
+    def test_no_source_still_works(self) -> None:
+        assert _clean_translation("متن") == "متن"
+
+    def test_the_code_fence_is_still_removed(self) -> None:
+        fenced = "```html\n<p>ترجمه</p>\n```"
+        assert _clean_translation(fenced, "<p>x</p>").strip() == "<p>ترجمه</p>"
+
+    def test_translations_still_join_back_to_their_neighbours(self) -> None:
+        # The end-to-end shape, with the markup each translation is responsible
+        # for -- the `<p>` wrapper is part of the chunk, not of the model's output.
+        first = _clean_translation("پاراگراف اول.", "<p>First.</p>")
+        second = _clean_translation("پاراگراف دوم.", "\n<p>Second.</p>")
+        document = f"<p>{first}</p>{second}<p>پاراگراف سوم.</p>"
+        # The paragraph break survived: the closing tag is not glued straight to
+        # the next sentence. This is the exact shape that was broken.
+        assert "</p>پاراگراف دوم." not in document
+        assert "</p>\nپاراگراف دوم." in document

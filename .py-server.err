@@ -1,0 +1,234 @@
+----------------------------------------
+Exception occurred during processing of request from ('127.0.0.1', 51844)
+Traceback (most recent call last):
+  File "C:\Users\SadidGostaran_Co\AppData\Local\Python\pythoncore-3.14-64\Lib\socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\SadidGostaran_Co\AppData\Local\Python\pythoncore-3.14-64\Lib\socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\SadidGostaran_Co\AppData\Local\Python\pythoncore-3.14-64\Lib\socketserver.py", line 766, in __init__
+    self.handle()
+    ~~~~~~~~~~~^^
+  File "C:\Users\SadidGostaran_Co\AppData\Local\Python\pythoncore-3.14-64\Lib\http\server.py", line 500, in handle
+    self.handle_one_request()
+    ~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\SadidGostaran_Co\AppData\Local\Python\pythoncore-3.14-64\Lib\http\server.py", line 488, in handle_one_request
+    method()
+    ~~~~~~^^
+  File "D:\J_BookTranslate_V\app\web.py", line 1318, in do_GET
+    with job.output_path.open("rb") as output: shutil.copyfileobj(output,self.wfile)
+                                               ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\SadidGostaran_Co\AppData\Local\Python\pythoncore-3.14-64\Lib\shutil.py", line 257, in copyfileobj
+    fdst_write(buf)
+    ~~~~~~~~~~^^^^^
+  File "C:\Users\SadidGostaran_Co\AppData\Local\Python\pythoncore-3.14-64\Lib\socketserver.py", line 845, in write
+    self._sock.sendall(b)
+    ~~~~~~~~~~~~~~~~~~^^^
+ConnectionResetError: [WinError 10054] An existing connection was forcibly closed by the remote host
+----------------------------------------
+----------------------------------------
+Exception occurred during processing of request from ('127.0.0.1', 52799)
+Traceback (most recent call last):
+  File "D:\J_BookTranslate_V\app\web.py", line 1270, in do_GET
+    self._json({"status":"ready","message":message}); return
+    ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\J_BookTranslate_V\app\web.py", line 1105, in _json
+    self.send_response(status); self.send_header("Content-Type", "application/json; charset=utf-8"); self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data)
+                                                                                                                                                                             ~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\SadidGostaran_Co\AppData\Local\Python\pythoncore-3.14-64\Lib\socketserver.py", line 845, in write
+    self._sock.sendall(b)
+    ~~~~~~~~~~~~~~~~~~^^^
+ConnectionAbortedError: [WinError 10053] An established connection was aborted by the software in your host machine
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\SadidGostaran_Co\AppData\Local\Python\pythoncore-3.14-64\Lib\socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\SadidGostaran_Co\AppData\Local\Python\pythoncore-3.14-64\Lib\socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\SadidGostaran_Co\AppData\Local\Python\pythoncore-3.14-64\Lib\socketserver.py", line 766, in __init__
+    self.handle()
+    ~~~~~~~~~~~^^
+  File "C:\Users\SadidGostaran_Co\AppData\Local\Python\pythoncore-3.14-64\Lib\http\server.py", line 500, in handle
+    self.handle_one_request()
+    ~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\SadidGostaran_Co\AppData\Local\Python\pythoncore-3.14-64\Lib\http\server.py", line 488, in handle_one_request
+    method()
+    ~~~~~~^^
+  File "D:\J_BookTranslate_V\app\web.py", line 1271, in do_GET
+    except Exception as exc: self._json({"status":"error","message":_friendly_error(exc)}); return
+                             ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\J_BookTranslate_V\app\web.py", line 1105, in _json
+    self.send_response(status); self.send_header("Content-Type", "application/json; charset=utf-8"); self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data)
+                                                                                                                                                         ~~~~~~~~~~~~~~~~^^
+  File "C:\Users\SadidGostaran_Co\AppData\Local\Python\pythoncore-3.14-64\Lib\http\server.py", line 602, in end_headers
+    self.flush_headers()
+    ~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\SadidGostaran_Co\AppData\Local\Python\pythoncore-3.14-64\Lib\http\server.py", line 606, in flush_headers
+    self.wfile.write(b"".join(self._headers_buffer))
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\SadidGostaran_Co\AppData\Local\Python\pythoncore-3.14-64\Lib\socketserver.py", line 845, in write
+    self._sock.sendall(b)
+    ~~~~~~~~~~~~~~~~~~^^^
+ConnectionAbortedError: [WinError 10053] An established connection was aborted by the software in your host machine
+----------------------------------------
+----------------------------------------
+Exception occurred during processing of request from ('127.0.0.1', 52797)
+Traceback (most recent call last):
+  File "C:\Users\SadidGostaran_Co\AppData\Local\Python\pythoncore-3.14-64\Lib\socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\SadidGostaran_Co\AppData\Local\Python\pythoncore-3.14-64\Lib\socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\SadidGostaran_Co\AppData\Local\Python\pythoncore-3.14-64\Lib\socketserver.py", line 766, in __init__
+    self.handle()
+    ~~~~~~~~~~~^^
+  File "C:\Users\SadidGostaran_Co\AppData\Local\Python\pythoncore-3.14-64\Lib\http\server.py", line 500, in handle
+    self.handle_one_request()
+    ~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\SadidGostaran_Co\AppData\Local\Python\pythoncore-3.14-64\Lib\http\server.py", line 488, in handle_one_request
+    method()
+    ~~~~~~^^
+  File "D:\J_BookTranslate_V\app\web.py", line 1206, in do_GET
+    self._json({"items": jobs, "total": len(jobs)}); return
+    ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\J_BookTranslate_V\app\web.py", line 1105, in _json
+    self.send_response(status); self.send_header("Content-Type", "application/json; charset=utf-8"); self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data)
+                                                                                                                                                                             ~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\SadidGostaran_Co\AppData\Local\Python\pythoncore-3.14-64\Lib\socketserver.py", line 845, in write
+    self._sock.sendall(b)
+    ~~~~~~~~~~~~~~~~~~^^^
+ConnectionAbortedError: [WinError 10053] An established connection was aborted by the software in your host machine
+----------------------------------------
+----------------------------------------
+Exception occurred during processing of request from ('127.0.0.1', 53156)
+Traceback (most recent call last):
+  File "C:\Users\SadidGostaran_Co\AppData\Local\Python\pythoncore-3.14-64\Lib\socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\SadidGostaran_Co\AppData\Local\Python\pythoncore-3.14-64\Lib\socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\SadidGostaran_Co\AppData\Local\Python\pythoncore-3.14-64\Lib\socketserver.py", line 766, in __init__
+    self.handle()
+    ~~~~~~~~~~~^^
+  File "C:\Users\SadidGostaran_Co\AppData\Local\Python\pythoncore-3.14-64\Lib\http\server.py", line 500, in handle
+    self.handle_one_request()
+    ~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\SadidGostaran_Co\AppData\Local\Python\pythoncore-3.14-64\Lib\http\server.py", line 488, in handle_one_request
+    method()
+    ~~~~~~^^
+  File "D:\J_BookTranslate_V\app\web.py", line 1206, in do_GET
+    self._json({"items": jobs, "total": len(jobs)}); return
+    ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\J_BookTranslate_V\app\web.py", line 1105, in _json
+    self.send_response(status); self.send_header("Content-Type", "application/json; charset=utf-8"); self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data)
+                                                                                                                                                                             ~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\SadidGostaran_Co\AppData\Local\Python\pythoncore-3.14-64\Lib\socketserver.py", line 845, in write
+    self._sock.sendall(b)
+    ~~~~~~~~~~~~~~~~~~^^^
+ConnectionAbortedError: [WinError 10053] An established connection was aborted by the software in your host machine
+----------------------------------------
+----------------------------------------
+Exception occurred during processing of request from ('127.0.0.1', 59413)
+----------------------------------------
+Exception occurred during processing of request from ('127.0.0.1', 59414)
+Traceback (most recent call last):
+Traceback (most recent call last):
+  File "D:\J_BookTranslate_V\app\web.py", line 1148, in do_GET
+    try: self._json({"book": job.filename, "items": reader_chapters(job.output_path)})
+         ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\J_BookTranslate_V\app\web.py", line 1185, in do_GET
+    self._json(reader_chapter(job.output_path, chapter_id, asset_prefix=asset_prefix))
+    ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\J_BookTranslate_V\app\web.py", line 1105, in _json
+    self.send_response(status); self.send_header("Content-Type", "application/json; charset=utf-8"); self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data)
+                                                                                                                                                                             ~~~~~~~~~~~~~~~~^^^^^^
+  File "D:\J_BookTranslate_V\app\web.py", line 1105, in _json
+    self.send_response(status); self.send_header("Content-Type", "application/json; charset=utf-8"); self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data)
+                                                                                                                                                                             ~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\SadidGostaran_Co\AppData\Local\Python\pythoncore-3.14-64\Lib\socketserver.py", line 845, in write
+    self._sock.sendall(b)
+    ~~~~~~~~~~~~~~~~~~^^^
+ConnectionAbortedError: [WinError 10053] An established connection was aborted by the software in your host machine
+  File "C:\Users\SadidGostaran_Co\AppData\Local\Python\pythoncore-3.14-64\Lib\socketserver.py", line 845, in write
+    self._sock.sendall(b)
+    ~~~~~~~~~~~~~~~~~~^^^
+
+During handling of the above exception, another exception occurred:
+
+ConnectionAbortedError: [WinError 10053] An established connection was aborted by the software in your host machine
+Traceback (most recent call last):
+
+During handling of the above exception, another exception occurred:
+
+  File "C:\Users\SadidGostaran_Co\AppData\Local\Python\pythoncore-3.14-64\Lib\socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+Traceback (most recent call last):
+  File "C:\Users\SadidGostaran_Co\AppData\Local\Python\pythoncore-3.14-64\Lib\socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\SadidGostaran_Co\AppData\Local\Python\pythoncore-3.14-64\Lib\socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\SadidGostaran_Co\AppData\Local\Python\pythoncore-3.14-64\Lib\socketserver.py", line 766, in __init__
+    self.handle()
+    ~~~~~~~~~~~^^
+  File "C:\Users\SadidGostaran_Co\AppData\Local\Python\pythoncore-3.14-64\Lib\socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\SadidGostaran_Co\AppData\Local\Python\pythoncore-3.14-64\Lib\http\server.py", line 500, in handle
+    self.handle_one_request()
+    ~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\SadidGostaran_Co\AppData\Local\Python\pythoncore-3.14-64\Lib\socketserver.py", line 766, in __init__
+    self.handle()
+    ~~~~~~~~~~~^^
+  File "C:\Users\SadidGostaran_Co\AppData\Local\Python\pythoncore-3.14-64\Lib\http\server.py", line 488, in handle_one_request
+    method()
+    ~~~~~~^^
+  File "C:\Users\SadidGostaran_Co\AppData\Local\Python\pythoncore-3.14-64\Lib\http\server.py", line 500, in handle
+    self.handle_one_request()
+    ~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "D:\J_BookTranslate_V\app\web.py", line 1149, in do_GET
+    except (OSError, ValueError, zipfile.BadZipFile) as exc: self._json({"error": str(exc)}, 422)
+                                                             ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\SadidGostaran_Co\AppData\Local\Python\pythoncore-3.14-64\Lib\http\server.py", line 488, in handle_one_request
+    method()
+    ~~~~~~^^
+  File "D:\J_BookTranslate_V\app\web.py", line 1105, in _json
+    self.send_response(status); self.send_header("Content-Type", "application/json; charset=utf-8"); self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data)
+                                                                                                                                                         ~~~~~~~~~~~~~~~~^^
+  File "D:\J_BookTranslate_V\app\web.py", line 1186, in do_GET
+    except (IndexError, ValueError, OSError, zipfile.BadZipFile) as exc: self._json({"error": str(exc)}, 404)
+                                                                         ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\SadidGostaran_Co\AppData\Local\Python\pythoncore-3.14-64\Lib\http\server.py", line 602, in end_headers
+    self.flush_headers()
+    ~~~~~~~~~~~~~~~~~~^^
+  File "D:\J_BookTranslate_V\app\web.py", line 1105, in _json
+    self.send_response(status); self.send_header("Content-Type", "application/json; charset=utf-8"); self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data)
+                                                                                                                                                         ~~~~~~~~~~~~~~~~^^
+  File "C:\Users\SadidGostaran_Co\AppData\Local\Python\pythoncore-3.14-64\Lib\http\server.py", line 606, in flush_headers
+    self.wfile.write(b"".join(self._headers_buffer))
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\SadidGostaran_Co\AppData\Local\Python\pythoncore-3.14-64\Lib\http\server.py", line 602, in end_headers
+    self.flush_headers()
+    ~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\SadidGostaran_Co\AppData\Local\Python\pythoncore-3.14-64\Lib\socketserver.py", line 845, in write
+    self._sock.sendall(b)
+    ~~~~~~~~~~~~~~~~~~^^^
+  File "C:\Users\SadidGostaran_Co\AppData\Local\Python\pythoncore-3.14-64\Lib\http\server.py", line 606, in flush_headers
+    self.wfile.write(b"".join(self._headers_buffer))
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ConnectionAbortedError: [WinError 10053] An established connection was aborted by the software in your host machine
+  File "C:\Users\SadidGostaran_Co\AppData\Local\Python\pythoncore-3.14-64\Lib\socketserver.py", line 845, in write
+    self._sock.sendall(b)
+    ~~~~~~~~~~~~~~~~~~^^^
+----------------------------------------
+ConnectionAbortedError: [WinError 10053] An established connection was aborted by the software in your host machine
+----------------------------------------

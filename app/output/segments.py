@@ -144,13 +144,36 @@ def build_segments(
 def chapter_title(chapter):
     """
     Human-readable heading for a chapter path.
+
+    A filename is not a heading. Converting a PDF gives every "chapter" the name
+    of the page file it came from, so a six-page PDF came out with a document
+    whose navigation pane read ``page_0000.html``, ``page_0001.html``, and so on
+    -- six headings, none of them meaning anything to a reader.
+
+    A name that looks like a generated artefact returns nothing instead, and the
+    caller falls back to a single heading for the whole book. That is what a PDF
+    actually has: no chapters, only pages.
+
+    The test is deliberately narrow. A real EPUB chapter is named after the book
+    (``ch07.html``, ``ch03.xhtml``), which is not what a converter's page naming
+    looks like -- those carry a page prefix, an index, and a known extension.
     """
-
     if not chapter:
-
         return "Chapter"
 
-    return Path(str(chapter)).name
+    name = Path(str(chapter)).name
+    stem = Path(name).stem
+
+    # page_0003, page-0003, page3, p003, 0003, doc_0003 -- a page, not a chapter.
+    if re.fullmatch(r"(page|p|pg|doc|img)?[-_ ]?\d+", stem, re.IGNORECASE):
+        return ""
+    # A bare index, and the converters' own page files.
+    if re.fullmatch(r"\d+(\.\w{2,4})?", stem):
+        return ""
+    if re.fullmatch(r"(page|p|pg)[-_ ]?\d+\.\w{2,4}", name, re.IGNORECASE):
+        return ""
+
+    return name
 
 
 def _snippet(text, limit=90):

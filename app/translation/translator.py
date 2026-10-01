@@ -165,7 +165,31 @@ def load_test_translations(
 # TRANSLATION CLEANUP
 # ============================================================
 
-def _clean_translation(text: Any) -> str:
+def _leading_separator(source: str) -> str:
+    """The whitespace a translation must keep at its start.
+
+    ## Why this exists
+
+    Chunks are reassembled with ``"".join``, so whatever separates one chunk's
+    translation from the next has to live *inside* one of them. The source chunk
+    usually begins with the whitespace that followed the previous chunk's closing
+    tag -- a newline and an indent, in a book that uses them.
+
+    ``_clean_translation`` ended with ``.strip()``, which is right for a string
+    being displayed and wrong for a string being concatenated back into a
+    document. It removed the leading newline from every translation, and the
+    reassembled book came out with ``</p>متن`` where the source had
+    ``</p>\\n<p ...>متن``: paragraphs welded together, 26 times in a 60-chunk book.
+
+    So the separator is recovered from the source and put back after cleaning.
+    """
+    if not source:
+        return ""
+    match = re.match(r"[ \t\r\n]*", source)
+    return match.group(0) if match else ""
+
+
+def _clean_translation(text: Any, source: str | None = None) -> str:
     """
     Clean accidental Markdown code fences from model output.
 
@@ -180,6 +204,11 @@ def _clean_translation(text: Any) -> str:
     becomes:
 
         <p>Hello</p>
+
+    ``source`` is the chunk this was translated from. When given, the leading
+    whitespace the source began with is restored afterwards, because the caller
+    joins translations with ``"".join`` and the separator has to live inside one
+    of them. See :func:`_leading_separator`.
     """
 
     if text is None:
@@ -217,14 +246,23 @@ def _clean_translation(text: Any) -> str:
 
     if cleaned.startswith("```") and cleaned.endswith("```"):
 
-        lines = cleaned.splitlines()
+        fenced = cleaned.splitlines()
 
-        if len(lines) >= 2:
+        if len(fenced) >= 2:
             cleaned = "\n".join(
-                lines[1:-1]
+                fenced[1:-1]
             )
 
-    return cleaned.strip()
+    # The leading separator, restored. Stripping it is what welded the
+    # paragraphs together in a shipped book; see _leading_separator.
+    #
+    # Outside the fence check on purpose. It was inside, which left a translation
+    # with no code fence -- the normal case -- with no `return` on its path, so the
+    # function handed back `None` and every chunk failed as "became empty after
+    # cleanup".
+    separator = _leading_separator(source or "")
+    body = cleaned.strip()
+    return f"{separator}{body}" if separator else body
 
 
 # ============================================================
@@ -233,6 +271,7 @@ def _clean_translation(text: Any) -> str:
 
 def _extract_translation_from_response(
     response: Any,
+    source: str | None = None,
 ) -> str:
     """
     Extract translated text from an OpenAI-compatible response.
@@ -303,7 +342,7 @@ def _extract_translation_from_response(
         )
 
     translated_text = _clean_translation(
-        translated_text
+            translated_text, source
     )
 
     if not translated_text:
@@ -548,7 +587,7 @@ def translate_chunk(
         if translation is not None:
 
             return _clean_translation(
-                translation
+                translation, text
             )
 
         print(
@@ -645,7 +684,8 @@ def translate_chunk(
             rate_limiter.report_success()
 
         return _extract_translation_from_response(
-            response
+            response,
+            source=text,
         )
 
     # ========================================================
@@ -665,7 +705,7 @@ def translate_chunk(
         )
 
         translated_text = _clean_translation(
-            translated_text
+            translated_text, text
         )
 
         if not translated_text:
@@ -1346,7 +1386,7 @@ def _process_fast_resume_sequential(
             # ------------------------------------------------
 
             translated_text = _clean_translation(
-                translated_text
+                translated_text, chunk_text
             )
             for term in check_translation(chunk_text, translated_text, glossary_snapshot):
                 print(f"Glossary review needed in chunk {chunk_id}: {term['source_term']} -> {term['target_term']}")
@@ -1670,7 +1710,7 @@ def _process_fast_resume(
             glossary_snapshot=snapshot,
             context_before=(chunk_contexts or {}).get(str(chunk_id)),
         )
-        translated_text = _clean_translation(translated_text)
+        translated_text = _clean_translation(translated_text, chunk_text)
         if not translated_text:
             raise RuntimeError(f"Chunk {chunk_id} returned empty translation.")
         return chunk_id, chunk_text, translated_text, snapshot
@@ -1804,7 +1844,7 @@ def _process_test_mode(
         translations
     )
 
-    for chunk_id, _ in untranslated_chunks:
+    for chunk_id, chunk_text in untranslated_chunks:
 
         chunk_key = str(
             chunk_id
@@ -1815,7 +1855,8 @@ def _process_test_mode(
             translation = _clean_translation(
                 test_translations[
                     chunk_key
-                ]
+                ],
+                chunk_text
             )
 
             if translation:

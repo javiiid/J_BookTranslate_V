@@ -1,31 +1,35 @@
-# Repository Guidelines
+# KALIMA backend — agent guide
 
-## Project Structure & Module Organization
+Python EPUB/PDF translator. Local-only: server binds `127.0.0.1:8765`, OpenAI-compatible API, thread-based concurrency, resumable on-disk jobs. `app/main.py` is CLI entry, `app/web.py` is web/API server. Full product spec in `readme.md`; this file is only what agents get wrong.
 
-Application code lives under `app/`. Keep shared infrastructure in `app/core/`, translation logic in `app/translation/`, EPUB/PDF processing in `app/pipeline/`, background work in `app/jobs/`, and user-facing features in `app/library/`, `app/reader/`, and `app/glossary/`. CLI parsing is in `app/cli/`; `app/main.py` is the command-line entry point and `app/web.py` runs the local web application. Tests live in `tests/` and generally mirror feature modules. Runtime files belong in `data/`, `output/`, or `temp/` and should not be committed.
+## Setup & commands
 
-## Build, Test, and Development Commands
+- `python -m venv .venv` + `.\.venv\Scripts\Activate.ps1` + `pip install -r requirements.txt` (openai, PyYAML, PyMuPDF, pypandoc_binary, fonttools, playwright).
+- `python -m app.web` → http://127.0.0.1:8765. `python -m app.main --help` for CLI.
+- `config/config.yaml` is the only config source. Create manually (see `readme.md` sample); never commit it — gitignore uses a **named** rule, not `*.yaml`, so future workflow/packaging YAML isn't silently dropped.
+- Saving from `/account` rewrites `config.yaml` with `yaml.safe_dump` and **strips comments**. Values survive, explanations don't.
+- Model default comes from `resolve_default_model()` reading `config.yaml`. Never hardcode a model; empty model field = configured default. Unknown model → `400`, not silent fallback.
 
-- `python -m venv .venv` creates the local virtual environment.
-- `.\.venv\Scripts\Activate.ps1` activates it on Windows PowerShell.
-- `pip install -r requirements.txt` installs runtime and test dependencies.
-- `python -m app.main --help` lists CLI translation commands and options.
-- `python -m app.web` starts the local web dashboard.
-- `python -m pytest -q` runs the full test suite.
-- `python -m pytest tests/test_library.py -q` runs one focused test module.
+## Test
 
-## Coding Style & Naming Conventions
+- `python -m pytest -q` (full suite, ~291 tests). Single module: `python -m pytest tests/test_library.py -q`.
+- **Stop `python -m app.web` before testing.** It holds the SQLite lock → ~53 spurious failures.
+- If system temp is restricted: `python -m pytest -q -p no:cacheprovider --basetemp .test-tmp\full`.
+- `pytest.ini` only sets `pythonpath=. testpaths=tests`. No formatter/linter/typecheck enforced — match nearby code (4-space, `snake_case` funcs, `PascalCase` classes).
 
-Use four-space indentation and standard Python conventions: `snake_case` for functions, variables, and modules; `PascalCase` for classes; and uppercase names for constants. Prefer small, focused modules and type hints for public interfaces. Keep UI text and persisted state changes compatible with existing resumable jobs. No formatter or linter is currently enforced, so match nearby code and keep diffs focused.
+## Architecture facts that matter
 
-## Testing Guidelines
+- Thread-based parallelism (`max_concurrency: 12`, hard cap in `app/core/config.py`), **not asyncio** — deliberate, preserves commit order + stop/resume. `app/core/rate_limit.py` (`AdaptiveRateLimiter`): halves ceiling on `429`, honors `Retry-After`, stoppable via `stop_event`.
+- `Ctrl+C` at concurrency 12 can waste up to 12 paid requests (finished but uncommitted). Nothing is ever mis-marked complete; resume is always safe.
+- Glossary is snapshotted at job start so chunk 1 uses the same terms as chunk 300. `glossary_mode: off` (default) | `deferred` (+1 LLM call/chunk after) | `inline` (+1/chunk, forces sequential). Proposal = 12 sampled chunks → 1 LLM call → user ticks approves; server-side filter drops terms not literally in the sampled text. Never auto-add during translation.
+- Runtime dirs `data/`, `temp/`, `/output/` are gitignored and never committed (one PDF export hit 99 MB). Leading slash in `/output/` is load-bearing: bare `output/` would also swallow source `app/output/` (format modules). Verify: `git check-ignore -v app/output/convert.py` must print nothing.
+- Security: `Host` checked on **all** methods (DNS-rebinding), `Origin`/`Sec-Fetch-Site` on mutating methods, bind loopback only. Reader images served as local assets, never inline HTML: strip `onerror`/`onload`/`<base>`/`javascript:`/`data:`/remote `src`; SVG with `sandbox` + `nosniff`. `sanitize_html` stays Python-side — the React UI must not re-implement it.
 
-Tests use `pytest`. Name files `test_<feature>.py` and test functions `test_<behavior>()`. Add regression tests for changes to job persistence, resume behavior, glossary generation, EPUB/PDF processing, and reader rendering. Run the narrowest relevant tests first, then the full suite before opening a pull request.
+## Known-broken (don't "fix" by adding one string)
 
-## Commit & Pull Request Guidelines
+- `--mode pdfbilingual` is offered in `app/cli/parser.py` + web form but rejected in `translator.py` (`ValueError`). Needs a product decision, not a set addition.
+- SRT output is generated but untranslated content. Non-UTF-8 EPUB chapters silently skipped. PDF vision prompt hardcoded DE→EN in `pdf_handler.py`. No OCR / `get_text()` fast path — every PDF renders as image. `load_batch_state` picks newest `batch_status_*.json` by mtime with no book filter (cross-book state bleed).
 
-Recent history uses concise Conventional Commit-style subjects such as `feat: ...` and `chore: ...`. Use an imperative subject that describes one logical change. Pull requests should explain user-visible behavior, list validation commands, link related issues, and include screenshots for dashboard, library, or reader UI changes. Do not commit API keys, generated books, job state, or local virtual environments.
+## Commits
 
-## Configuration & Security
-
-Store credentials in local configuration or environment variables, never in tracked files. Review `.gitignore` before adding new runtime artifacts, and use sample or redacted values in documentation and tests.
+Conventional-style subjects (`feat: …`, `chore: …`), one logical change. PRs: behavior + validation commands + issue link + screenshots for dashboard/library/reader changes. Never commit keys, books, job state, `.venv/`.

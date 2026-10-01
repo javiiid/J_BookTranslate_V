@@ -331,6 +331,52 @@ class TestSplitMarkupSentences:
         html = "<p>این جمله کوتاه است. این جمله بلندتر است. پایان.</p>"
         assert len(split_markup_sentences(html)) == 3
 
+    def test_keeps_the_space_at_every_cut(self):
+        """The bug this file was missing.
+
+        `_SENTENCE_BREAK` consumes the whitespace, so slicing on
+        `match.start()` dropped it, and the chunker rejoins with `"".join`. The
+        result came out of the pipeline with words welded together.
+
+        Every earlier round-trip assertion passed because the fixtures were small
+        enough that no block was over budget, so the sentence splitter never ran.
+        This one is deliberately over budget.
+        """
+        html = "<p>" + " ".join(f"Sentence number {n} is here." for n in range(40)) + "</p>"
+        chunks = SemanticChunker(max_tokens=120).chunk(html)
+        assert len(chunks) > 1, "the budget should force a sentence split"
+        # The joined output has to be byte-identical to the input.
+        assert "".join(c.html for c in chunks) == html
+        # And no seam may weld a word to a tag.
+        joined = "".join(c.html for c in chunks)
+        assert "</p>" + "<p>" not in joined
+        import re as _re
+
+        welded = _re.findall(r"</[a-zA-Z][^>]*>(?=[^\s<])", joined)
+        assert not welded, f"{len(welded)} seam(s) with no space: {welded[:3]}"
+
+    def test_a_cut_between_two_sentences_keeps_the_space(self):
+        # The smallest possible reproduction, so the failure mode is unmistakable.
+        #
+        # The space is *kept*, and it leads the following piece rather than
+        # trailing the previous one. That is the only arrangement that survives
+        # `"".join`: a space at the end of a piece is just as easy to strip in
+        # transit as one in the middle, and putting it first means the source's
+        # own layout is reproduced exactly.
+        pieces = split_markup_sentences("<p>One. Two. Three.</p>")
+        assert len(pieces) == 3
+        assert pieces[0] == "<p>One."
+        assert pieces[1] == " Two."
+        assert pieces[2] == " Three.</p>"
+        assert "".join(pieces) == "<p>One. Two. Three.</p>"
+
+    def test_newlines_at_a_cut_survive(self):
+        # A real book separates paragraphs with a newline, so a cut there has to
+        # keep it -- this is the shape the shipped book had.
+        html = "<p>First one here. Second one here. Third one here.</p>"
+        pieces = split_markup_sentences(html)
+        assert "".join(pieces) == html
+
     def test_keeps_the_outer_tags_in_the_first_piece(self):
         # The old path emitted "<p>a. b." then "c. d.</p>" -- a <p> with no
         # closing tag followed by a </p> with no opening tag.

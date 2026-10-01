@@ -26,6 +26,8 @@ from app.core.config import (
     DEFAULT_BASE_URL,
     MAX_TRANSLATION_CONCURRENCY,
     get_openai_config,
+    get_chunking_config,
+    get_translation_config,
     normalize_base_url,
     read_config_safe,
     update_openai_config,
@@ -83,6 +85,7 @@ from app.glossary.automatic import sync_book
 from app.glossary.proposal_page import install_glossary_proposal
 from app.core.brand import kalima_mark
 from app.jobs.state import _atomic_json, deduplicate_chunks
+from app.jobs.estimate import estimate
 from app.jobs.dashboard import install_jobs_dashboard
 from app.jobs.detail_page import job_detail_page
 from app.jobs.workspace import install_workspace
@@ -202,6 +205,27 @@ def _rescue_job(job: Job) -> Path:
                     continue
                 seen.add(resolved)
                 archive.write(file_path, f"project/{file_path.name}")
+        # How this job was chunked, so the import can say *why* it cannot be
+        # replayed rather than only that it cannot.
+        #
+        # Chunk ids are positional, so an archive without its settings is a
+        # puzzle. A real one from 2026-09-24 carried 166 chunks, and no budget of
+        # today's chunker produces 166 -- it ran before the semantic chunker
+        # existed. The count was the only clue available; the settings are better,
+        # and the cost of writing them is a hundred bytes.
+        chunking = get_chunking_config()
+        archive.writestr(
+            "project/chunking.json",
+            json.dumps(
+                {
+                    "semantic_chunking": bool(chunking.get("semantic_chunking")),
+                    "chunk_max_tokens": int(chunking.get("chunk_max_tokens") or 1200),
+                    "chunk_context_window": int(chunking.get("chunk_context_window") or 2),
+                    "created_at": now(),
+                },
+                ensure_ascii=False,
+            ),
+        )
     _job_event(job, "rescue_created", "نسخهٔ نجات پروژه ساخته شد.")
     return rescue_path
 
@@ -810,6 +834,216 @@ def _origin_permitted(origin: str) -> bool:
     )
 
 
+# ============================================================
+# Upload
+# ============================================================
+
+def _parse_upload(handler):
+    """Read one multipart file upload off the request.
+
+    Lifted out of the ``POST /api/jobs`` handler so the upload-only route and the
+    start-a-translation route cannot drift apart. The two used to be one block of
+    code; splitting them into separate implementations is how a file ends up
+    accepted by one and rejected by the other.
+
+    Returns ``(fields, filename, payload)``. Raises ``ValueError`` for anything
+    the caller should answer with a 400.
+    """
+    content_type = handler.headers.get("Content-Type", "")
+    if "multipart/form-data" not in content_type:
+        raise ValueError("multipart/form-data required.")
+
+    try:
+        size = int(handler.headers.get("Content-Length", "0"))
+        if not 0 < size <= 1024 * 1024 * 1024:
+            raise ValueError("Upload size is missing or too large (1 GB max).")
+        raw = (
+            f"Content-Type: {content_type}\r\nMIME-Version: 1.0\r\n\r\n".encode()
+            + handler.rfile.read(size)
+        )
+        message = BytesParser(policy=policy.default).parsebytes(raw)
+    except (ValueError, OSError) as exc:
+        raise ValueError(str(exc)) from exc
+
+    fields: dict[str, str] = {}
+    upload_name = ""
+    upload_data = b""
+    for part in message.iter_parts():
+        name = part.get_param("name", header="content-disposition")
+        if not name:
+            continue
+        payload = part.get_payload(decode=True) or b""
+        if part.get_filename():
+            upload_name, upload_data = part.get_filename(), payload
+        else:
+            value = payload.decode("utf-8", errors="replace")
+            fields[name] = fields[name] + "," + value if name in fields else value
+
+    if not upload_name or not upload_data:
+        raise ValueError("No file in the upload.")
+    return fields, _safe_filename(upload_name), upload_data
+
+
+def _store_upload(filename: str, payload: bytes) -> Path:
+    """Write an upload into the upload directory under a safe, unique name.
+
+    Returns the path. Raises ``ValueError`` for a type we do not accept and
+    ``OSError`` when the disk is short of room -- the same two failures the
+    original handler reported, kept distinct so the messages stay accurate.
+    """
+    suffix = Path(filename).suffix.lower()
+    if suffix not in {".epub", ".pdf"}:
+        raise ValueError("Only EPUB and PDF files are accepted.")
+    job_id = uuid.uuid4().hex[:12]
+    target = UPLOAD_DIR / f"{job_id}_{filename}"
+    ensure_disk_space(UPLOAD_DIR, required_bytes=len(payload) * 3)
+    target.write_bytes(payload)
+    return target
+
+
+def _import_rescue(payload: bytes, *, force: bool) -> dict:
+    """Unpack a rescue archive and put the book back in a resumable state.
+
+    Returns a descriptor for the client. Raises ``ValueError`` when the archive
+    is not a rescue, or when a job with this id already exists and ``force`` was
+    not set.
+
+    ## Why the conflict is a question and not a decision
+
+    A rescue carries the settings it ran with, so importing one silently would
+    change the language pair, the model or the glossary of a book that is
+    already queued. That is not a preference -- a different model means a
+    different bill, and mixing translations from two models in one book produces
+    a glossary nobody chose. So the caller is told what differs and decides.
+
+    The job is created ``paused``, not ``queued``: ``POST /api/jobs/{id}/resume``
+    only accepts a paused or failed job, and a rescue that started translating
+    on import would skip the estimate dialog the whole point of this is to feed.
+    """
+    from app.jobs.rescue import check_chunking, read_rescue, restore, RescueError
+
+    try:
+        imported = read_rescue(payload)
+    except RescueError as exc:
+        raise ValueError(str(exc)) from None
+
+    if not imported.model or not is_supported_model(imported.model):
+        raise ValueError(
+            "مدل «%s» در این نسخهٔ نجاتی پشتیبانی نمی‌شود." % (imported.model or "؟")
+        )
+
+    with JOBS_LOCK:
+        existing = JOBS.get(imported.job_id)
+    if existing is not None and not force:
+        raise _RescueConflict(imported, existing)
+
+    # The book goes to its real location first, because the chunking check below
+    # has to read it. Nothing else is written until the check passes.
+    uploads = UPLOAD_DIR
+    uploads.mkdir(parents=True, exist_ok=True)
+    book_path = uploads / f"{imported.job_id}_{imported.filename}"
+    book_path.write_bytes(imported.book_bytes)
+
+    settings = get_chunking_config()
+    check = check_chunking(
+        imported,
+        book_path,
+        int(settings.get("chunk_max_tokens") or 1200),
+        int(settings.get("chunk_context_window") or 2),
+        semantic_chunking=bool(settings.get("semantic_chunking", True)),
+    )
+    if not check.matches:
+        # Left on disk deliberately: the estimate dialog and the resume both need
+        # the book to exist, and the reader's next move is to fix the config and
+        # try again. It is an upload of a file they already had.
+        raise ValueError(check.message())
+
+    # The job state. The estimate endpoint reads the book off disk and the resume
+    # reads this directory, so both have to be real before the client is told.
+    written = restore(imported, uploads, ensure_dir("temp"))
+
+    options = dict(imported.options)
+    options.update({
+        "from_lang": imported.from_lang,
+        "to_lang": imported.to_lang,
+        "model": imported.model,
+        "mode": imported.mode,
+    })
+
+    job = Job(
+        imported.job_id,
+        imported.filename,
+        Path(written["book"]),
+        imported.filetype,
+        imported.file_size,
+        options,
+        imported.from_lang,
+        imported.to_lang,
+        imported.model,
+        imported.mode,
+        style=imported.style,
+    )
+    # The pipeline reads this to find the directory it resumes from.
+    job.pipeline_job_id = imported.pipeline_job_id
+    job.paths = written
+    # `paused` is what makes the resume route accept it, and it is the honest
+    # state: nothing is running, and there is work left.
+    job.status = "paused"
+    job.started_at = now()
+    job.progress = {"completed": imported.chunks_completed, "total": imported.chunks_total}
+
+    with JOBS_LOCK:
+        JOBS[job.id] = job
+    _persist_job(job)
+    _job_event(
+        job,
+        "rescue_imported",
+        "نسخهٔ نجاتی وارد شد: %d از %d بخش پیش‌تر ترجمه شده است."
+        % (imported.chunks_completed, imported.chunks_total),
+    )
+    try:
+        _ensure_library_source(job)
+    except Exception:
+        # The translation job is authoritative. A missing library row only costs
+        # the glossary binding, and failing the import over it would be worse.
+        pass
+
+    return {
+        "id": job.id,
+        "filename": job.filename,
+        "file_path": str(job.input_path),
+        "from_lang": job.source_language,
+        "to_lang": job.target_language,
+        "model": job.model,
+        "mode": job.mode,
+        "status": job.status,
+        # The same field names the estimate endpoint uses, so the client reads one
+        # vocabulary from both. A page that had to learn two spellings of "how many
+        # chunks are in this book" would eventually read the wrong one.
+        "chunk_count_total": imported.chunks_total,
+        "chunks_already_done": imported.chunks_completed,
+        "chunks_remaining": imported.chunks_remaining,
+        "resumed_from": imported.pipeline_job_id,
+    }
+
+
+class _RescueConflict(ValueError):
+    """A job of this id already exists, and the caller did not say to replace it."""
+
+    def __init__(self, imported, existing) -> None:
+        super().__init__("این کتاب از قبل روی سرور هست.")
+        self.imported = imported
+        self.existing = existing
+        #: What the reader needs to choose. ``None`` means "same", which is
+        #: reported as such rather than omitted.
+        self.differences = {
+            "model": (imported.model, existing.model),
+            "from_lang": (imported.from_lang, existing.source_language),
+            "to_lang": (imported.to_lang, existing.target_language),
+            "mode": (imported.mode, existing.mode),
+        }
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, format: str, *args: object) -> None: return
 
@@ -905,21 +1139,6 @@ class Handler(BaseHTTPRequestHandler):
             except LookupError as exc: self._json({'error': str(exc)}, 404)
             except ValueError as exc: self._json({'error': str(exc)}, 400)
             return
-        if parsed.path == "/":
-            data = inject_language_switcher(welcome_page()).encode("utf-8"); self.send_response(HTTPStatus.OK); self.send_header("Content-Type", "text/html; charset=utf-8"); self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data); return
-        if parsed.path == "/landing":
-            lp = Path(__file__).parent.parent / "landing.html"
-            alt = Path("D:/J_BookTranslate_V/landing.html")
-            src_path = lp if lp.exists() else alt
-            if src_path.exists():
-                data = src_path.read_bytes(); self.send_response(HTTPStatus.OK); self.send_header("Content-Type", "text/html; charset=utf-8"); self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data); return
-            self.send_error(404); return
-        if parsed.path == "/workspace":
-            data = inject_language_switcher(model_select_html(PAGE)).encode("utf-8"); self.send_response(HTTPStatus.OK); self.send_header("Content-Type", "text/html; charset=utf-8"); self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data); return
-        if parsed.path == "/account":
-            data = account_page().encode("utf-8"); self.send_response(HTTPStatus.OK); self.send_header("Content-Type", "text/html; charset=utf-8"); self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data); return
-        if parsed.path == "/library":
-            data = inject_language_switcher(library_page()).encode("utf-8"); self.send_response(HTTPStatus.OK); self.send_header("Content-Type", "text/html; charset=utf-8"); self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data); return
         if parsed.path == "/api/reader/settings":
             self._json({"value": reading_settings()}); return
         if parsed.path.startswith("/api/reader/") and parsed.path.endswith("/chapters"):
@@ -1223,10 +1442,64 @@ class Handler(BaseHTTPRequestHandler):
                 pid = db.execute("INSERT INTO translation_profiles(name, system_prompt, temperature, preserve_html, preserve_quotes, glossary_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (name, prompt, float(body.get("temperature", .2)), int(bool(body.get("preserve_html", True))), int(bool(body.get("preserve_quotes", True))), body.get("glossary_id"), now(), now()))
             except Exception: self._json({"error": "Profile already exists or is invalid."}, 409); return
             self._json({"id": pid, "name": name}, 201); return
+        if path == "/api/jobs/upload":
+            # Store a book without translating it, so the estimate dialog has a
+            # path to measure. The real start is still POST /api/jobs, which will
+            # re-read the file; storing it twice costs disk, and re-uploading on
+            # confirm would be worse, so this returns a path the client hands back
+            # as `upload_token` and the start route looks it up.
+            try:
+                fields, filename, payload = _parse_upload(self)
+                target = _store_upload(filename, payload)
+            except ValueError as exc: self._json({"error": str(exc)}, 400); return
+            except OSError as exc: self._json({"error": str(exc)}, 500); return
+            self._json({
+                "file_path": str(target),
+                "filename": filename,
+                "size": len(payload),
+            }, 201); return
         if path == "/api/jobs/estimate":
-            try: body = self._request_json(); size = int(body.get("file_size", 0)); model = body.get("model", DEFAULT_MODEL)
-            except (ValueError, json.JSONDecodeError) as exc: self._json({"error": str(exc)}, 400); return
-            chunks = max(1, (size + 12000 - 1) // 12000); self._json({"chunks": chunks, "estimated_seconds": chunks * 4, "estimated_cost": 0.0, "model": model}); return
+            # This used to answer from the file's size in bytes:
+            #   chunks = ceil(file_size / 12000); seconds = chunks * 4; cost = 0.0
+            # None of which was a measurement. The cost was a hardcoded zero, and
+            # shown beside a "start translating" button a zero reads as "free"
+            # rather than "unknown". The count ignored how the book actually
+            # chunks, and the time ignored max_concurrency -- so it overstated by
+            # roughly 12x. The real numbers come from app/jobs/estimate.py, which
+            # runs the same chunker the translator will.
+            try:
+                body = self._request_json()
+                file_path = str(body.get("file_path") or body.get("path") or "")
+                if not file_path:
+                    raise ValueError("file_path is required.")
+                model = str(body.get("model") or DEFAULT_MODEL)
+                settings = get_translation_config()
+                mode = str(body.get("mode") or "fast")
+                concurrency = int(
+                    body.get("concurrency")
+                    or settings.get("max_concurrency")
+                    or MAX_TRANSLATION_CONCURRENCY
+                )
+                # Glossary learning is opt-in and off by default, and it adds one
+                # LLM call per chunk, so it has to be priced and timed separately
+                # rather than folded in silently.
+                glossary_auto = bool(
+                    body.get("glossary_auto")
+                    or settings.get("glossary_mode") in {"inline", "deferred"}
+                )
+                self._json(estimate(
+                    file_path=file_path,
+                    model=model,
+                    concurrency=concurrency,
+                    mode=mode,
+                    glossary_auto=glossary_auto,
+                    source_lang=str(body.get("from_lang") or settings.get("default_from_lang") or ""),
+                    target_lang=str(body.get("to_lang") or settings.get("default_to_lang") or ""),
+                    max_tokens=int(settings.get("chunk_max_tokens") or 1200),
+                    context_window=int(settings.get("chunk_context_window") or 2),
+                ).to_payload()); return
+            except (ValueError, TypeError, json.JSONDecodeError) as exc: self._json({"error": str(exc)}, 400); return
+            except Exception as exc: self._json({"error": _friendly_error(exc)}, 500); return
         if path == "/api/provider-config/test":
             try:
                 body = self._request_json()
@@ -1300,6 +1573,43 @@ class Handler(BaseHTTPRequestHandler):
             except (ValueError, TypeError) as exc: self._json({'error': str(exc)}, 400)
             except Exception as exc: self._json({'error': _friendly_error(exc)}, 502)
             return
+        if path == "/api/jobs/rescue/import":
+            # The way back in. `POST /api/jobs/{id}/rescue` has always produced a
+            # portable archive of a job's state; there was no route that read one,
+            # so a rescue could be looked at and never used. This restores the
+            # book and its job directory, and leaves the job `paused` so the
+            # client can price the remaining chunks before spending anything.
+            try:
+                fields, _name, payload = _parse_upload(self)
+            except ValueError as exc:
+                self._json({"error": str(exc)}, 400); return
+            # `force` says "replace what is on the server", which is the answer to
+            # the conflict question rather than a default.
+            force = (fields.get("force", "") or "").strip().lower() in {"1", "true", "yes"}
+            try:
+                self._json(_import_rescue(payload, force=force), 201); return
+            except _RescueConflict as conflict:
+                # 409 with the differences, so the page can ask rather than pick.
+                self._json({
+                    "error": str(conflict),
+                    "conflict": {
+                        "id": conflict.existing.id,
+                        "status": conflict.existing.status,
+                        "progress": conflict.existing.progress,
+                        "rescued": {
+                            "chunks_already_done": conflict.imported.chunks_completed,
+                            "chunk_count_total": conflict.imported.chunks_total,
+                        },
+                        "differences": {
+                            key: {"rescue": was, "server": now_}
+                            for key, (was, now_) in conflict.differences.items()
+                        },
+                    },
+                }, 409); return
+            except (ValueError, TypeError, json.JSONDecodeError) as exc:
+                self._json({"error": str(exc)}, 400); return
+            except OSError as exc:
+                self._json({"error": str(exc)}, 500); return
         if path.startswith("/api/jobs/") and path.endswith("/rescue"):
             job = self._job(path.split("/")[-2])
             if not job: self._json({"error": "Job not found."}, 404); return
@@ -1309,27 +1619,16 @@ class Handler(BaseHTTPRequestHandler):
             except OSError as exc: self._json({"error": str(exc)}, 500)
             return
         if path!="/api/jobs": self.send_error(404); return
-        content_type=self.headers.get("Content-Type","")
-        if "multipart/form-data" not in content_type: self._json({"error":"فرم آپلود نامعتبر است."},400); return
         try:
-            size=int(self.headers.get("Content-Length","0"))
-            if not 0<size<=1024*1024*1024: raise ValueError("فایل خالی است یا بیش از ۱ گیگابایت حجم دارد.")
-            message=BytesParser(policy=policy.default).parsebytes(f"Content-Type: {content_type}\r\nMIME-Version: 1.0\r\n\r\n".encode()+self.rfile.read(size)); fields,upload_name,upload_data={},"",b""
-            for part in message.iter_parts():
-                name=part.get_param("name",header="content-disposition")
-                if not name: continue
-                payload=part.get_payload(decode=True) or b""
-                if part.get_filename(): upload_name,upload_data=part.get_filename(),payload
-                else:
-                    value=payload.decode("utf-8",errors="replace")
-                    fields[name]=fields[name]+","+value if name in fields else value
-        except (ValueError,OSError) as exc: self._json({"error":str(exc)},400); return
-        filename=_safe_filename(upload_name); suffix=Path(filename).suffix.lower()
-        if not filename or suffix not in {".epub",".pdf"}: self._json({"error":"فقط فایل EPUB یا PDF قابل پذیرش است."},400); return
-        job_id=uuid.uuid4().hex[:12]; input_path=UPLOAD_DIR/f"{job_id}_{filename}"
+            fields, filename, upload_data = _parse_upload(self)
+            input_path = _store_upload(filename, upload_data)
+        except ValueError as exc: self._json({"error": str(exc)}, 400); return
+        except OSError as exc: self._json({"error": str(exc)}, 500); return
+        job_id=input_path.name.split('_', 1)[0]
+        # The filetype, without the dot. _store_upload has already rejected
+        # anything that is not .epub or .pdf, so this cannot be empty here.
+        suffix=Path(filename).suffix.lower()
         try:
-            ensure_disk_space(UPLOAD_DIR, required_bytes=len(upload_data) * 3)
-            input_path.write_bytes(upload_data)
             validate_book(input_path)
         except (OSError, ValueError) as exc:
             if input_path.exists(): input_path.unlink()

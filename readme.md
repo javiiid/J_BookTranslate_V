@@ -17,7 +17,7 @@
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![Tests](https://img.shields.io/badge/tests-291%20passing-brightgreen.svg)]()
 [![Dependencies](https://img.shields.io/badge/dependencies-3-lightgrey.svg)]()
-[![License](https://img.shields.io/badge/license-none%20yet-orange.svg)](#-وضعیت-حق-انحصار)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Local](https://img.shields.io/badge/server-127.0.0.1%3A8765-informational.svg)]()
 
 <br>
@@ -602,14 +602,13 @@ python -m pytest -q -p no:cacheprovider --basetemp .test-tmp\full
 
 ---
 
-## 📄 وضعیت حق انحصار
+## 📄 مجوز (License)
 
-**هنوز هیچ پروانه‌ای انتخاب نشده است.** مخزن عمومی است ولی فایل `LICENSE`
-ندارد، یعنی به‌صورت پیش‌فرض «همهٔ حقوق محفوظ است» و استفادهٔ مجدد از آن
-صریح نیست.
+این پروژه تحت **مجوز MIT** منتشر شده است.
 
-قبل از استفادهٔ جدی از این مخزن باید تصمیم بگیرید: `MIT`، `Apache-2.0`، یا
-چیز دیگر.
+شما می‌توانید این نرم‌افزار را برای هر منظوری (شخصی، تجاری، آموزشی) استفاده، تغییر، توزیع و فروش کنید، فقط باید copyright notice و متن مجوز را در کپی‌ها حفظ کنید.
+
+جزئیات کامل در فایل [`LICENSE`](LICENSE) موجود است.
 
 ---
 

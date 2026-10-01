@@ -19,9 +19,11 @@ Supported outputs: json_segments · txt_bilingual · markdown
 from __future__ import annotations
 
 import re
+from html import escape
 from pathlib import Path
 
-from app.output.formats import generate_outputs, normalize_outputs
+from app.output.formats import SUFFIXES, generate_outputs
+from app.output.typography import has_rtl, html_text
 
 # ------------------------------------------------------------------
 # Helpers
@@ -29,16 +31,8 @@ from app.output.formats import generate_outputs, normalize_outputs
 
 RTL_CHARS = re.compile(r"[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]")
 
-_HTML_TAG_RE = re.compile(r"<[^>]+>")
-_WS_RE = re.compile(r"[ \t\u200c]+")
-
-
 def _html_to_text(value: str) -> str:
-    text = _HTML_TAG_RE.sub(" ", str(value or ""))
-    text = _WS_RE.sub(" ", text)
-    # collapse space before punctuation
-    text = re.sub(r"\s+([.!?,;:،؛»\"')\u2013\u2014\u2026-])", r"\1", text)
-    return text.strip()
+    return html_text(value)
 
 
 def _detect_to_lang(sample: str) -> str:
@@ -52,7 +46,7 @@ def _detect_to_lang(sample: str) -> str:
 def _extract_epub(input_path: Path):
     from app.pipeline.epub_handler import EPUBHandler
 
-    all_chunks, chapter_map = EPUBHandler.build_chunks(input_path)
+    all_chunks, chapter_map, _contexts = EPUBHandler.build_chunks(input_path)
     return all_chunks, chapter_map
 
 
@@ -164,6 +158,32 @@ def build_convert_segments(all_chunks, chapter_map, filetype: str):
     """
     From raw chunks build the segment records expected by
     generate_outputs — source == target, never flagged.
+
+    ## Why there are no ``blocks`` here
+
+    An earlier version parsed each chunk's markup into blocks of runs and carried
+    them on the segment, on the theory that structure should reach the writers.
+    It did not: for an EPUB the DOCX is written by `epub_convert`, which reads
+    the book file through pandoc, and the segment never got a look-in. So the
+    parser ran on every chunk, the blocks rode along in memory, and
+    `json_segments` dropped them on the floor on the way out.
+
+    Measured on the same book, the two writers are not equal and were never going
+    to be:
+
+    * pandoc reads every structural element an EPUB has -- headings, lists,
+      blockquotes, tables, images, links, `b`/`i`/`sup`/`br` -- and embeds the
+      images as real `word/media/` parts: 6 of them, referenced by 6
+      relationships. A converted illustrated book keeps its illustrations.
+    * `app.output.docx` writes a correct document with embedded fonts and
+      heading levels, but has no image support, so a picture becomes the text
+      ``[تصویر: ...]``.
+
+    So pandoc is the right writer for an EPUB and `app.output.docx` is the right
+    writer for a PDF, an SRT or a text file -- sources that have no markup to
+    preserve and no images to carry. Carrying a parallel structure model on the
+    segment for the path that does not use it was the drift, and removing it is
+    what makes the two writers one code path each.
     """
     segments = []
     for chunk_id, raw_html in all_chunks:
@@ -250,13 +270,41 @@ def convert_file(
 
     base_name = Path(title).stem if title else input_path.stem
 
+    formatted = [name for name in normalized if suffix == "epub" and name in {"docx", "translated_pdf", "markdown"}]
+    persian_pdf = suffix != "epub" and "translated_pdf" in normalized and any(has_rtl(segment["source"]) for segment in segments)
     result = generate_outputs(
         segments,
-        requested=normalized,
+        requested=[name for name in normalized if name not in formatted and not (persian_pdf and name == "translated_pdf")],
         output_dir=output_dir,
         base_name=base_name,
         filetype=filetype,
         title=title or input_path.stem,
         to_lang=lang,
     )
+    if formatted:
+        from app.output.epub_convert import write_epub_output
+
+        for name in formatted:
+            target = output_dir / f"{base_name}{SUFFIXES[name]}"
+            write_epub_output(input_path, target, name, lang)
+            result["generated"][name] = str(target)
+    if persian_pdf:
+        from app.output.rtl_pdf import write_html_pdf
+
+        target = output_dir / f"{base_name}.pdf"
+        paragraphs = "".join(f'<p>{escape(segment["source"]).replace(chr(10), "<br>")}</p>' for segment in segments)
+        write_html_pdf(f'<!doctype html><html><head><meta charset="utf-8"><title>{escape(title or base_name)}</title></head><body>{paragraphs}</body></html>', target)
+        result["generated"]["translated_pdf"] = str(target)
+    if "docx" in result["generated"]:
+        from app.output.rtl_docx import fix_docx_typography
+
+        # For every source, not just the non-EPUB ones.
+        #
+        # The condition used to be `suffix != "epub"`, on the assumption that an
+        # EPUB's own markup was already suitable. It is not: the DOCX writer
+        # flattens the markup to text, so the output needs the same direction,
+        # spacing and font treatment as any other conversion. Skipping it meant an
+        # EPUB conversion shipped with no embedded font at all -- measured: 0 font
+        # parts in a 1.3 MB document that declared `Tahoma` and embedded nothing.
+        fix_docx_typography(result["generated"]["docx"])
     return result
