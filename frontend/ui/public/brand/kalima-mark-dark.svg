@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  KALIMA mark, dark variant.
+
+  Same geometry as kalima-mark-light.svg, recoloured for a dark surface. The
+  brand palette flips which role each colour plays: on light, the blue is the
+  ink and the cream is the paper; on dark, the aqua is the ink and the document
+  becomes the pale object. That is why this is a second file rather than one file
+  with currentColor: the two are not inversions of each other, the hues swap
+  roles.
+
+  Colours, all from the brand palette:
+    aqua  #B0E1E4   ink on the dark surface, and the panel outline
+    cream #F1E6B6   the arrow, and the output lines
+    navy  #071426   the glyphs, and the panel fill
+
+  The background is transparent even though the reference image has a solid dark
+  background. A logo with a baked background becomes a visible box the moment it
+  sits on anything but that exact colour, and this one has to work as a favicon
+  and inside a sidebar as well as on a page.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512"
+     role="img" aria-label="KALIMA">
+
+  <!-- source document, tilted like the reference -->
+  <g transform="rotate(-7 256 256)">
+    <rect x="88" y="104" width="216" height="300" rx="24"
+          fill="#C9EBED" stroke="#B0E1E4" stroke-width="10"/>
+    <g fill="#071426" opacity="0.88">
+      <rect x="112" y="132" width="168" height="14" rx="7"/>
+      <rect x="112" y="160" width="150" height="14" rx="7"/>
+      <rect x="112" y="188" width="172" height="14" rx="7"/>
+      <rect x="112" y="216" width="128" height="14" rx="7"/>
+      <rect x="112" y="244" width="162" height="14" rx="7"/>
+      <rect x="112" y="272" width="144" height="14" rx="7"/>
+      <rect x="112" y="300" width="168" height="14" rx="7"/>
+      <rect x="112" y="328" width="118" height="14" rx="7"/>
+      <rect x="112" y="356" width="158" height="14" rx="7"/>
+    </g>
+  </g>
+
+  <!-- the arrow, in cream here: the one warm note against all that aqua -->
+  <path fill="#F1E6B6" d="
+    M 214 316
+    C 246 292, 268 268, 286 244
+    L 300 258
+    L 356 246
+    L 330 200
+    L 316 214
+    L 330 228
+    C 302 258, 272 292, 236 332
+    Z"/>
+
+  <!-- target panel -->
+  <rect x="318" y="126" width="150" height="272" rx="26"
+        fill="#0E2233" stroke="#B0E1E4" stroke-width="10"/>
+
+  <!-- output lines -->
+  <g fill="#B0E1E4">
+    <rect x="342" y="158" width="102" height="16" rx="8"/>
+    <rect x="342" y="188" width="86" height="16" rx="8"/>
+    <rect x="342" y="218" width="102" height="16" rx="8"/>
+    <rect x="342" y="248" width="72" height="16" rx="8"/>
+  </g>
+
+  <!-- keyboard: 3x3 -->
+  <g fill="#0E2233" stroke="#B0E1E4" stroke-width="6">
+    <rect x="342" y="292" width="30" height="26" rx="6"/>
+    <rect x="380" y="292" width="30" height="26" rx="6"/>
+    <rect x="418" y="292" width="30" height="26" rx="6"/>
+    <rect x="342" y="326" width="30" height="26" rx="6"/>
+    <rect x="380" y="326" width="30" height="26" rx="6"/>
+    <rect x="418" y="326" width="30" height="26" rx="6"/>
+    <rect x="342" y="360" width="30" height="26" rx="6"/>
+    <rect x="380" y="360" width="30" height="26" rx="6"/>
+    <rect x="418" y="360" width="30" height="26" rx="6"/>
+  </g>
+</svg>

@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  KALIMA mark, light variant.
+
+  Recreated as vector from the supplied reference image rather than copied as a
+  raster. Three reasons:
+
+    1. it stays crisp on a HiDPI display and at favicon size
+    2. it is a few KB instead of a few hundred, and the repo carries no binaries
+    3. the two variants differ only in colour, and they differ in which way:
+       the dark mark needs light ink and the light mark dark ink
+
+  Geometry: a document of CJK glyphs becoming typed text on a keyboard, which
+  is the product in one image: source language in, translation out.
+
+  Flat fills only. A gradient was tried and dropped: the brief asks for
+  restraint, and the SVG renderer used to check this output resolved
+  url(#gradient) to black, so the page came out as a black slab. A flat fill
+  renders the same everywhere and cannot fail that way.
+
+  The background is transparent. The white in the reference was the preview
+  background, and baking it in would put a white box on the dark theme.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512"
+     role="img" aria-label="KALIMA">
+
+  <!-- source document, tilted like the reference -->
+  <g transform="rotate(-7 256 256)">
+    <rect x="88" y="104" width="216" height="300" rx="24"
+          fill="#F1E6B6" stroke="#4C7C92" stroke-width="10"/>
+    <!-- glyph rows: abstract marks rather than real CJK, because a text element
+         falls back to a different font on every machine and at this size the
+         point is the texture of text, not its content. -->
+    <g fill="#4C7C92" opacity="0.85">
+      <rect x="112" y="132" width="168" height="14" rx="7"/>
+      <rect x="112" y="160" width="150" height="14" rx="7"/>
+      <rect x="112" y="188" width="172" height="14" rx="7"/>
+      <rect x="112" y="216" width="128" height="14" rx="7"/>
+      <rect x="112" y="244" width="162" height="14" rx="7"/>
+      <rect x="112" y="272" width="144" height="14" rx="7"/>
+      <rect x="112" y="300" width="168" height="14" rx="7"/>
+      <rect x="112" y="328" width="118" height="14" rx="7"/>
+      <rect x="112" y="356" width="158" height="14" rx="7"/>
+    </g>
+  </g>
+
+  <!-- The arrow, drawn as one filled path rather than a stroked line plus a
+       separate head, so the joint cannot show a seam and the head cannot drift
+       off the end of the curve. It is the only warm element in the mark, which
+       is what makes the transform legible at favicon size. -->
+  <path fill="#B3A054" d="
+    M 214 316
+    C 246 292, 268 268, 286 244
+    L 300 258
+    L 356 246
+    L 330 200
+    L 316 214
+    L 330 228
+    C 302 258, 272 292, 236 332
+    Z"/>
+
+  <!-- target panel: the typed result above a keyboard -->
+  <rect x="318" y="126" width="150" height="272" rx="26"
+        fill="#4C7C92" stroke="#F1E6B6" stroke-width="10"/>
+
+  <!-- output lines -->
+  <g fill="#F1E6B6">
+    <rect x="342" y="158" width="102" height="16" rx="8"/>
+    <rect x="342" y="188" width="86" height="16" rx="8"/>
+    <rect x="342" y="218" width="102" height="16" rx="8"/>
+    <rect x="342" y="248" width="72" height="16" rx="8"/>
+  </g>
+
+  <!-- keyboard: 3x3 -->
+  <g fill="#4C7C92" stroke="#F1E6B6" stroke-width="6">
+    <rect x="342" y="292" width="30" height="26" rx="6"/>
+    <rect x="380" y="292" width="30" height="26" rx="6"/>
+    <rect x="418" y="292" width="30" height="26" rx="6"/>
+    <rect x="342" y="326" width="30" height="26" rx="6"/>
+    <rect x="380" y="326" width="30" height="26" rx="6"/>
+    <rect x="418" y="326" width="30" height="26" rx="6"/>
+    <rect x="342" y="360" width="30" height="26" rx="6"/>
+    <rect x="380" y="360" width="30" height="26" rx="6"/>
+    <rect x="418" y="360" width="30" height="26" rx="6"/>
+  </g>
+</svg>

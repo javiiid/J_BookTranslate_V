@@ -1,0 +1,82 @@
+npm notice run ui@0.0.0 predev
+npm notice run node scripts/ensure-fonts.mjs && node scripts/check-brand.mjs
+npm notice run ui@0.0.0 dev
+npm notice run vite
+[2m4:43:10 PM[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/jobs/e63c36fe2d3a/chunks[39m
+Error: socket hang up
+    at Socket.socketOnEnd (node:_http_client:790:25)
+    at Socket.emit (node:events:526:24)
+    at endReadableNT (node:internal/streams/readable:1764:12)
+    at process.processTicksAndRejections (node:internal/process/task_queues:90:21)
+[2m4:43:11 PM[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/jobs/e63c36fe2d3a/chunks[39m
+Error: socket hang up
+    at Socket.socketOnEnd (node:_http_client:790:25)
+    at Socket.emit (node:events:526:24)
+    at endReadableNT (node:internal/streams/readable:1764:12)
+    at process.processTicksAndRejections (node:internal/process/task_queues:90:21)
+[2m4:43:24 PM[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/jobs/e63c36fe2d3a/chunks[39m
+Error: socket hang up
+    at Socket.socketOnEnd (node:_http_client:790:25)
+    at Socket.emit (node:events:526:24)
+    at endReadableNT (node:internal/streams/readable:1764:12)
+    at process.processTicksAndRejections (node:internal/process/task_queues:90:21)
+[2m4:43:25 PM[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/jobs/e63c36fe2d3a/chunks[39m
+Error: socket hang up
+    at Socket.socketOnEnd (node:_http_client:790:25)
+    at Socket.emit (node:events:526:24)
+    at endReadableNT (node:internal/streams/readable:1764:12)
+    at process.processTicksAndRejections (node:internal/process/task_queues:90:21)
+[2m4:43:27 PM[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/jobs/e63c36fe2d3a/chunks[39m
+Error: connect ECONNREFUSED 127.0.0.1:8765
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2021:16)
+[2m4:43:28 PM[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/jobs/e63c36fe2d3a/chunks[39m
+Error: connect ECONNREFUSED 127.0.0.1:8765
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2021:16)
+[2m4:44:15 PM[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/jobs/e63c36fe2d3a/chunks[39m
+Error: socket hang up
+    at Socket.socketOnEnd (node:_http_client:790:25)
+    at Socket.emit (node:events:526:24)
+    at endReadableNT (node:internal/streams/readable:1764:12)
+    at process.processTicksAndRejections (node:internal/process/task_queues:90:21)
+[2m4:44:16 PM[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/jobs/e63c36fe2d3a/chunks[39m
+Error: socket hang up
+    at Socket.socketOnEnd (node:_http_client:790:25)
+    at Socket.emit (node:events:526:24)
+    at endReadableNT (node:internal/streams/readable:1764:12)
+    at process.processTicksAndRejections (node:internal/process/task_queues:90:21)
+[2m4:44:20 PM[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/jobs/e63c36fe2d3a/chunks[39m
+Error: socket hang up
+    at Socket.socketOnEnd (node:_http_client:790:25)
+    at Socket.emit (node:events:526:24)
+    at endReadableNT (node:internal/streams/readable:1764:12)
+    at process.processTicksAndRejections (node:internal/process/task_queues:90:21)
+[2m4:44:21 PM[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/jobs/e63c36fe2d3a/chunks[39m
+Error: socket hang up
+    at Socket.socketOnEnd (node:_http_client:790:25)
+    at Socket.emit (node:events:526:24)
+    at endReadableNT (node:internal/streams/readable:1764:12)
+    at process.processTicksAndRejections (node:internal/process/task_queues:90:21)
+[2m4:44:23 PM[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/jobs/e63c36fe2d3a/chunks[39m
+Error: socket hang up
+    at Socket.socketOnEnd (node:_http_client:790:25)
+    at Socket.emit (node:events:526:24)
+    at endReadableNT (node:internal/streams/readable:1764:12)
+    at process.processTicksAndRejections (node:internal/process/task_queues:90:21)
+[2m4:44:24 PM[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/jobs/e63c36fe2d3a/chunks[39m
+Error: socket hang up
+    at Socket.socketOnEnd (node:_http_client:790:25)
+    at Socket.emit (node:events:526:24)
+    at endReadableNT (node:internal/streams/readable:1764:12)
+    at process.processTicksAndRejections (node:internal/process/task_queues:90:21)
+[2m4:57:53 PM[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/jobs/e63c36fe2d3a/chunks[39m
+Error: socket hang up
+    at Socket.socketOnEnd (node:_http_client:790:25)
+    at Socket.emit (node:events:526:24)
+    at endReadableNT (node:internal/streams/readable:1764:12)
+    at process.processTicksAndRejections (node:internal/process/task_queues:90:21)
+[2m4:57:54 PM[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/jobs/e63c36fe2d3a/chunks[39m
+Error: socket hang up
+    at Socket.socketOnEnd (node:_http_client:790:25)
+    at Socket.emit (node:events:526:24)
+    at endReadableNT (node:internal/streams/readable:1764:12)
+    at process.processTicksAndRejections (node:internal/process/task_queues:90:21)
