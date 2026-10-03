@@ -89,6 +89,7 @@ from app.jobs.estimate import estimate
 from app.jobs.dashboard import install_jobs_dashboard
 from app.jobs.detail_page import job_detail_page
 from app.jobs.workspace import install_workspace
+from app.calibration.routes import handle as calibration_route
 
 UTC = timezone.utc
 UPLOAD_DIR = ensure_dir("data") / "uploads"
@@ -398,13 +399,20 @@ def _run_job(job: Job, *, resume: bool = False) -> None:
                 prompt = with_author_voice(prompt)
             mode = "resume" if resume else job.mode
             print(f"Starting web job {job.id}")
-            manifest = translate(client=client, input_path=job.input_path, output_path=job.output_path,
-                from_lang=job.options["from_lang"], to_lang=job.options["to_lang"], mode=mode,
-                model=job.options["model"], fast=mode not in {"batch", "batchcheck", "resumebatch"},
-                resume_job_id=job.pipeline_job_id if resume else None, debug=True, filetype=job.filetype,
-                output_formats=job.options.get("outputs"), translation_prompt=prompt, stop_event=job.stop_event,
-                style_preset=job.style,
-                on_job_started=lambda pipeline_id, paths: _on_pipeline_started(job, pipeline_id, paths))
+            if job.options.get("calibration_id"):
+                from app.calibration.routes import get_service
+                from app.calibration.runner import run_calibrated_job
+                manifest = run_calibrated_job(get_service(), job,
+                    lambda pipeline_id, paths: _on_pipeline_started(job, pipeline_id, paths),
+                    lambda: _update_progress(job))
+            else:
+                manifest = translate(client=client, input_path=job.input_path, output_path=job.output_path,
+                    from_lang=job.options["from_lang"], to_lang=job.options["to_lang"], mode=mode,
+                    model=job.options["model"], fast=mode not in {"batch", "batchcheck", "resumebatch"},
+                    resume_job_id=job.pipeline_job_id if resume else None, debug=True, filetype=job.filetype,
+                    output_formats=job.options.get("outputs"), translation_prompt=prompt, stop_event=job.stop_event,
+                    style_preset=job.style,
+                    on_job_started=lambda pipeline_id, paths: _on_pipeline_started(job, pipeline_id, paths))
             _update_progress(job)
             job.status = "cancelled" if job.cancel_requested else ("paused" if job.stop_event.is_set() else ("completed" if job.output_path.exists() else "failed"))
             if job.status == "completed":
@@ -426,6 +434,11 @@ def _run_job(job: Job, *, resume: bool = False) -> None:
             _persist_job(job)
             _job_event(job, "failed", job.error or "ترجمه با خطا متوقف شد.", "ERROR")
             traceback.print_exc()
+        finally:
+            if job.options.get("calibration_id"):
+                from app.calibration.routes import get_service
+                state = {"completed": "COMPLETED", "cancelled": "CANCELLED", "paused": "PAUSED", "failed": "FAILED"}.get(job.status, "FULL_PROCESSING")
+                get_service().store.change(job.options["calibration_id"], lambda s: s.update(state=state))
 
 
 _CHUNK_FLAG_MARKERS = ("{NOTE", "{BOUNDARY_WARNING", "{WARNING")
@@ -892,8 +905,8 @@ def _store_upload(filename: str, payload: bytes) -> Path:
     original handler reported, kept distinct so the messages stay accurate.
     """
     suffix = Path(filename).suffix.lower()
-    if suffix not in {".epub", ".pdf"}:
-        raise ValueError("Only EPUB and PDF files are accepted.")
+    if suffix not in {".epub", ".pdf", ".txt"}:
+        raise ValueError("Only EPUB, PDF and TXT files are accepted.")
     job_id = uuid.uuid4().hex[:12]
     target = UPLOAD_DIR / f"{job_id}_{filename}"
     ensure_disk_space(UPLOAD_DIR, required_bytes=len(payload) * 3)
@@ -1117,6 +1130,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self._host_allowed():
             self._reject("این درخواست از مبدأ مجاز ارسال نشده است."); return
         parsed = urlparse(self.path)
+        if calibration_route(self, "GET"): return
         if parsed.path.startswith('/api/library/') and '/glossary/proposal' in parsed.path:
             query = parse_qs(parsed.query)
             origin = (query.get('origin', ['preflight'])[0] or 'preflight').lower()
@@ -1320,6 +1334,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_error(404)
     def do_POST(self) -> None:
         if not self._guarded(): return
+        if calibration_route(self, "POST"): return
         path=urlparse(self.path).path
         if path.startswith('/api/library/') and path.endswith('/translate'):
             try:
@@ -1455,6 +1470,7 @@ class Handler(BaseHTTPRequestHandler):
             except OSError as exc: self._json({"error": str(exc)}, 500); return
             self._json({
                 "file_path": str(target),
+                "upload_id": target.name,
                 "filename": filename,
                 "size": len(payload),
             }, 201); return
@@ -1628,6 +1644,8 @@ class Handler(BaseHTTPRequestHandler):
         # The filetype, without the dot. _store_upload has already rejected
         # anything that is not .epub or .pdf, so this cannot be empty here.
         suffix=Path(filename).suffix.lower()
+        if suffix == ".txt":
+            self._json({"error": "فایل TXT را از مسیر تأیید نمونه شروع کنید."}, 400); return
         try:
             validate_book(input_path)
         except (OSError, ValueError) as exc:
@@ -1670,6 +1688,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_PUT(self) -> None:
         if not self._guarded(): return
+        if calibration_route(self, "PUT"): return
         path = urlparse(self.path).path
         if path.startswith('/api/library/') and '/glossary/proposal/approve' in path:
             try: body = self._request_json()
