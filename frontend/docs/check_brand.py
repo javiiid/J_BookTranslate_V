@@ -71,7 +71,7 @@ print("=== the source SVGs are reachable and well-formed ===")
 import app.core.brand as brand_module  # noqa: E402
 
 for location, directory in [
-    ("react (source)", Path(r"D:\J_Translate_Ui\ui\public\brand")),
+    ("react (source)", Path(r"D:\J_BookTranslate_V\frontend\ui\public\brand")),
     ("python (copy)", brand_module.BRAND_DIR),
 ]:
     for name in ("kalima-mark-light.svg", "kalima-mark-dark.svg"):
@@ -87,7 +87,7 @@ for location, directory in [
 print()
 print("=== the two copies are identical ===")
 for name in ("kalima-mark-light.svg", "kalima-mark-dark.svg"):
-    source = (Path(r"D:\J_Translate_Ui\ui\public\brand") / name).read_bytes()
+    source = (Path(r"D:\J_BookTranslate_V\frontend\ui\public\brand") / name).read_bytes()
     copy = (brand_module.BRAND_DIR / name).read_bytes()
     check(f"{name} is in sync", source == copy,
           "run install_brand.py" if source != copy else "")

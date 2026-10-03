@@ -28,7 +28,7 @@ from pathlib import Path
 sys.stdout.reconfigure(encoding="utf-8")
 
 PY = Path(r"D:\J_BookTranslate_V")
-UI = Path(r"D:\J_Translate_Ui")
+UI = Path(r"D:\J_BookTranslate_V\frontend")
 
 SKIP_DIRS = {
     "node_modules", ".git", ".venv", "__pycache__", "dist", ".test-tmp",

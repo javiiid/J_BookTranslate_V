@@ -10,7 +10,7 @@ break the moment either folder is moved.
 
 Re-run after changing the artwork:
 
-    python D:\\J_Translate_Ui\\docs\\install_brand.py
+    python D:\\J_BookTranslate_V\\frontend\\docs\\install_brand.py
 """
 import shutil
 import sys
@@ -18,7 +18,7 @@ from pathlib import Path
 
 sys.stdout.reconfigure(encoding="utf-8")
 
-SOURCE = Path(r"D:\J_Translate_Ui\ui\public\brand")
+SOURCE = Path(r"D:\J_BookTranslate_V\frontend\ui\public\brand")
 TARGET = Path(r"D:\J_BookTranslate_V\app\brand")
 
 FILES = ["kalima-mark-light.svg", "kalima-mark-dark.svg"]
@@ -43,8 +43,8 @@ for name in FILES:
 (TARGET / "README.md").write_text(
     """# Brand assets
 
-Copied from `D:\\J_Translate_Ui\\ui\\public\\brand` by
-`D:\\J_Translate_Ui\\docs\\install_brand.py`.
+Copied from `D:\\J_BookTranslate_V\\frontend\\ui\\public\\brand` by
+`D:\\J_BookTranslate_V\\frontend\\docs\\install_brand.py`.
 
 **These are not the source.** The React project owns the artwork; edit there and
 re-run the installer. Editing here means the two UIs drift, and the drift is

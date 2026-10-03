@@ -22,7 +22,7 @@ from pathlib import Path
 
 sys.stdout.reconfigure(encoding="utf-8")
 
-UI = Path(r"D:\J_Translate_Ui\ui")
+UI = Path(r"D:\J_BookTranslate_V\frontend\ui")
 DIST = UI / "dist"
 
 if not DIST.is_dir():

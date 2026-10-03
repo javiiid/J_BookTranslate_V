@@ -20,7 +20,7 @@ from pathlib import Path
 sys.stdout.reconfigure(encoding="utf-8")
 
 BASE = "http://127.0.0.1:8765"
-OUT = Path(r"D:\J_Translate_Ui\docs\inventory\phase3")
+OUT = Path(r"D:\J_BookTranslate_V\frontend\docs\inventory\phase3")
 OUT.mkdir(parents=True, exist_ok=True)
 
 

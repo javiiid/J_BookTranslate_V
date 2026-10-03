@@ -19,7 +19,7 @@ sys.stdout.reconfigure(encoding="utf-8")
 
 REPOS = {
     "python": Path(r"D:\J_BookTranslate_V"),
-    "react": Path(r"D:\J_Translate_Ui"),
+    "react": Path(r"D:\J_BookTranslate_V\frontend"),
 }
 
 # Anything that could be a rendering of the old name.

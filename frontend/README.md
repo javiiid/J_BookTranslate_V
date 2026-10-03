@@ -46,7 +46,7 @@ cd D:\J_BookTranslate_V
 .\.venv\Scripts\python.exe -m app.web          # http://127.0.0.1:8765
 
 # 2. this UI
-cd D:\J_Translate_Ui\ui
+cd D:\J_BookTranslate_V\frontend\ui
 npm install
 npm run dev                                     # http://localhost:5173
 ```

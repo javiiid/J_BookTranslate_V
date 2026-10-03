@@ -15,7 +15,7 @@ from pathlib import Path
 
 sys.stdout.reconfigure(encoding="utf-8")
 
-UI = Path(r"D:\J_Translate_Ui\ui")
+UI = Path(r"D:\J_BookTranslate_V\frontend\ui")
 PREVIEW = UI / "scripts" / "preview"
 
 # --- the built stylesheet, reduced to a size lookup -----------------------

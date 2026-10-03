@@ -84,8 +84,8 @@ def repair(text: str) -> str | None:
 
 
 TARGETS = [
-    Path(r"D:\J_Translate_Ui\ui\src\pages\ReaderPage.tsx"),
-    Path(r"D:\J_Translate_Ui\ui\src\pages\AccountPage.tsx"),
+    Path(r"D:\J_BookTranslate_V\frontend\ui\src\pages\ReaderPage.tsx"),
+    Path(r"D:\J_BookTranslate_V\frontend\ui\src\pages\AccountPage.tsx"),
     Path(r"D:\J_BookTranslate_V\app\pipeline\epub_pipeline.py"),
     Path(r"D:\J_BookTranslate_V\app\pipeline\pdf_fixer.py"),
 ]

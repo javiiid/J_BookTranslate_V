@@ -17,7 +17,7 @@ from pathlib import Path
 
 sys.stdout.reconfigure(encoding="utf-8")
 
-ROOTS = [Path(r"D:\J_Translate_Ui"), Path(r"D:\J_BookTranslate_V")]
+ROOTS = [Path(r"D:\J_BookTranslate_V\frontend"), Path(r"D:\J_BookTranslate_V")]
 SUFFIXES = {".ts", ".tsx", ".js", ".mjs", ".css", ".html", ".json", ".md", ".py"}
 SKIP = {"node_modules", ".git", "dist", ".venv", "__pycache__", ".test-tmp", "output"}
 

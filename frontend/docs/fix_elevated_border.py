@@ -12,7 +12,7 @@ from pathlib import Path
 
 sys.stdout.reconfigure(encoding="utf-8")
 
-path = Path(r"D:\J_Translate_Ui\ui\src\styles\tokens.css")
+path = Path(r"D:\J_BookTranslate_V\frontend\ui\src\styles\tokens.css")
 lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
 
 changed = 0

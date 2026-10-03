@@ -34,7 +34,7 @@ chapters = get(f"/api{reader_path}/chapters")["items"]
 chapter = get(f"/api{reader_path}/chapters/{chapters[0]['id']}")
 
 html = chapter["html"]
-out = Path(r"D:\J_Translate_Ui\docs\reader-chapter.html")
+out = Path(r"D:\J_BookTranslate_V\frontend\docs\reader-chapter.html")
 out.write_text(html, encoding="utf-8")
 
 print("=== the first 1200 characters, verbatim ===")

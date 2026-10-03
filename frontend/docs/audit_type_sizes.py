@@ -17,7 +17,7 @@ from pathlib import Path
 
 sys.stdout.reconfigure(encoding="utf-8")
 
-UI = Path(r"D:\J_Translate_Ui\ui")
+UI = Path(r"D:\J_BookTranslate_V\frontend\ui")
 
 # Run the audit and capture its JSON by asking for machine output.
 result = subprocess.run(

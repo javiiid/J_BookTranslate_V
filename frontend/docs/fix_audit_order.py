@@ -11,7 +11,7 @@ from pathlib import Path
 
 sys.stdout.reconfigure(encoding="utf-8")
 
-path = Path(r"D:\J_Translate_Ui\ui\scripts\audit-contrast.mjs")
+path = Path(r"D:\J_BookTranslate_V\frontend\ui\scripts\audit-contrast.mjs")
 text = path.read_text(encoding="utf-8")
 
 # 1. Make sure AppShell is in the destructured import from the built bundle.

@@ -25,7 +25,7 @@ from pathlib import Path
 sys.stdout.reconfigure(encoding="utf-8")
 
 PY_FONT_DIR = Path(r"D:\J_BookTranslate_V\app\library")
-UI = Path(r"D:\J_Translate_Ui\ui")
+UI = Path(r"D:\J_BookTranslate_V\frontend\ui")
 FONT_OUT = UI / "public" / "fonts"
 CSS_OUT = UI / "src" / "styles" / "fonts.generated.css"
 

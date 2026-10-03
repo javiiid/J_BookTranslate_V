@@ -1,8 +1,8 @@
 ﻿import xml.etree.ElementTree as ET, sys, pathlib
 sys.stdout.reconfigure(encoding="utf-8")
-for f in [r"D:\J_Translate_Ui\ui\public\brand\kalima-mark-light.svg",
-          r"D:\J_Translate_Ui\ui\public\brand\kalima-mark-dark.svg",
-          r"D:\J_Translate_Ui\ui\public\favicon.svg"]:
+for f in [r"D:\J_BookTranslate_V\frontend\ui\public\brand\kalima-mark-light.svg",
+          r"D:\J_BookTranslate_V\frontend\ui\public\brand\kalima-mark-dark.svg",
+          r"D:\J_BookTranslate_V\frontend\ui\public\favicon.svg"]:
     p = pathlib.Path(f)
     text = p.read_text(encoding="utf-8")
     print("=" * 60)

@@ -15,7 +15,7 @@ from pathlib import Path
 
 sys.stdout.reconfigure(encoding="utf-8")
 
-UI = Path(r"D:\J_Translate_Ui\ui")
+UI = Path(r"D:\J_BookTranslate_V\frontend\ui")
 
 OLD_HEX = {
     "356df6", "2e62dc", "2d5ed4", "7257e8", "08966c", "0ca6a6",

@@ -12,9 +12,9 @@ from pathlib import Path
 sys.stdout.reconfigure(encoding="utf-8")
 
 TARGETS = [
-    Path(r"D:\J_Translate_Ui\ui\public\brand\kalima-mark-light.svg"),
-    Path(r"D:\J_Translate_Ui\ui\public\brand\kalima-mark-dark.svg"),
-    Path(r"D:\J_Translate_Ui\ui\public\favicon.svg"),
+    Path(r"D:\J_BookTranslate_V\frontend\ui\public\brand\kalima-mark-light.svg"),
+    Path(r"D:\J_BookTranslate_V\frontend\ui\public\brand\kalima-mark-dark.svg"),
+    Path(r"D:\J_BookTranslate_V\frontend\ui\public\favicon.svg"),
 ]
 
 for path in TARGETS:

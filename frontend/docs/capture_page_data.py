@@ -14,7 +14,7 @@ from pathlib import Path
 sys.stdout.reconfigure(encoding="utf-8")
 
 BASE = "http://127.0.0.1:8765"
-OUT = Path(r"D:\J_Translate_Ui\ui\scripts\page-data.json")
+OUT = Path(r"D:\J_BookTranslate_V\frontend\ui\scripts\page-data.json")
 READER = "/reader/040061b0658b"
 
 for _ in range(30):

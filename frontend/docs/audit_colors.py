@@ -13,7 +13,7 @@ from pathlib import Path
 sys.stdout.reconfigure(encoding="utf-8")
 
 PY = Path(r"D:\J_BookTranslate_V")
-UI = Path(r"D:\J_Translate_Ui\ui")
+UI = Path(r"D:\J_BookTranslate_V\frontend\ui")
 
 # Hex colours, excluding the ones that are obviously not UI colours.
 HEX = re.compile(r"#[0-9A-Fa-f]{3,8}\b")

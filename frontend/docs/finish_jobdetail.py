@@ -10,7 +10,7 @@ from pathlib import Path
 
 sys.stdout.reconfigure(encoding="utf-8")
 
-path = Path(r"D:\J_Translate_Ui\ui\src\pages\JobDetailPage.tsx")
+path = Path(r"D:\J_BookTranslate_V\frontend\ui\src\pages\JobDetailPage.tsx")
 text = path.read_text(encoding="utf-8")
 original = text
 
