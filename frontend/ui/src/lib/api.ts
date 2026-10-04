@@ -171,6 +171,21 @@ export interface LibraryListResponse {
   storage: { used: number; free: number }
 }
 
+/**
+ * The buckets `/api/library` can be filtered on.
+ *
+ * These are the server's own strings, read out of `library_summary` in
+ * `app/web.py`, and not a set invented here. The page's filter row is built
+ * from this union, so a bucket the UI shows is a bucket the backend can filter
+ * on -- the alternative is a tab that looks exact and is really a client-side
+ * guess over one page of results.
+ *
+ * `archived` is understood by the endpoint and is deliberately absent from the
+ * filter row: archiving is a per-book action, and a tab that hides books would
+ * give a second, quieter way to lose one.
+ */
+export type LibraryStatusFilter = 'completed' | 'running' | 'failed' | 'available' | 'archived'
+
 export interface Model {
   id: string
   provider: string
@@ -568,9 +583,15 @@ export const api = {
   providerConfig: () => request<ProviderConfig>('/api/provider-config'),
 
   /* --- library ------------------------------------------------------ */
-  library: (page: number, limit: number, query = '') => {
+  library: (
+    page: number,
+    limit: number,
+    query = '',
+    status: LibraryStatusFilter = '',
+  ) => {
     const params = new URLSearchParams({ page: String(page), limit: String(limit) })
     if (query.trim()) params.set('q', query.trim())
+    if (status) params.set('status', status)
     return request<LibraryListResponse>(`/api/library?${params}`)
   },
   book: (id: number) => request<LibraryBook>(`/api/library/${id}`),

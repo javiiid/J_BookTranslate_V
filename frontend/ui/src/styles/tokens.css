@@ -213,18 +213,22 @@
   --color-selected: #deeaf0;
   --color-selected-border: #4c7c92;
 
-  /* The mobile bottom bar.
-     Two tokens, because the indicator is not one colour in both themes and the
-     difference is a real constraint rather than taste. In day mode a solid fill
-     would be a 40px blue dot on every screen; the wash plus brand ink is quieter
-     and the same pairing the sidebar's active row already uses. In dark mode
-     the wash is *darker* than the bar it sits on, so it disappears -- there the
-     fill has to be the aqua, with the near-black ink on top, which is the
-     primary-button pairing. Both pairs are already asserted in
-     tests/tokens.contrast.test.ts; the day one is "brand text on the subtle
-     wash", the dark one is "label on an aqua primary button". */
-  --color-nav-indicator: #eff5f8;
-  --color-nav-indicator-ink: #2e5c70;
+  /* The mobile bottom bar. Five roles, each a pair or a single ink, taken from
+     the approved design reference (navy by day, amber by night) rather than
+     from the brand ramp, so the bar can be matched to that reference exactly.
+       indicator / indicator-ink  the selected pill, and the ink on it. The same
+                                  ink is the label of a selected or primary
+                                  item, drawn on the bar itself.
+       idle                       the icon and label of everything else.
+       primary / primary-ink      the solid pill of the one action, at rest.
+     The divider before the theme switch is `--color-border`, the same line as
+     the bar's top edge: it is a separator, not information, so it is not given
+     a contrast ratio of its own. */
+  --color-nav-indicator: #e2e7f5;
+  --color-nav-indicator-ink: #1f3972;
+  --color-nav-idle: #535c78;
+  --color-nav-primary: #1f3972;
+  --color-nav-primary-ink: #ffffff;
 
   /* Elevation. Soft and low-opacity; the day palette carries hierarchy through
      the tinted neutrals more than through shadow. */
@@ -247,9 +251,14 @@
 /* The mobile bar's height, as a token rather than a number typed twice.
    A fixed bottom bar that overlaps the last row of a page is the classic way to
    make a form unusable, so the shell's bottom padding reads this same value --
-   one number, and the bar and the space it reserves cannot drift apart. */
+   one number, and the bar and the space it reserves cannot drift apart.
+
+   It is 4rem because of what the bar holds: 8px of top padding, a 32px pill, a
+   4px gap and a 17px label is 61px. At 3.5rem the bar was drawn about 9px taller
+   than the space reserved for it, and the difference was hidden only by the
+   padding that pages happen to have at their foot. */
 :root {
-  --mobile-nav-height: 3.5rem;
+  --mobile-nav-height: 4rem;
 }
 
 /* --------------------------------------------------------------------------
@@ -336,10 +345,15 @@
   --color-selected: #1f4655;
   --color-selected-border: #b0e1e4;
 
-  /* The mobile bottom bar, dark side. See the day block for why this pair is
-     the primary-button pair and not a wash. */
-  --color-nav-indicator: #b0e1e4;
-  --color-nav-indicator-ink: #071426;
+  /* The mobile bottom bar, dark side. Here the selected pill is a solid blue
+     with white ink and the primary action is amber, so the two are different
+     colours and "selected" can never be mistaken for "the action". (They were
+     both the aqua in an earlier version, which made them one fill.) */
+  --color-nav-indicator: #1e386f;
+  --color-nav-indicator-ink: #ffffff;
+  --color-nav-idle: #a9b8dc;
+  --color-nav-primary: #fdb838;
+  --color-nav-primary-ink: #0e1630;
 
   /* Dark mode gets almost no shadow: on a near-black ground, shadow is
      invisible, so elevation is carried by surface lightness instead. */
@@ -368,6 +382,19 @@
 
   body {
     margin: 0;
+    /* `100dvh`, not `100vh` and not `100%`.
+
+       `100vh` on mobile is the *largest* viewport, the one with the browser bar
+       hidden, so it is taller than the screen at rest and the page scrolls a
+       bar-height past its own content. `100dvh` tracks the visible area, so it
+       does not.
+
+       But `dvh` alone is not enough on its own, and this is why: `dvh` changes
+       as the browser bar slides. Every element that is sized from it grows
+       when the bar hides, and a page that grows while you are already at the
+       bottom of it is the "I scrolled past the end and it went white" report.
+       So the height is owned in exactly ONE place -- this rule -- and the
+       shell below it fills by growing with its content. See `AppShell`. */
     min-height: 100dvh;
     background: var(--color-background);
     color: var(--color-text-primary);
@@ -409,6 +436,35 @@
 }
 
 @layer components {
+  /* The mobile theme switch is chrome, not a sixth destination. Keep the
+     existing shared control semantics, but remove its desktop button chrome
+     inside the flat mobile bar and preserve a 44px touch target. */
+  .mobile-nav .btn-icon {
+    width: 44px;
+    min-height: 44px;
+    border: 0;
+    border-radius: var(--radius-control);
+    background: transparent;
+    color: var(--color-nav-idle);
+    box-shadow: none;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .mobile-nav .btn-icon:hover,
+  .mobile-nav .btn-icon:active {
+    background: transparent;
+    color: var(--color-nav-indicator-ink);
+  }
+  /* The hairline before the switch, and the margins that keep it shorter than
+     the bar so it reads as a divider and not as a second border. The end padding
+     is room for the focus ring: this button is the last thing before the screen
+     edge, and a ring drawn 4px out would otherwise be cut off by it. */
+  .mobile-nav > div > ul + div {
+    margin-block: var(--spacing-2);
+    padding-inline-end: var(--spacing-1);
+    border-inline-start: 1px solid var(--color-border);
+  }
+
   /* ------------------------------------------------------------------
      Surfaces
      ------------------------------------------------------------------ */
@@ -417,6 +473,33 @@
     border: 1px solid var(--color-border);
     border-radius: var(--radius-card);
     box-shadow: var(--shadow-card);
+  }
+
+  /* A whole card that is one link. It had `transition-colors` and nothing to
+     transition, so hovering a capability card did nothing. Only the border
+     changes, which keeps the text on its already-audited background. */
+  .card-link {
+    display: block;
+    color: inherit;
+    text-decoration: none;
+    transition: border-color 0.15s var(--ease-out);
+  }
+  .card-link:hover {
+    border-color: var(--color-primary);
+  }
+
+  /* The first tab stop on every page. Parked above the viewport until it has
+     keyboard focus, so a keyboard user does not tab through the whole rail on
+     every navigation. */
+  .skip-link {
+    position: fixed;
+    inset-block-start: var(--spacing-2);
+    inset-inline-start: var(--spacing-2);
+    z-index: 60;
+    transform: translateY(calc(-100% - var(--spacing-4)));
+  }
+  .skip-link:focus-visible {
+    transform: none;
   }
 
   /* An overlay surface: sidebar, dialog, popover, table header in dark mode. */
@@ -545,6 +628,13 @@
     cursor: not-allowed;
   }
 
+  /* Secondary and ghost had a hover but no pressed state, so a click on them
+     gave no feedback until the page responded. One pixel of travel, on every
+     variant, is enough to read as "that registered". */
+  .btn:active:not(:disabled) {
+    transform: translateY(1px);
+  }
+
   /* A small square button for icon-only controls. */
   .btn-icon {
     display: inline-grid;
@@ -606,6 +696,16 @@
       calc(100% - 13px) calc(50% + 2px);
     background-size: 5px 5px, 5px 5px;
     background-repeat: no-repeat;
+  }
+
+  /* `padding-inline-end` is logical but `background-position` is physical.
+     In RTL the padding is reserved on the left while the chevron stayed on
+     the right, drawn over the first letters of the selected value. Mirror the
+     two offsets (left half of the "v", then right half) to the left edge. */
+  [dir='rtl'] select.field {
+    background-position:
+      8px calc(50% + 2px),
+      13px calc(50% + 2px);
   }
 
   .label {
