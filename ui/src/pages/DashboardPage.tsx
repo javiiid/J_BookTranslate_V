@@ -1,9 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { api } from '@/lib/api'
-import type { Job, JobStatus } from '@/lib/api'
-import { STATUS_FA, badgeClass, fa, faBytes, faDuration } from '@/lib/format'
-import { attentionQueue, bucketByDay, missingFromChart } from '@/lib/dashboard'
+import type { Job } from '@/lib/api'
+import { badgeClass, fa, faAgo, faBytes, faDuration, statusLabel } from '@/lib/format'
+import { attentionQueue, bucketByDay, greeting, heroStatus, missingFromChart, todayFa, weekStats } from '@/lib/dashboard'
 import { ApiStatus } from '@/components/ApiStatus'
 import { KalimaMark } from '@/components/AppShell'
 import { BarChart } from '@/components/BarChart'
@@ -88,11 +88,6 @@ function StatCard({
  * in the database. It gets the error instead, because the useful thing to do
  * with a failure is read why it failed.
  */
-/** A job's status in Persian, falling back to the raw value from the API. */
-function statusLabel(status: string): string {
-  return STATUS_FA[status as JobStatus] ?? status
-}
-
 function AttentionRow({ job }: { job: Job }) {
   const client = useQueryClient()
   const resume = useMutation({
@@ -131,7 +126,14 @@ function AttentionRow({ job }: { job: Job }) {
           </span>
           {done !== null && done < 100 ? (
             <div className="mt-[var(--spacing-2)] flex items-center gap-[var(--spacing-2)]">
-              <div className="progress-track flex-1" role="presentation">
+              <div
+                className="progress-track flex-1"
+                role="progressbar"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={Math.round(done)}
+                aria-label={`پیشرفت ترجمهٔ ${job.filename}`}
+              >
                 <div className="progress-fill" style={{ width: `${done}%` }} />
               </div>
               <span
@@ -189,14 +191,24 @@ function AttentionRow({ job }: { job: Job }) {
  *
  * It is now ordered by what a person opening it wants to know, in this order:
  *
+ *   0. **Where am I.** A greeting with today's date and one live sentence:
+ *      stuck work first, running work second, silence when there is nothing.
  *   1. **What is stuck.** The attention queue, worst first. On the data this
  *      was written against that is 13 failed and 1 paused out of 30 jobs --
  *      nearly half the account, none of it visible anywhere in the interface.
- *   2. **What to do next.** Three shortcuts to the things people actually do:
- *      continue the last book, open the library, add a book.
- *   3. **How it is going.** The week's activity, and the totals that have no
- *      time dimension and so belong in tiles rather than a chart.
- *   4. **Everything else.** Recent jobs, for the ones that need no decision.
+ *   2. **What to do next.** Four shortcuts to the things people actually do:
+ *      continue the last book, read it, open the library, convert a file.
+ *   3. **How it is going.** The week's pulse (started, finished, cohort
+ *      completion rate), the totals that have no time dimension, and the chart.
+ *   4. **Everything else.** Recent jobs with a relative timestamp, for the
+ *      ones that need no decision. Five, not eight: the full list lives on
+ *      `/jobs` behind the link beside the heading, and a second full job
+ *      list is how a dashboard turns into an endless scroll ending in
+ *      whitespace.
+ *
+ * A first run gets none of the machinery: with zero jobs the page is a
+ * greeting, the shortcuts, and three steps that teach the loop
+ * (add -> watch -> read) instead of four tiles of zeros.
  *
  * ## What it will not do
  *
@@ -204,6 +216,11 @@ function AttentionRow({ job }: { job: Job }) {
  * this page. Resuming a translation spends money -- it calls the model again --
  * so the button says what it costs by being a real button on a real job, and
  * there is nothing here that can destroy work.
+ *
+ * There is also no cost tile. `dashboard/summary` answers `estimated_cost`
+ * with a hardcoded `0.0`, and `$0.00` beside a "start translating" button
+ * reads as "free" rather than "unknown" -- so the number stays off the page
+ * until the backend measures it.
  */
 export function DashboardPage() {
   const summary = useQuery({ queryKey: ['summary'], queryFn: api.summary, refetchInterval: 5000 })
@@ -215,6 +232,14 @@ export function DashboardPage() {
   const queue = attentionQueue(items)
   const total = jobs.data?.total ?? items.length
   const notOnPage = missingFromChart(total, items.length)
+  // The full stuck count, not the 4 shown: the hero sentence must not claim
+  // "1 needs attention" when 13 do.
+  const stuckCount = attentionQueue(items, 99).length
+  const runningCount = items.filter((job) => job.status === 'running').length
+  const pulse = weekStats(items)
+  // A first run: no jobs anywhere, so tiles and charts would be zeros and
+  // the page teaches the loop instead of reporting it.
+  const isFirstRun = !jobs.isPending && !jobs.isError && items.length === 0 && total === 0
 
   // The last job that produced a readable file, which is what "continue
   // reading" means. A failed run has nothing to read, so it is skipped rather
@@ -234,24 +259,39 @@ export function DashboardPage() {
 
   return (
     <main className="page" dir="rtl">
-      <header className="mb-[var(--spacing-6)] flex flex-wrap items-start justify-between gap-[var(--spacing-4)]">
-        <div className="flex items-center gap-[var(--spacing-3)]">
-          <KalimaMark size={40} />
-          <div>
-            <h1 className="text-[length:var(--text-h1)] font-extrabold tracking-tight">
-              میز کار ترجمه
-            </h1>
-            <p
-              className="mt-[var(--spacing-1)] text-[length:var(--text-small)]"
-              style={{ color: 'var(--color-text-muted)' }}
-            >
-              KALIMA — رابط React روی همان API پایتون
-            </p>
-          </div>
+      {/* 0. Where am I. A greeting, today's date, and one live sentence.
+          The text block carries `min-w-48` on top of `flex-1`: on a 390px
+          phone the status pill is ~200px of `nowrap` badge, so without a
+          basis the greeting is squeezed to a word per line instead of the
+          pill wrapping underneath. */}
+      <header className="surface-card mb-[var(--spacing-6)] flex flex-wrap items-center gap-[var(--spacing-4)] p-[var(--spacing-5)]">
+        <KalimaMark size={48} />
+        <div className="min-w-0" style={{ flex: '1 1 12rem' }}>
+          <p
+            className="text-[length:var(--text-caption)]"
+            style={{ color: 'var(--color-text-muted)' }}
+          >
+            {todayFa()}
+          </p>
+          <h1 className="mt-[var(--spacing-1)] text-[length:var(--text-h1)] font-extrabold tracking-tight">
+            {greeting(new Date().getHours())}؛ به کالیما خوش آمدید
+          </h1>
+          <p
+            className="mt-[var(--spacing-1)] text-[length:var(--text-small)]"
+            style={{ color: 'var(--color-text-secondary)' }}
+          >
+            {jobs.isPending
+              ? 'در حال سر زدن به کارها…'
+              : heroStatus({ running: runningCount, stuck: stuckCount, total })}
+          </p>
         </div>
         <ApiStatus />
       </header>
 
+      {isFirstRun ? (
+        <FirstRunCard />
+      ) : (
+        <>
       {/* 1. What is stuck. First, because it is the only part of this page that
           can change what the reader does next. */}
       {queue.length > 0 ? (
@@ -287,7 +327,7 @@ export function DashboardPage() {
 
       {/* 2. What to do next. */}
       <section aria-label="دسترسی سریع" className="mb-[var(--spacing-6)]">
-        <ul className="grid gap-[var(--spacing-3)] sm:grid-cols-3">
+        <ul className="grid gap-[var(--spacing-3)] sm:grid-cols-2 lg:grid-cols-4">
           <li>
             <Link
               to={lastUnfinished ? `/jobs/${lastUnfinished.id}` : '/workspace'}
@@ -312,24 +352,73 @@ export function DashboardPage() {
               </span>
             </Link>
           </li>
+          {/* `job.reader` is a BACKEND path (`/reader/<id>`), not a React route:
+              a `<Link to>` would be intercepted by the router and land on the
+              `ReaderHandedOver` placeholder. A plain anchor leaves the SPA for
+              the Python reader, which is the point of the card. */}
+          <li>
+            {lastReadable ? (
+              <a
+                href={lastReadable.reader}
+                className="surface-card flex h-full items-center gap-[var(--spacing-3)] p-[var(--spacing-4)] no-underline"
+              >
+                <span
+                  className="grid size-10 flex-none place-items-center rounded-full"
+                  style={{ background: 'var(--color-primary-subtle)', color: 'var(--color-text-brand)' }}
+                >
+                  <NavIcon name="reader" size={20} />
+                </span>
+                <span className="min-w-0">
+                  <strong className="block text-[length:var(--text-body)]">مطالعه</strong>
+                  <small
+                    className="block truncate text-[length:var(--text-caption)]"
+                    style={{ color: 'var(--color-text-muted)' }}
+                  >
+                    {lastReadable.filename}
+                  </small>
+                </span>
+              </a>
+            ) : (
+              <Link
+                to="/library"
+                className="surface-card flex h-full items-center gap-[var(--spacing-3)] p-[var(--spacing-4)] no-underline"
+              >
+                <span
+                  className="grid size-10 flex-none place-items-center rounded-full"
+                  style={{ background: 'var(--color-primary-subtle)', color: 'var(--color-text-brand)' }}
+                >
+                  <NavIcon name="reader" size={20} />
+                </span>
+                <span className="min-w-0">
+                  <strong className="block text-[length:var(--text-body)]">مطالعه</strong>
+                  <small
+                    className="block truncate text-[length:var(--text-caption)]"
+                    style={{ color: 'var(--color-text-muted)' }}
+                  >
+                    هنوز کتابی آماده نیست
+                  </small>
+                </span>
+              </Link>
+            )}
+          </li>
           <li>
             <Link
-              to={lastReadable ? lastReadable.reader : '/library'}
+              to="/convert"
               className="surface-card flex h-full items-center gap-[var(--spacing-3)] p-[var(--spacing-4)] no-underline"
             >
               <span
                 className="grid size-10 flex-none place-items-center rounded-full"
                 style={{ background: 'var(--color-primary-subtle)', color: 'var(--color-text-brand)' }}
               >
-                <NavIcon name="reader" size={20} />
+                <NavIcon name="convert" size={20} />
               </span>
               <span className="min-w-0">
-                <strong className="block text-[length:var(--text-body)]">مطالعه</strong>
+                <strong className="block text-[length:var(--text-body)]">تبدیل فایل</strong>
                 <small
                   className="block truncate text-[length:var(--text-caption)]"
                   style={{ color: 'var(--color-text-muted)' }}
                 >
-                  {lastReadable ? lastReadable.filename : 'هنوز کتابی آماده نیست'}
+                  Word و PDF، بدون ترجمه
                 </small>
               </span>
             </Link>
@@ -359,10 +448,65 @@ export function DashboardPage() {
         </ul>
       </section>
 
-      {/* 3. How it is going. The tiles are the totals that have no time
-          dimension, so they cannot be part of the chart; the chart is the part
-          that does. */}
+      {/* 3. How it is going. The pulse first: what started this week and how
+          much of it finished. Then the tiles, which are the totals that have
+          no time dimension and so belong in tiles rather than a chart. */}
       <section aria-label="وضعیت" className="mb-[var(--spacing-6)]">
+        <div className="surface-card mb-[var(--spacing-3)] p-[var(--spacing-4)]">
+          <div className="mb-[var(--spacing-3)] flex flex-wrap items-baseline justify-between gap-[var(--spacing-3)]">
+            <h2 className="text-[length:var(--text-body)] font-extrabold">نبض هفته</h2>
+            <span
+              className="text-[length:var(--text-caption)]"
+              style={{ color: 'var(--color-text-muted)' }}
+            >
+              از کتاب‌هایی که این هفته شروع شدند
+            </span>
+          </div>
+          <div className="grid grid-cols-3 gap-[var(--spacing-3)]">
+            <div className="min-w-0">
+              <strong
+                className="block text-[length:var(--text-h1)] font-extrabold tabular-nums"
+                style={{ color: 'var(--color-text-primary)' }}
+              >
+                {fa(pulse.started)}
+              </strong>
+              <span
+                className="mt-[var(--spacing-1)] block text-[length:var(--text-caption)]"
+                style={{ color: 'var(--color-text-muted)' }}
+              >
+                کتاب شروع‌شده
+              </span>
+            </div>
+            <div className="min-w-0">
+              <strong
+                className="block text-[length:var(--text-h1)] font-extrabold tabular-nums"
+                style={{ color: 'var(--color-text-primary)' }}
+              >
+                {fa(pulse.finished)}
+              </strong>
+              <span
+                className="mt-[var(--spacing-1)] block text-[length:var(--text-caption)]"
+                style={{ color: 'var(--color-text-muted)' }}
+              >
+                به سرانجام رسیده
+              </span>
+            </div>
+            <div className="min-w-0">
+              <strong
+                className="block text-[length:var(--text-h1)] font-extrabold tabular-nums"
+                style={{ color: 'var(--color-text-primary)' }}
+              >
+                {pulse.rate === null ? '—' : `${fa(Math.round(pulse.rate * 100))}٪`}
+              </strong>
+              <span
+                className="mt-[var(--spacing-1)] block text-[length:var(--text-caption)]"
+                style={{ color: 'var(--color-text-muted)' }}
+              >
+                نرخ اتمام هفته
+              </span>
+            </div>
+          </div>
+        </div>
         <div className="grid grid-cols-2 gap-[var(--spacing-3)] lg:grid-cols-4">
           <StatCard
             label="در حال ترجمه"
@@ -464,7 +608,7 @@ export function DashboardPage() {
           <p className="empty">هنوز کاری ثبت نشده است.</p>
         ) : (
           <ul className="grid gap-[var(--spacing-2)]">
-            {items.slice(0, 8).map((job) => (
+            {items.slice(0, 5).map((job) => (
               <li key={job.id}>
                 <Link
                   to={`/jobs/${job.id}`}
@@ -493,7 +637,8 @@ export function DashboardPage() {
                       {job.filetype} · {job.source_language} → {job.target_language} ·{' '}
                       {job.progress?.total
                         ? `${fa(job.progress.completed)}/${fa(job.progress.total)}`
-                        : '—'}
+                        : '—'}{' '}
+                      · {faAgo(job.updated_at)}
                     </span>
                   </span>
                   {/* The status and the ETA travel together, tight, on one line.
@@ -515,6 +660,83 @@ export function DashboardPage() {
           </ul>
         )}
       </section>
+        </>
+      )}
     </main>
+  )
+}
+
+/**
+ * The first run: three steps that teach the loop (add -> watch -> read).
+ *
+ * Shown instead of the machinery when there are zero jobs, because four
+ * tiles of zeros and an empty chart teach nothing. Each step links where it
+ * happens, so the card is a path, not a poster.
+ */
+function FirstRunCard() {
+  const steps = [
+    {
+      to: '/workspace',
+      title: 'کتاب را اضافه کنید',
+      body: 'یک EPUB یا PDF بدهید؛ هزینه و زمان را پیش از شروع می‌بینید و چیزی خرج نمی‌شود.',
+    },
+    {
+      to: '/jobs',
+      title: 'پیشرفت را ببینید',
+      body: 'هر بخش که آماده شد همان‌جا می‌ماند؛ توقف یعنی ادامه از همان‌جا، نه از صفر.',
+    },
+    {
+      to: '/library',
+      title: 'کنار متن اصلی بخوانید',
+      body: 'نسخهٔ دوزبانه از کتابخانه باز می‌شود؛ واژه‌نامه را پیش‌تر خودتان تأیید کرده‌اید.',
+    },
+  ]
+  return (
+    <section className="surface-card p-[var(--spacing-5)]" aria-labelledby="firstrun-heading">
+      <h2 id="firstrun-heading" className="text-[length:var(--text-h2)] font-extrabold">
+        سه قدم تا اولین ترجمه
+      </h2>
+      <ol className="mt-[var(--spacing-4)] grid gap-[var(--spacing-3)]">
+        {steps.map((step, index) => (
+          <li key={step.to + step.title}>
+            <Link
+              to={step.to}
+              className="flex items-start gap-[var(--spacing-3)] rounded-[var(--radius-control)] border p-[var(--spacing-3)] no-underline transition-colors"
+              style={{ borderColor: 'var(--color-border)' }}
+              onMouseEnter={(event) => {
+                event.currentTarget.style.borderColor = 'var(--color-primary)'
+                event.currentTarget.style.background = 'var(--color-surface-elevated)'
+              }}
+              onMouseLeave={(event) => {
+                event.currentTarget.style.borderColor = 'var(--color-border)'
+                event.currentTarget.style.background = 'transparent'
+              }}
+            >
+              <span
+                className="grid size-8 flex-none place-items-center rounded-full text-[length:var(--text-small)] font-extrabold tabular-nums"
+                style={{ background: 'var(--color-primary-subtle)', color: 'var(--color-text-brand)' }}
+                aria-hidden="true"
+              >
+                {fa(index + 1)}
+              </span>
+              <span className="min-w-0">
+                <strong
+                  className="block text-[length:var(--text-body)]"
+                  style={{ color: 'var(--color-text-primary)' }}
+                >
+                  {step.title}
+                </strong>
+                <span
+                  className="mt-[var(--spacing-1)] block text-[length:var(--text-small)]"
+                  style={{ color: 'var(--color-text-secondary)' }}
+                >
+                  {step.body}
+                </span>
+              </span>
+            </Link>
+          </li>
+        ))}
+      </ol>
+    </section>
   )
 }

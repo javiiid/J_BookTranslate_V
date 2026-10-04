@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { api } from '@/lib/api'
@@ -47,6 +47,12 @@ function BookRow({ book }: { book: LibraryBook }) {
   const variants = book.variants ?? []
   const active = variants.find((variant) => variant.status === 'running')
     ?? variants[0]
+  /* Where "read it" goes. The translated copy is the one a reader of this
+     tool wants, so it wins; an untranslated book still opens in its original
+     language rather than offering nothing. */
+  const readable =
+    variants.find((variant) => variant.kind === 'translated' && variant.is_readable && variant.reader)
+    ?? variants.find((variant) => variant.is_readable && variant.reader)
 
   return (
     <li className="surface-card p-4">
@@ -71,7 +77,17 @@ function BookRow({ book }: { book: LibraryBook }) {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {book.translated ? <span className="badge badge-success">ترجمه‌شده</span> : null}
-          {book.readable ? <span className="badge badge-info">قابل مطالعه</span> : null}
+          {/* A plain `<a>`, never `<Link>`: `reader` is a backend path and the
+              router would swallow it. Before, "readable" was a badge -- a
+              statement about the book with nothing to press -- while the
+              landing page promises reading "from the library". */}
+          {readable ? (
+            <a href={readable.reader} className="btn btn-secondary">
+              مطالعه
+            </a>
+          ) : book.readable ? (
+            <span className="badge badge-info">قابل مطالعه</span>
+          ) : null}
           {active ? (
             <span className={STATUS_TONE[active.status] ?? 'badge'}>
               {STATUS_FA[active.status] ?? active.status}
@@ -137,16 +153,20 @@ export function LibraryPage() {
   const [query, setQuery] = useState('')
 
   // Debounce: 300ms is short enough to feel live and long enough that a fast
-  // typist does not produce eight requests.
+  // typist does not produce eight requests. The timer lives in a ref, not on
+  // the callback: re-creating the callback every render used to reset the id
+  // to 0, so `clearTimeout` never cleared and keystrokes fired overlapping
+  // timers.
+  const timer = useRef(0)
+  useEffect(() => () => window.clearTimeout(timer.current), [])
   const onQuery = (value: string) => {
     setRawQuery(value)
-    window.clearTimeout(onQuery.timer)
-    onQuery.timer = window.setTimeout(() => {
+    window.clearTimeout(timer.current)
+    timer.current = window.setTimeout(() => {
       setQuery(value)
       setPage(1)
     }, 300)
   }
-  onQuery.timer = 0
 
   const books = useQuery({
     queryKey: ['library', page, query],
@@ -183,7 +203,7 @@ export function LibraryPage() {
             placeholder="جست‌وجوی کتاب…"
             aria-label="جست‌وجوی کتاب"
           />
-          <Link to="/" className="btn btn-primary">
+          <Link to="/workspace" className="btn btn-primary">
             افزودن کتاب
           </Link>
         </div>

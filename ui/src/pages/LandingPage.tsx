@@ -17,42 +17,58 @@
 import { Link } from 'react-router-dom'
 import { KalimaMark } from '@/components/AppShell'
 import { ThemeToggle } from '@/components/AppShell'
+import { NavIcon } from '@/components/NavIcon'
+import type { NavIconName } from '@/components/nav'
 
 interface Capability {
   to: string
   title: string
   body: string
+  /* The same icon the rail uses for the same destination, so a card and its
+     nav entry read as one thing. */
+  icon: NavIconName
 }
 
 const CAPABILITIES: Capability[] = [
   {
     to: '/workspace',
     title: 'افزودن کتاب',
-    body: 'یک EPUB یا PDF بدهید؛ متن به بخش‌های قابل ترجمه شکسته می‌شود و هر بخش جدا ترجمه می‌شود.',
+    icon: 'add',
+    body: 'EPUB یا PDF را بدهید. بارگذاری هیچ هزینه‌ای ندارد؛ اول روی چند نمونهٔ واقعی کتاب لحن و واژه‌نامه را می‌سنجید.',
   },
   {
     to: '/jobs',
     title: 'پایش ترجمه',
+    icon: 'monitor',
     body: 'پیشرفت هر کار، بخش‌های ترجمه‌شده، و هر چیزی که نیاز به بازبینی دارد.',
   },
   {
     to: '/library',
     title: 'کتابخانه',
+    icon: 'library',
     body: 'هر کتابی که افزوده‌اید، با وضعیت ترجمه و حجم و تاریخ آخرین تغییر.',
   },
   {
-    to: '/reader',
+    /* Two cards, one destination, on purpose: the study surface opens from the
+       library because each translated book carries its own reader path. Bare
+       `/reader` is proxied to the Python page, and a card that promised a
+       reader and landed on the handover notice was the broken link this
+       replaced. */
+    to: '/library',
     title: 'مطالعه',
-    body: 'خواندن دوزبانه؛ متن اصلی کنار ترجمه، با واژه‌نامه و یادداشت.',
+    icon: 'reader',
+    body: 'خواندن دوزبانه از کتابخانه؛ متن اصلی کنار ترجمه.',
   },
   {
     to: '/convert',
     title: 'تبدیل فایل',
+    icon: 'convert',
     body: 'خروجی گرفتن به Word، PDF، مارک‌داون یا متن ساده.',
   },
   {
     to: '/account',
     title: 'پنل کاربری',
+    icon: 'account',
     body: 'کلید ارائه‌دهنده، مدل پیش‌فرض، و فضای آزاد.',
   },
 ]
@@ -85,8 +101,9 @@ export function LandingPage() {
           className="mt-[var(--spacing-3)] text-[length:var(--text-body)]"
           style={{ color: 'var(--color-text-secondary)' }}
         >
-          کتاب را بدهید، ترجمه را ببینید، و کنار متن اصلی بخوانید. واژه‌نامه در طول کار یاد گرفته
-          می‌شود و پیشنهادهایش را خودتان تأیید می‌کنید.
+          کتاب را بدهید، لحن و واژه‌نامه را روی چند نمونهٔ واقعی بسنجید، بعد کتاب
+          کامل را با همان پروفایل قفل‌شده ترجمه کنید. بخش‌های تأییدشده دوباره
+          هزینه نمی‌شوند.
         </p>
         <div className="control-row mt-[var(--spacing-5)]">
           <Link to="/workspace" className="btn btn-primary">
@@ -99,13 +116,26 @@ export function LandingPage() {
       </section>
 
       <section aria-label="قابلیت‌ها" className="grid gap-[var(--spacing-3)] sm:grid-cols-2 lg:grid-cols-3">
-        {CAPABILITIES.map(({ to, title, body }) => (
+        {/* Keyed on the title, not the destination: two cards may legitimately
+            point at the same page -- the reader opens from the library, since
+            bare `/reader` is proxied to Python -- and keying on `to` gave React
+            two children with the same key, which it warns about loudly and
+            resolves by dropping one of them. */}
+        {CAPABILITIES.map(({ to, title, body, icon }) => (
           <Link
-            key={to}
+            key={title}
             to={to}
-            className="surface-card block p-[var(--spacing-4)] no-underline transition-colors"
+            className="surface-card card-link p-[var(--spacing-4)]"
           >
-            <strong className="block text-[length:var(--text-body)]">{title}</strong>
+            <span className="flex items-center gap-[var(--spacing-2)]">
+              <span
+                className="flex flex-none items-center"
+                style={{ color: 'var(--color-text-brand)' }}
+              >
+                <NavIcon name={icon} size={18} />
+              </span>
+              <strong className="text-[length:var(--text-body)]">{title}</strong>
+            </span>
             <span
               className="mt-[var(--spacing-2)] block text-[length:var(--text-small)]"
               style={{ color: 'var(--color-text-secondary)' }}

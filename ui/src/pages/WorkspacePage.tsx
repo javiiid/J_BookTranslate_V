@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
+import { calibrationApi, stateLabel } from '@/lib/calibration'
 import { EstimateModal } from '@/components/estimate/EstimateModal'
 import {
   RescueConflictError,
@@ -8,21 +9,25 @@ import {
   type RescueConflict,
   type RescueImport,
 } from '@/lib/api'
-import { fa } from '@/lib/format'
-import { GlossaryReview } from '@/components/glossary/GlossaryReview'
-import { GlossaryPanel } from '@/components/glossary/GlossaryPanel'
+import { fa, faDate } from '@/lib/format'
 
 /**
- * The translation form.
+ * Intake. Get a book into the calibration workshop, or bring work back.
  *
- * Ported from the workspace in `app/web.py`. The behaviour that matters:
+ * ## Why choosing a file does not start a translation
  *
- * - a book is dropped or picked, then queued
- * - the glossary is *proposed and reviewed before* the run, not learned during
- *   it, so the same terminology applies to every chunk including the first
- * - the response carries `book_id`, which is what the glossary flow needs; when
- *   it is null the library index failed and the panel says so rather than
- *   silently doing nothing
+ * This page used to end at `POST /api/jobs`, which uploads *and* starts a
+ * worker thread in the same request -- so picking a file began spending money
+ * immediately, and the glossary was something that appeared afterwards.
+ *
+ * Now a book goes to `/api/calibrations` instead. The server cuts it into a few
+ * samples, the reader settles the voice and the glossary on those first, and
+ * the full run starts from there with the profile locked. Uploading costs
+ * nothing, and the wording says so, because now that is true.
+ *
+ * The rescue path is the exception and stays here: a rescue archive is already
+ * translated work being restored, so it is priced through the estimate dialog
+ * and then resumed.
  */
 /**
  * What differs between the rescue and the copy already on the server.
@@ -73,12 +78,8 @@ export function WorkspacePage() {
   const [from, setFrom] = useState('EN')
   const [to, setTo] = useState('FA')
   const [model, setModel] = useState('')
-  const [mode, setMode] = useState('fast')
-  const [style, setStyle] = useState('literary')
   const [outputs, setOutputs] = useState<string[]>([])
   const [dragging, setDragging] = useState(false)
-  const [bookId, setBookId] = useState<number | null>(null)
-  const [reviewing, setReviewing] = useState(false)
   const [notice, setNotice] = useState<{ text: string; tone: 'ok' | 'warn' | 'error' } | null>(null)
 
   const models = useQuery({ queryKey: ['models'], queryFn: api.models, staleTime: 60_000 })
@@ -89,19 +90,48 @@ export function WorkspacePage() {
   // need to know which model that is.
   const effectiveModel = model || config.data?.default_model || ''
 
-  /* The estimate dialog needs a path the server already has, because the
-     estimate endpoint reads a file from disk. `POST /api/jobs` uploads *and*
-     starts a translation in one request, so the book is uploaded first through
-     `/api/jobs/upload` and only started after the dialog is confirmed. */
-  const [pending, setPending] = useState<File | null>(null)
+  /* The upload does not start a translation.
+
+     `POST /api/calibrations` takes the stored upload and opens a workshop: the
+     book is cut into samples, the reader settles the voice and the glossary on
+     those, and only then does the full run start. So this page's whole job is
+     to get a file into that workshop -- there is no queue here, and no job, and
+     nothing is sent to the provider by choosing a file.
+
+     The one exception is a rescue archive, which is already-translated work:
+     it goes back through the estimate dialog and resumes, so that path still
+     lives here. */
   const [uploaded, setUploaded] = useState<{ path: string; name: string } | null>(null)
 
   const upload = useMutation({
-    mutationFn: (file: File) => api.uploadBook(file),
-    onSuccess: (result, file) => {
-      setUploaded({ path: result.file_path, name: file.name })
-      setPending(file)
+    mutationFn: async (file: File) => {
+      const stored = await api.uploadBook(file)
+      return calibrationApi.create({
+        upload_id: stored.upload_id,
+        model: effectiveModel,
+        from_lang: from,
+        to_lang: to,
+        outputs,
+      })
     },
+    onSuccess: (result) => {
+      void client.invalidateQueries({ queryKey: ['calibrations'] })
+      if (fileInput.current) fileInput.current.value = ''
+      navigate(`/calibrations/${result.id}`)
+    },
+    onError: (error) => {
+      setNotice({
+        text: error instanceof Error ? error.message : 'آماده‌سازی کارگاه ترجمه ناموفق بود.',
+        tone: 'error',
+      })
+    },
+  })
+
+  /** Workshops already open, so a half-finished one is reachable again. */
+  const drafts = useQuery({
+    queryKey: ['calibrations'],
+    queryFn: calibrationApi.list,
+    staleTime: 5_000,
   })
 
   /* A rescue archive, rather than a book.
@@ -126,7 +156,6 @@ export function WorkspacePage() {
       setUploaded({ path: result.file_path, name: result.filename })
       // The dialog is opened on the restored path, not on the archive: the
       // estimate endpoint reads a book off disk, and the archive is not one.
-      setPending(null)
       setNotice({
         text: `نسخهٔ نجاتی وارد شد: ${fa(result.chunks_already_done)} بخش از ${fa(
           result.chunk_count_total,
@@ -147,45 +176,8 @@ export function WorkspacePage() {
     },
   })
 
-  const queue = useMutation({
-    mutationFn: async (file: File) => {
-      const form = new FormData()
-      form.set('from_lang', from)
-      form.set('to_lang', to)
-      if (effectiveModel) form.set('model', effectiveModel)
-      form.set('mode', mode)
-      form.set('style_preset', style)
-      if (outputs.length) form.set('outputs', outputs.join(','))
-      // The glossary is reviewed before the run, so nothing is learned mid-book.
-      form.set('auto_glossary', 'false')
-      form.set('book', file, file.name)
-      return api.createJob(form)
-    },
-    onSuccess: (result) => {
-      void client.invalidateQueries({ queryKey: ['jobs'] })
-      if (result.book_id) {
-        setBookId(result.book_id)
-        setNotice({ text: 'کتاب به صف اضافه شد.', tone: 'ok' })
-      } else {
-        setBookId(null)
-        setNotice({
-          text: 'کتاب در کتابخانه ثبت نشد؛ برای ساخت واژه‌نامه از صفحهٔ کتابخانه اقدام کنید.',
-          tone: 'warn',
-        })
-      }
-      if (fileInput.current) fileInput.current.value = ''
-      navigate(`/jobs/${result.id}`)
-    },
-    onError: (error) => {
-      setNotice({
-        text: error instanceof Error ? error.message : 'افزودن کتاب به صف ناموفق بود',
-        tone: 'error',
-      })
-    },
-  })
-
   const submit = (file: File | null | undefined) => {
-    if (!file) return
+    if (!file || upload.isPending || rescue.isPending) return
     setNotice(null)
     setConflict(null)
     setRescued(null)
@@ -198,17 +190,15 @@ export function WorkspacePage() {
       return
     }
 
-    if (!/^[^.]+\.(epub|pdf)$/i.test(file.name)) {
+    if (!/\.(epub|pdf|txt)$/i.test(file.name)) {
       setNotice({
-        text: 'فقط فایل EPUB، PDF یا نسخهٔ نجاتی (ZIP) پذیرفته می‌شود.',
+        text: 'فقط فایل EPUB، PDF، TXT یا نسخهٔ نجاتی (ZIP) پذیرفته می‌شود.',
         tone: 'error',
       })
       return
     }
-    /* Upload first, translate second. The estimate dialog sits between them, so
-       the cost and the duration are visible before anything is spent. Going
-       straight to `queue.mutate` would start the run on the server the moment the
-       file was chosen, which is the thing the dialog exists to prevent. */
+    /* Store, then open the workshop. No job, no provider call, no cost: the
+       reader chooses the voice on real samples before anything is translated. */
     upload.mutate(file)
   }
 
@@ -232,6 +222,14 @@ export function WorkspacePage() {
     )
   }
 
+  /**
+   * Formats the calibrated run can produce.
+   *
+   * Deliberately not the full output list from the Python form: the server
+   * rejects `srt` and `quality_report` in a calibration session
+   * (`CalibrationService.create`), because neither has a final text to write
+   * until the run is done. Offering them here would be offering a 422.
+   */
   const OUTPUTS = [
     ['json_segments', 'حافظهٔ ترجمه'],
     ['txt_bilingual', 'متن دوزبانه'],
@@ -239,17 +237,13 @@ export function WorkspacePage() {
     ['docx', 'ورد'],
     ['translated_pdf', 'PDF'],
     ['bilingual_pdf', 'PDF دوزبانه'],
-    ['srt', 'زیرنویس'],
-    ['quality_report', 'گزارش QA'],
   ] as const
 
-  if (upload.isError) {
-    return (
-      <p role="alert" className="alert alert-error">
-        {upload.error instanceof Error ? upload.error.message : 'آپلود ناموفق بود.'}
-      </p>
-    )
-  }
+  // Inline, never a full-page replacement: an upload failure must not unmount
+  // the form, the settings and the glossary panel the reader just filled in.
+  const uploadError = upload.isError
+    ? upload.error instanceof Error ? upload.error.message : 'آپلود ناموفق بود.'
+    : null
 
   return (
     <main className="page" dir="rtl">
@@ -259,14 +253,30 @@ export function WorkspacePage() {
           className="mt-1 text-[length:var(--text-small)]"
           style={{ color: 'var(--color-text-muted)' }}
         >
-          فایل EPUB یا PDF را رها کنید. چند کتاب هم‌زمان پردازش می‌شوند.
+          کتاب را وارد کنید، نمونه‌ها و واژه‌نامه را بررسی کنید و سپس ترجمهٔ کامل را شروع کنید. بارگذاری هزینهٔ مدل ندارد.
         </p>
       </header>
 
+      {/* `min-w-0` on BOTH grid items, and it is load-bearing on the outer pair.
+          A grid item defaults to `min-width: auto`, which means it may not be
+          smaller than its widest content. The workshop list carries real book
+          filenames — one is 150 characters of "Robert C. Martin Series…" — so
+          the inner column grew to its max-content and pushed the document to
+          1,608px on a 390px phone: the whole page scrolled sideways and the
+          selects measured 1,550px wide.
+
+          `minmax(0,1fr)` on the outer track only bounds the TRACK; the item
+          inside still refuses to shrink unless it is told it may. */}
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
-        <div className="grid gap-4">
-          {/* ---- drop zone ---- */}
+        <div className="grid min-w-0 gap-4">
+          {/* ---- drop zone ----
+              `role="group"` with a label, not `role="button"`: the zone itself
+              is not keyboard-operable (drag only), and the labelled file input
+              inside is the keyboard path. A button role here would bury a
+              native control inside a fake one. */}
           <div
+            role="group"
+            aria-label="انتخاب فایل کتاب"
             className="grid place-items-center rounded-[var(--radius-panel)] border-2 border-dashed p-10 text-center"
             style={{
               borderColor: dragging ? 'var(--color-primary)' : 'var(--color-border-strong)',
@@ -291,19 +301,26 @@ export function WorkspacePage() {
               className="mt-1 text-[length:var(--text-caption)]"
               style={{ color: 'var(--color-text-muted)' }}
             >
-              کتاب EPUB یا PDF، یا یک نسخهٔ نجاتی برای ادامهٔ ترجمه
+              کتاب EPUB، PDF یا TXT؛ یا نسخهٔ نجاتی ZIP برای ادامهٔ ترجمه
             </span>
             <label className="btn btn-secondary mt-2">
               انتخاب از دستگاه
               <input
                 ref={fileInput}
                 type="file"
-                accept=".epub,.pdf,.zip"
+                accept=".epub,.pdf,.txt,.zip"
+                disabled={upload.isPending || rescue.isPending}
                 className="sr-only"
                 onChange={(event) => submit(event.target.files?.[0])}
               />
             </label>
           </div>
+
+          {uploadError ? (
+            <p role="alert" className="alert alert-error">
+              {uploadError}
+            </p>
+          ) : null}
 
           {/* ---- the conflict question ----
 
@@ -355,9 +372,9 @@ export function WorkspacePage() {
             </p>
           ) : null}
 
-          {queue.isPending ? (
+          {upload.isPending ? (
             <p role="status" className="alert alert-info">
-              در حال افزودن به صف…
+              در حال آماده‌سازی کارگاه ترجمه…
             </p>
           ) : null}
 
@@ -391,7 +408,7 @@ export function WorkspacePage() {
               </label>
 
               <label className="grid gap-1">
-                <span className="label">مدل</span>
+                <span className="label">مدل پیش‌نویس و ترجمه</span>
                 <select className="field" value={model} onChange={(event) => setModel(event.target.value)}>
                   {/* Empty means "the configured default", so the form does not
                       hardcode a model the way the Python form did. */}
@@ -405,26 +422,15 @@ export function WorkspacePage() {
                   ))}
                 </select>
               </label>
-
-              <label className="grid gap-1">
-                <span className="label">سبک ترجمه</span>
-                <select className="field" value={style} onChange={(event) => setStyle(event.target.value)}>
-                  <option value="literary">ادبی</option>
-                  <option value="technical">فنی</option>
-                  <option value="conversational">محادثه‌ای</option>
-                  <option value="formal">رسمی</option>
-                </select>
-              </label>
-
-              <label className="grid gap-1">
-                <span className="label">حالت</span>
-                <select className="field" value={mode} onChange={(event) => setMode(event.target.value)}>
-                  <option value="fast">سریع</option>
-                  <option value="batch">Batch</option>
-                  <option value="resume">ادامه</option>
-                </select>
-              </label>
             </div>
+
+            <p
+              className="mt-4 text-[length:var(--text-caption)]"
+              style={{ color: 'var(--color-text-muted)' }}
+            >
+              لحن، مدل نهایی، واژه‌نامه و سقف هزینه در کارگاه انتخاب می‌شوند؛ آنجا
+              روی نمونهٔ واقعی کتاب تصمیم می‌گیرید، نه پیش از دیدن متن.
+            </p>
 
             <fieldset className="mt-5">
               <legend className="label mb-2">خروجی‌های اضافه</legend>
@@ -442,39 +448,126 @@ export function WorkspacePage() {
               </div>
             </fieldset>
           </section>
+
+          {/* ---- workshops already open ----
+              A workshop is where the decisions live, so a half-finished one
+              has to be reachable from here. Dropping the file again would open a
+              second session and lose the approvals already paid for. */}
+          <section className="surface-card p-5" aria-labelledby="drafts-heading">
+            <h2 id="drafts-heading" className="text-[length:var(--text-h3)] font-extrabold">
+              کارگاه‌های باز
+            </h2>
+            {drafts.isPending ? (
+              <div className="skeleton mt-3" style={{ height: 64 }} />
+            ) : drafts.isError ? (
+              <p role="alert" className="alert alert-error mt-3">
+                فهرست کارگاه‌ها خوانده نشد.
+              </p>
+            ) : (drafts.data?.items.length ?? 0) === 0 ? (
+              <p className="mt-2 text-[length:var(--text-caption)]" style={{ color: 'var(--color-text-muted)' }}>
+                هنوز کارگاهی باز نیست. یک کتاب انتخاب کنید.
+              </p>
+            ) : (
+              /* `min-w-0` on the row as well as the text block: `truncate` needs a
+                 parent that has been told it may shrink, and a grid item is not
+                 told that by default. The state badge is `flex-none` so it keeps
+                 its own width instead of being squeezed to an ellipsis. */
+              <ul className="mt-3 grid min-w-0 gap-2">
+                {drafts.data?.items.map((draft) => (
+                  <li key={draft.id} className="min-w-0">
+                    <Link
+                      to={`/calibrations/${draft.id}`}
+                      className="flex min-w-0 items-center justify-between gap-3 rounded-[var(--radius-control)] border p-[var(--spacing-3)] no-underline"
+                      style={{ borderColor: 'var(--color-border)' }}
+                    >
+                      <span className="min-w-0">
+                        {/* The name is data, not a label: a real filename runs to
+                            150 characters, so the full path goes in `title` and
+                            the visible line is bounded rather than reflowed into
+                            a dozen lines.
+
+                            `dir="ltr"` on THIS element, and not a `<bdi>` around
+                            the text: `text-overflow: ellipsis` puts the cut at
+                            the *containing block's* inline end, and the page is
+                            RTL, so the visible half was the tail —
+                            "...ructure and Design-Pearson Education _2017_" —
+                            with the part that identifies the book gone. An
+                            isolate reorders the text but leaves the ellipsis
+                            where it was; only the direction of the truncating
+                            box moves it. `text-right` keeps the name against
+                            the badge it sits beside. */}
+                        <strong
+                          dir="ltr"
+                          className="block truncate text-right text-[length:var(--text-body)]"
+                          title={draft.filename}
+                        >
+                          {draft.filename}
+                        </strong>
+                        <small
+                          className="block text-[length:var(--text-caption)]"
+                          style={{ color: 'var(--color-text-muted)' }}
+                        >
+                          {faDate(draft.updated_at)}
+                        </small>
+                      </span>
+                      <span className="badge flex-none">{stateLabel(draft.state)}</span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
         </div>
 
-        {/* ---- glossary ---- */}
-        <aside className="surface-card h-fit p-5">
-          <GlossaryPanel
-            bookId={bookId}
-            from={from}
-            to={to}
-            model={effectiveModel}
-            onPropose={() => setReviewing(true)}
-          />
+        {/* ---- what happens next ---- */}
+        <aside className="surface-card h-fit min-w-0 p-5">
+          <h2 className="text-[length:var(--text-h3)] font-extrabold">بعد از بارگذاری</h2>
+          <ol className="mt-3 grid gap-3">
+            {[
+              ['نمونه‌های واقعی', 'کتاب به چند بخش نماینده برش می‌خورد و همین‌جا نشان داده می‌شود.'],
+              ['صدا و واژه‌نامه', 'لحن را می‌خوانید و اصطلاح‌ها را خودتان تأیید یا اصلاح می‌کنید.'],
+              ['قفل پروفایل', 'پس از تأیید، لحن و واژه‌نامه قفل می‌شوند و بخش‌های تأییدشده دوباره هزینه نمی‌شوند.'],
+              ['ترجمهٔ کامل', 'کتاب با همان پروفایل قفل‌شده وارد صف می‌شود.'],
+            ].map(([title, body], index) => (
+              <li key={title} className="flex gap-[var(--spacing-3)]">
+                <span
+                  className="grid size-7 flex-none place-items-center rounded-full text-[length:var(--text-small)] font-extrabold tabular-nums"
+                  style={{ background: 'var(--color-primary-subtle)', color: 'var(--color-text-brand)' }}
+                  aria-hidden="true"
+                >
+                  {fa(index + 1)}
+                </span>
+                <span className="min-w-0">
+                  <strong className="block text-[length:var(--text-label)]">{title}</strong>
+                  <span
+                    className="mt-[var(--spacing-1)] block text-[length:var(--text-caption)]"
+                    style={{ color: 'var(--color-text-secondary)' }}
+                  >
+                    {body}
+                  </span>
+                </span>
+              </li>
+            ))}
+          </ol>
+          <p
+            className="mt-4 text-[length:var(--text-caption)]"
+            style={{ color: 'var(--color-text-muted)' }}
+          >
+            بارگذاری هیچ هزینه‌ای ندارد. اولین تماس با مدل، وقتی است که خودتان دکمهٔ
+            ترجمهٔ یک نمونه را می‌زنید.
+          </p>
         </aside>
       </div>
 
-      {reviewing && bookId !== null ? (
-        <GlossaryReview
-          bookId={bookId}
-          from={from}
-          to={to}
-          onClose={() => setReviewing(false)}
-          onApproved={(text) => {
-            setReviewing(false)
-            setNotice({ text, tone: 'ok' })
-          }}
-          onError={(text) => setNotice({ text, tone: 'error' })}
-        />
-      ) : null}
-
-
+      {/* The estimate dialog is the RESCUE path now.
+          A rescue carries an already-priced remainder: some chunks are done and
+          the rest are not, and what resuming will cost is the question. A fresh
+          upload has no such number -- its cost depends on the profile that does
+          not exist yet -- so it goes to the workshop instead, which quotes it
+          against real samples. */}
       <EstimateModal
-        open={(pending !== null || rescued !== null) && uploaded !== null}
+        open={rescued !== null && uploaded !== null}
         onClose={() => {
-          setPending(null)
           setUploaded(null)
           setRescued(null)
         }}
@@ -483,27 +576,19 @@ export function WorkspacePage() {
         request={{
           /* A rescue's own settings, not the form's. The estimate has to price
              the run the resume will actually make, and that is the rescued job's
-             model and language pair. Using the form's would quote a different
-             bill than the one the reader is about to pay. */
+             model and language pair. */
           model: rescued?.model || effectiveModel,
-          mode: (rescued?.mode === 'batch' ? 'batch' : mode === 'batch' ? 'batch' : 'fast'),
+          mode: rescued?.mode === 'batch' ? 'batch' : 'fast',
           concurrency: config.data?.max_concurrency,
           glossary_auto: false,
           from_lang: rescued?.from_lang || from,
           to_lang: rescued?.to_lang || to,
         }}
-        starting={queue.isPending || finish.isPending}
+        starting={finish.isPending}
         onStart={() => {
-          if (rescued) {
-            setRescued(null)
-            setUploaded(null)
-            finish.mutate()
-            return
-          }
-          const file = pending
-          setPending(null)
+          setRescued(null)
           setUploaded(null)
-          if (file) queue.mutate(file)
+          finish.mutate()
         }}
       />
     </main>

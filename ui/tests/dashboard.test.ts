@@ -33,7 +33,7 @@
  */
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { attentionQueue, bucketByDay, missingFromChart, type DatedJob } from '../src/lib/dashboard.ts'
+import { attentionQueue, bucketByDay, greeting, heroStatus, missingFromChart, weekStats, type DatedJob } from '../src/lib/dashboard.ts'
 
 /** A local-midnight date, so the tests do not depend on the machine's zone. */
 function local(...parts: number[]): Date {
@@ -212,5 +212,84 @@ describe('what the chart does not cover', () => {
 
   it('never reports a negative number when the two disagree the other way', () => {
     assert.equal(missingFromChart(10, 30), 0)
+  })
+})
+
+describe('the greeting', () => {
+  it('greets the morning, midday, evening and night', () => {
+    assert.equal(greeting(8), 'صبح بخیر')
+    assert.equal(greeting(13), 'ظهر بخیر')
+    assert.equal(greeting(18), 'عصر بخیر')
+    assert.equal(greeting(23), 'شب بخیر')
+    assert.equal(greeting(3), 'شب بخیر')
+  })
+
+  it('changes exactly on the boundary hours', () => {
+    assert.equal(greeting(11), 'صبح بخیر')
+    assert.equal(greeting(12), 'ظهر بخیر')
+    assert.equal(greeting(16), 'ظهر بخیر')
+    assert.equal(greeting(17), 'عصر بخیر')
+    assert.equal(greeting(19), 'عصر بخیر')
+    assert.equal(greeting(20), 'شب بخیر')
+    assert.equal(greeting(4), 'شب بخیر')
+    assert.equal(greeting(5), 'صبح بخیر')
+  })
+})
+
+describe('the hero sentence', () => {
+  it('points a fresh account at the first step instead of reporting zeros', () => {
+    assert.equal(heroStatus({ running: 0, stuck: 0, total: 0 }), 'هنوز کاری ثبت نشده — از افزودن کتاب شروع کنید.')
+  })
+
+  it('names stuck work before running work', () => {
+    assert.equal(
+      heroStatus({ running: 2, stuck: 3, total: 9 }),
+      '۳ کار نیازمند توجه و ۲ کار در حال ترجمه است.',
+    )
+  })
+
+  it('reports only what exists', () => {
+    assert.equal(heroStatus({ running: 0, stuck: 1, total: 4 }), '۱ کار نیازمند توجه است.')
+    assert.equal(heroStatus({ running: 2, stuck: 0, total: 4 }), '۲ کار در حال ترجمه است.')
+    assert.equal(
+      heroStatus({ running: 0, stuck: 0, total: 4 }),
+      'کاری در جریان نیست — همه‌چیز سروسامان گرفته است.',
+    )
+  })
+})
+
+describe('the week pulse', () => {
+  it('counts the week cohort and its completion rate', () => {
+    const stats = weekStats(
+      [
+        job({ created_at: local(2026, 8, 29, 10).toISOString(), status: 'completed' }),
+        job({ created_at: local(2026, 8, 29, 11).toISOString(), status: 'failed' }),
+        job({ created_at: local(2026, 8, 28, 10).toISOString(), status: 'completed' }),
+      ],
+      7,
+      NOW,
+    )
+    assert.equal(stats.started, 3)
+    assert.equal(stats.finished, 2)
+    assert.ok(Math.abs((stats.rate ?? 0) - 2 / 3) < 1e-9)
+  })
+
+  it('reports no rate instead of a fake 0% when nothing started', () => {
+    const stats = weekStats([], 7, NOW)
+    assert.equal(stats.started, 0)
+    assert.equal(stats.rate, null)
+  })
+
+  it('ignores jobs outside the window and unparseable dates', () => {
+    const stats = weekStats(
+      [
+        job({ created_at: local(2026, 7, 1, 10).toISOString(), status: 'completed' }),
+        job({ created_at: 'not-a-date', status: 'completed' }),
+      ],
+      7,
+      NOW,
+    )
+    assert.equal(stats.started, 0)
+    assert.equal(stats.rate, null)
   })
 })

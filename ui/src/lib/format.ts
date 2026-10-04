@@ -82,8 +82,16 @@ export const BADGE_TONE: Record<JobStatus, BadgeTone> = {
   cancelled: 'neutral',
 }
 
-/** Kept as a function of the tone so callers never concatenate class names. */
-export const badgeClass = (status: JobStatus): string => TONE_CLASS[BADGE_TONE[status]]
+/** A job's status in Persian, falling back to the raw value from the API. */
+export function statusLabel(status: string): string {
+  return (STATUS_FA as Record<string, string>)[status] ?? status
+}
+
+/** Kept as a function of the tone so callers never concatenate class names.
+ *  Accepts a plain string: the backend may add a status the `JobStatus`
+ *  union does not know yet, and that must render a neutral badge rather than
+ *  an `undefined` class. */
+export const badgeClass = (status: string): string => TONE_CLASS[BADGE_TONE[status as JobStatus] ?? 'neutral']
 
 const faNumber = new Intl.NumberFormat('fa-IR')
 
@@ -195,6 +203,32 @@ export const faDate = (value: string | null | undefined): string => {
     hour: '2-digit',
     minute: '2-digit',
   }).format(date)
+}
+
+/**
+ * How long ago, in words: «لحظاتی پیش»، «۳ ساعت پیش»، «۲ روز پیش».
+ *
+ * For rows where the absolute date answers nothing ("this changed recently"
+ * is the whole question). Beyond 30 days it falls back to `faDate`, because
+ * "۴۷ روز پیش" is arithmetic homework and a date is the answer.
+ *
+ * A future stamp — clock skew between browser and server — reads as "just
+ * now" rather than a negative duration, which would be a lie in the other
+ * direction.
+ */
+export const faAgo = (value: string | null | undefined, now: number = Date.now()): string => {
+  if (!value) return '—'
+  const then = new Date(value).getTime()
+  if (Number.isNaN(then)) return '—'
+  const seconds = Math.max(0, Math.floor((now - then) / 1000))
+  if (seconds < 60) return 'لحظاتی پیش'
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${fa(minutes)} دقیقه پیش`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${fa(hours)} ساعت پیش`
+  const days = Math.floor(hours / 24)
+  if (days < 30) return `${fa(days)} روز پیش`
+  return faDate(value)
 }
 
 /**

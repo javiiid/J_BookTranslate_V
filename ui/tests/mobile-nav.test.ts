@@ -93,6 +93,52 @@ describe('the labels are one word, because the bar is narrow', () => {
   })
 })
 
+describe('the theme switch is in the bar, and is not a destination', () => {
+  /* Dark mode was unreachable on a phone. The only copy of the toggle lived in
+   * the rail's footer, and the rail is `hidden` below `lg` — so the control was
+   * in the DOM, focusable, and invisible at every width a phone actually uses.
+   *
+   * A floating corner button was tried and rejected: at 390px it sat on top of
+   * the dashboard's status pill, and a full-width invisible strip across the top
+   * of the page swallowed taps meant for the header. The bar's chrome slot is
+   * the one place that is present on every page and collides with nothing.
+   */
+
+  const bar = readFileSync(new URL('../src/components/MobileNav.tsx', import.meta.url), 'utf8')
+
+  it('the bar renders the theme toggle', () => {
+    assert.ok(/<ThemeToggle \/>/.test(bar), 'the mobile bar has no theme toggle, so dark mode is unreachable on a phone')
+  })
+
+  it('the toggle is a sibling of the list, not a sixth destination', () => {
+    // MOBILE_NAV is five because six puts the label under 12px at 393px, and
+    // 12px is this project's floor for Persian. Adding an item there would
+    // trade a real constraint for a preference; a sibling costs no label.
+    const afterList = bar.slice(bar.lastIndexOf('</ul>'))
+    assert.ok(
+      /<ThemeToggle \/>/.test(afterList),
+      'the toggle is inside the list, so it has taken a destination slot',
+    )
+    assert.equal(MOBILE_NAV.length, 5, 'MOBILE_NAV is no longer five destinations')
+  })
+
+  it('the toggle does not shrink', () => {
+    assert.ok(
+      /<div className="flex flex-none items-center ps-\[var\(--spacing-1\)\]">/.test(bar),
+      'the toggle wrapper can be squeezed, so the button loses its touch target',
+    )
+  })
+
+  it('the rail keeps its own copy, so a desktop does not need the bar', () => {
+    const shell = readFileSync(new URL('../src/components/AppShell.tsx', import.meta.url), 'utf8')
+    assert.ok(
+      /<Sidebar \/>\s*<MobileNav \/>/.test(shell),
+      'AppShell no longer renders exactly one Sidebar and one MobileNav',
+    )
+    assert.ok(/<ThemeToggle \/>/.test(shell), 'the rail footer has no theme toggle')
+  })
+})
+
 describe('the primary action', () => {
   it('is marked, and exactly one item is', () => {
     // A second primary would give the bar two circles that both look chosen.

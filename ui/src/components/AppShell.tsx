@@ -49,13 +49,65 @@ export function ThemeToggle() {
       type="button"
       onClick={toggle}
       aria-pressed={dark}
-      title={dark ? 'حالت روشن' : 'حالت تاریک'}
-      aria-label={dark ? 'روشن کردن حالت روشن' : 'روشن کردن حالت تاریک'}
+      /* The accessible name is fixed and `aria-pressed` carries the state.
+         The name used to flip with the theme as well, so a screen reader in
+         dark mode heard "turn on light mode, pressed" -- a label and a state
+         that contradict each other. The tooltip may still name the action. */
+      aria-label="حالت تاریک"
+      title={dark ? 'تغییر به حالت روشن' : 'تغییر به حالت تاریک'}
       className="btn-icon"
     >
-      <span aria-hidden="true">{dark ? '☀' : '◐'}</span>
+      <ThemeIcon dark={dark} />
     </button>
   )
+}
+
+/**
+ * Sun in the light theme, moon in the dark one: the icon shows the theme that
+ * is on. That is what `aria-pressed` reports, so the picture and the state agree
+ * (the reverse -- showing where the press goes -- put a sun on a button that
+ * says "dark mode: on").
+ *
+ * Drawn on the same 24px / 1.75 stroke as `NavIcon`. The glyphs it replaces
+ * (U+2600, U+25D0) are text characters, so each platform drew them from a
+ * different font -- an emoji-style sun on phones, a hairline half-circle on
+ * Windows -- and neither matched the rail's outline icons.
+ */
+function ThemeIcon({ dark }: { dark: boolean }) {
+  return (
+    <svg
+      width={18}
+      height={18}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.75}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      {!dark ? (
+        <>
+          <circle cx="12" cy="12" r="4" />
+          <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
+        </>
+      ) : (
+        <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
+      )}
+    </svg>
+  )
+}
+
+/**
+ * The theme control, for the places that have a header of their own.
+ *
+ * The desktop rail carries one in its footer and `MobileNav` carries one in the
+ * bar's chrome slot, so on every page at every width there is a way to reach
+ * dark mode. `/account` states it as a preference too, so it is findable as one.
+ */
+export function ThemeToggleOnNarrow() {
+  return <ThemeToggle />
 }
 
 /**
@@ -119,16 +171,12 @@ export function Sidebar() {
         ))}
       </nav>
 
-      <div className="mt-auto flex items-center justify-between gap-2 pb-3">
+      {/* This footer carried a migration note ("React front end on the same
+          Python API, backend untouched"). That is a message from the
+          developer to the developer; to everyone else it was noise on every
+          page, so the footer is the theme switch and nothing else. */}
+      <div className="mt-auto flex items-center pb-3">
         <ThemeToggle />
-        <p
-          className="text-[length:var(--text-caption)] leading-5"
-          style={{ color: 'var(--color-text-muted)' }}
-        >
-          رابط React روی همان API پایتون.
-          <br />
-          بک‌اند دست‌نخورده است.
-        </p>
       </div>
     </aside>
   )
@@ -136,7 +184,29 @@ export function Sidebar() {
 
 export function AppShell({ children }: { children: ReactNode }) {
   return (
-    <div className="min-h-dvh" style={{ background: 'var(--color-background)' }}>
+    /* No `min-h-dvh` on either div. `body` already owns the minimum height in
+       tokens.css, and this stack had three of them: the body rule, this div and
+       the content div. `dvh` is a *dynamic* unit -- it re-resolves when the
+       mobile browser bar slides -- so three elements sized from it grew three
+       times over, and the page became taller than its own content while you
+       scrolled down it. That is the report: "I reach the end and there is more
+       empty page below it."
+
+       Growth is now content-driven, so the page is exactly as tall as what it
+       holds. */
+    <div style={{ background: 'var(--color-background)' }}>
+      {/* Focus is moved by hand instead of following the `#content` hash, so
+          the URL does not pick up a fragment on every skip. */}
+      <a
+        href="#content"
+        className="btn btn-primary skip-link"
+        onClick={(event) => {
+          event.preventDefault()
+          document.getElementById('content')?.focus()
+        }}
+      >
+        پرش به محتوا
+      </a>
       <Sidebar />
       <MobileNav />
       {/*
@@ -150,7 +220,9 @@ export function AppShell({ children }: { children: ReactNode }) {
         space at the bottom for a bar that is not there.
       */}
       <div
-        className="me-0 min-h-dvh pb-[calc(var(--mobile-nav-height)+env(safe-area-inset-bottom,0px))] lg:me-60 lg:pb-0"
+        className="me-0 pb-[calc(var(--mobile-nav-height)+env(safe-area-inset-bottom,0px))] focus:outline-none lg:me-60 lg:pb-0"
+        id="content"
+        tabIndex={-1}
       >
         {children}
       </div>

@@ -31,7 +31,7 @@
  */
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 
 const configUrl = new URL('../vite.config.ts', import.meta.url)
 const appUrl = new URL('../src/App.tsx', import.meta.url)
@@ -189,6 +189,22 @@ describe('every React route renders a React page', () => {
       if (component === 'ReaderHandedOver') continue
       assert.match(component, /Page$/, `${path} renders ${component}, which is not a page`)
     }
+  })
+
+  it('the workshop route is mounted, because intake navigates to it', () => {
+    // `/workspace` now opens a calibration workshop and redirects there. A route
+    // that was missing made the redirect land on the catch-all, so a freshly
+    // uploaded book appeared to vanish with no error anywhere.
+    assert.match(
+      app,
+      /path="\/calibrations\/:id"\s+element=\{<\s*CalibrationPage\s*\/>\s*\}/,
+      '/calibrations/:id is not routed, so the workspace redirect lands on the 404 page',
+    )
+  })
+
+  it('the workshop page exists on disk', () => {
+    const page = new URL('../src/pages/CalibrationPage.tsx', import.meta.url)
+    assert.ok(existsSync(page), 'CalibrationPage.tsx is missing; the route above renders nothing')
   })
 
   it('/landing renders a page that exists on disk', () => {

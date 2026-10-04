@@ -100,7 +100,18 @@ const GLYPHS: Record<NavIconName, Glyph> = {
   ),
 }
 
-export function NavIcon({ name, size = 24 }: { name: NavIconName; size?: number | undefined }) {
+export function NavIcon({
+  name,
+  size = 24,
+  strokeWidth,
+}: {
+  name: NavIconName
+  size?: number | undefined
+  strokeWidth?: number | undefined
+}) {
   const Glyph = GLYPHS[name]
-  return <Glyph size={size} />
+  /* Spread only when given. `Stroke` puts `...rest` after its own default, so an
+     explicit `strokeWidth: undefined` would overwrite 1.75 with nothing and the
+     icon would be drawn at the SVG default of 1. */
+  return <Glyph size={size} {...(strokeWidth === undefined ? {} : { strokeWidth })} />
 }

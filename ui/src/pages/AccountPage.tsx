@@ -8,6 +8,7 @@ import {
   type ProviderTestResult,
 } from '@/lib/api'
 import { fa, faDate, maskSecretLike } from '@/lib/format'
+import { useTheme } from '@/hooks/useTheme'
 
 /**
  * Account and settings.
@@ -170,7 +171,7 @@ function ProviderTest({ config }: { config: ProviderConfig | undefined }) {
         >
           {result.message}
           {result.model_available === false
-            ? ` مدل «${result.model}» در فهرست ارائه‌دهنده نیست.`
+            ? ` مدل «${result.selected_model}» در فهرست ارائه‌دهنده نیست.`
             : ''}
         </p>
       ) : null}
@@ -305,7 +306,29 @@ function UsagePanel() {
     staleTime: 60_000,
   })
 
+  // Never a silent `null`: an empty panel while loading or failed reads as
+  // "there is no usage section", not as "it is still coming".
+  if (analytics.isPending) {
+    return (
+      <Panel title="مصرف" id="usage-heading">
+        <div className="skeleton" style={{ height: 72 }} />
+      </Panel>
+    )
+  }
+
+  if (analytics.isError) {
+    return (
+      <Panel title="مصرف" id="usage-heading">
+        <p role="alert" className="alert alert-error">
+          {analytics.error instanceof Error ? analytics.error.message : 'دریافت آمار مصرف ممکن نشد.'}
+        </p>
+      </Panel>
+    )
+  }
+
   const data = analytics.data
+  // Unreachable while the query is enabled (pending and error return above),
+  // kept so the type stays honest instead of asserting non-null.
   if (!data) return null
 
   return (
@@ -487,6 +510,63 @@ function PacksPanel({ items }: { items: MarketplaceItem[] }) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Appearance                                                          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Where the theme lives as a *setting*.
+ *
+ * The rail's footer carries the same control on a desktop, and the shell has a
+ * floating one for phones. Neither is a place someone looks for a preference,
+ * so the preference is also stated here: what the theme is, where it came from,
+ * and what will happen if the phone's system setting changes.
+ */
+function AppearancePanel() {
+  const { theme, setTheme, followsSystem } = useTheme()
+  return (
+    <Panel title="نمایش" id="appearance-heading">
+      <fieldset className="grid gap-2 sm:grid-cols-2">
+        <legend className="sr-only">حالت رنگی</legend>
+        {(
+          [
+            ['light', 'روشن'],
+            ['dark', 'تیره'],
+          ] as const
+        ).map(([value, label]) => (
+          <label
+            key={value}
+            className="flex items-center justify-between gap-3 rounded-[var(--radius-control)] border p-[var(--spacing-3)] text-[length:var(--text-label)]"
+            style={{
+              borderColor: theme === value ? 'var(--color-primary)' : 'var(--color-border)',
+              background: theme === value ? 'var(--color-primary-subtle)' : 'transparent',
+            }}
+          >
+            <span className="flex items-center gap-2">
+              <input
+                type="radio"
+                name="theme"
+                checked={theme === value}
+                onChange={() => setTheme(value)}
+              />
+              {label}
+            </span>
+            {theme === value ? <span className="text-[length:var(--text-caption)]">انتخاب‌شده</span> : null}
+          </label>
+        ))}
+      </fieldset>
+      <p
+        className="mt-3 text-[length:var(--text-caption)]"
+        style={{ color: 'var(--color-text-muted)' }}
+      >
+        {followsSystem
+          ? 'فعلاً از تنظیم روشن/تاریک گوشی پیروی می‌کند. با انتخاب بالا، انتخاب خودتان ثبت می‌شود و دیگر با تغییر تنظیم گوشی عوض نمی‌شود.'
+          : 'انتخاب شما ثبت شده و با تغییر تنظیم گوشی عوض نمی‌شود. برای بازگشت به حالت خودکار، در یکی از دو حالت بالا کلیک کنید و دوباره انتخاب کنید.'}
+      </p>
+    </Panel>
+  )
+}
+
+/* ------------------------------------------------------------------ */
 /* Page                                                                */
 /* ------------------------------------------------------------------ */
 
@@ -537,6 +617,7 @@ export function AccountPage() {
         </p>
       </header>
 
+      <AppearancePanel />
       <SetupPanel config={config.data} />
       <WorkPanel portal={data} />
       <UsagePanel />
