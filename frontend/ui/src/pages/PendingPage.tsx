@@ -1,30 +1,16 @@
 import { Link } from 'react-router-dom'
 
-const PENDING: { path: string; label: string; note: string }[] = [
-  { path: '/jobs', label: 'پایش ترجمه', note: 'فاز ۳' },
-  { path: '/library', label: 'کتابخانه', note: 'فاز ۳' },
-  { path: '/reader', label: 'مطالعه', note: 'فاز ۴' },
-  { path: '/account', label: 'پنل کاربری', note: 'فاز ۵' },
+/** Where a lost visitor can go. Every entry is a mounted React route in
+ *  `App.tsx` — never `/reader`, which is proxied to the Python page and has
+ *  no React content to land on. */
+const DESTINATIONS: { path: string; label: string; note: string }[] = [
+  { path: '/', label: 'میز کار ترجمه', note: 'داشبورد' },
+  { path: '/workspace', label: 'افزودن کتاب', note: 'شروع ترجمه' },
+  { path: '/convert', label: 'تبدیل فایل', note: 'ابزار سند' },
+  { path: '/jobs', label: 'پایش ترجمه', note: 'کارها' },
+  { path: '/library', label: 'کتابخانه', note: 'کتاب‌ها' },
+  { path: '/account', label: 'پنل کاربری', note: 'حساب' },
 ]
-
-export function PendingPage({ title }: { title: string }) {
-  return (
-    <main className="page" dir="rtl">
-      <div className="surface-card p-8">
-        <h1 className="text-[length:var(--text-h1)] font-extrabold">{title}</h1>
-        <p
-          className="mt-[var(--spacing-2)] text-[length:var(--text-body)]"
-          style={{ color: 'var(--color-text-secondary)' }}
-        >
-          این صفحه هنوز از رابط پایتون استفاده می‌کند. نسخهٔ React در فاز بعدی ساخته می‌شود.
-        </p>
-        <Link to="/" className="btn btn-primary mt-6">
-          بازگشت به داشبورد
-        </Link>
-      </div>
-    </main>
-  )
-}
 
 export function NotFoundPage() {
   return (
@@ -35,10 +21,10 @@ export function NotFoundPage() {
           className="mt-[var(--spacing-2)] text-[length:var(--text-body)]"
           style={{ color: 'var(--color-text-secondary)' }}
         >
-          این مسیر هنوز port نشده است. از یکی از موارد زیر ادامه دهید:
+          این مسیر وجود ندارد. از یکی از موارد زیر ادامه دهید:
         </p>
         <ul className="mt-[var(--spacing-5)] grid gap-2">
-          {PENDING.map((item) => (
+          {DESTINATIONS.map((item) => (
             <li key={item.path}>
               <Link
                 to={item.path}

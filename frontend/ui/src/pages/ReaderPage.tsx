@@ -2,7 +2,7 @@ import { useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useParams } from 'react-router-dom'
 import { api } from '@/lib/api'
-import type { Chapter, ChapterBlock, ChapterContent } from '@/lib/api'
+import type { Chapter, ChapterBlock, ChapterContent, ReadingSettings } from '@/lib/api'
 import { stripDuplicatedHeading, stripLeadingTitle } from '@/lib/chunks'
 import { fa } from '@/lib/format'
 
@@ -24,28 +24,32 @@ import { fa } from '@/lib/format'
  * injected whole: there is no remote origin in it.
  */
 
-const MODE_FA: Record<ReadingSettings['reading_mode'], string> = {
+const MODE_FA: Record<ReaderMode, string> = {
   translation: 'ترجمه',
   original: 'مبدأ',
   bilingual: 'دوزبانه',
 }
 
-/** The subset of reader settings this page reads. */
-interface ReadingSettings {
-  reading_mode: 'translation' | 'original' | 'bilingual'
-  reading_theme: 'light' | 'dark'
-  reading_font_size: number
-  reading_line_height: number
-  reading_width: number
-  reading_direction: 'auto' | 'ltr' | 'rtl'
+/** Display modes this port implements. The server also knows `columns`, which
+ *  falls back to `bilingual` here until the port catches up. */
+type ReaderMode = 'translation' | 'original' | 'bilingual'
+
+function toReaderMode(value: string | undefined): ReaderMode {
+  return value === 'translation' || value === 'original' || value === 'bilingual'
+    ? value
+    : 'bilingual'
 }
 
 export function ReaderPage() {
   const { id = '' } = useParams()
   const client = useQueryClient()
   const [selectedId, setSelectedId] = useState<number | null>(null)
-  const [mode, setMode] = useState<ReadingSettings['reading_mode']>('bilingual')
-  const [fontSize, setFontSize] = useState(17)
+  // Local overrides until the next server round-trip. `null` means "follow
+  // the server": the settings query is the source of truth, so a change made
+  // in the Python reader (or another tab) is picked up instead of being
+  // overwritten by this page's hardcoded defaults.
+  const [modeOverride, setModeOverride] = useState<ReaderMode | null>(null)
+  const [fontOverride, setFontOverride] = useState<number | null>(null)
   const scrollRef = useRef<HTMLDivElement | null>(null)
 
   const settings = useQuery({
@@ -53,6 +57,10 @@ export function ReaderPage() {
     queryFn: () => api.readerSettings(),
     staleTime: 300_000,
   })
+
+  const server = settings.data?.value
+  const mode = modeOverride ?? toReaderMode(server?.reading_mode)
+  const fontSize = fontOverride ?? server?.reading_font_size ?? 18
 
   const chapters = useQuery({
     queryKey: ['reader-chapters', id],
@@ -79,32 +87,12 @@ export function ReaderPage() {
     enabled: mode === 'bilingual' && Boolean(id) && chapterId !== null,
   })
 
+  // A partial, FLAT patch: the backend keeps only keys in READING_DEFAULTS,
+  // so this merges server-side instead of clobbering untouched settings.
   const save = useMutation({
-    mutationFn: (next: Partial<ReadingSettings>) =>
-      api
-        .readerSettings()
-        .then(() => request('PUT', '/api/reader/settings', { value: { ...current, ...next } })),
+    mutationFn: (next: Partial<ReadingSettings>) => api.updateReaderSettings(next),
     onSuccess: () => void client.invalidateQueries({ queryKey: ['reader-settings'] }),
   })
-
-  const current: ReadingSettings = {
-    reading_mode: (settings.data?.value?.reading_mode as ReadingSettings['reading_mode']) ?? 'bilingual',
-    reading_theme: 'light',
-    reading_font_size: fontSize,
-    reading_line_height: 1.9,
-    reading_width: 720,
-    reading_direction: 'auto',
-  }
-
-  async function request(method: string, path: string, body: unknown) {
-    const response = await fetch(path, {
-      method,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    })
-    if (!response.ok) throw new Error(`HTTP ${response.status}`)
-    return response.json()
-  }
 
   const items = chapters.data?.items ?? []
 
@@ -155,7 +143,7 @@ export function ReaderPage() {
         <section className="grid gap-3">
           <div className="surface-card flex flex-wrap items-center gap-3 p-3">
             <div className="flex gap-1" role="group" aria-label="حالت نمایش">
-              {(Object.keys(MODE_FA) as ReadingSettings['reading_mode'][]).map((value) => (
+              {(Object.keys(MODE_FA) as ReaderMode[]).map((value) => (
                 <button
                   key={value}
                   type="button"
@@ -166,7 +154,10 @@ export function ReaderPage() {
                       ? { background: 'var(--color-primary-subtle)', color: 'var(--color-text-brand)' }
                       : undefined
                   }
-                  onClick={() => setMode(value)}
+                  onClick={() => {
+                    setModeOverride(value)
+                    void save.mutate({ reading_mode: value })
+                  }}
                 >
                   {MODE_FA[value]}
                 </button>
@@ -182,7 +173,7 @@ export function ReaderPage() {
                 value={fontSize}
                 onChange={(event) => {
                   const value = Number(event.target.value)
-                  setFontSize(value)
+                  setFontOverride(value)
                   void save.mutate({ reading_font_size: value })
                 }}
                 aria-label="اندازهٔ متن"
@@ -258,7 +249,7 @@ function ChapterBody({
   blocksPending,
 }: {
   content: ChapterContent
-  mode: ReadingSettings['reading_mode']
+  mode: ReaderMode
   blocks: ChapterBlock[]
   blocksPending: boolean
 }) {

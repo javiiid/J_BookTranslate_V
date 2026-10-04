@@ -377,14 +377,18 @@ export interface MarketplaceItem {
   installed: number
 }
 
-/** The result of POST /api/provider-config/test. */
+/** The result of POST /api/provider-config/test.
+ *
+ * `models` is a count, not a list: the backend answers how many models the
+ * provider listed (`len(model_ids)` in `app/web.py::_verify_provider_config`).
+ * `selected_model` is the model that was tested. */
 export interface ProviderTestResult {
   message: string
   base_url: string
-  model: string
+  models: number
+  selected_model: string
   /** Whether the chosen model appears in the provider's own list. */
   model_available?: boolean
-  models?: string[]
 }
 
 /**
@@ -447,11 +451,32 @@ export interface TranslationEstimate {
   chunk_count_exact: boolean
 }
 
-/** What `POST /api/jobs/upload` returns. */
+/**
+ * What `POST /api/jobs/upload` returns.
+ *
+ * `upload_id` is NOT in that response. The route answers with `file_path`, a
+ * full filesystem path, while `POST /api/calibrations` wants a bare filename:
+ * it joins it to the upload directory itself and rejects anything containing a
+ * separator, because the browser must not choose where on the server a file
+ * lives. So the id is derived here, once, rather than each caller slicing the
+ * path differently.
+ */
 export interface UploadedBook {
+  /** The stored file's name inside the upload directory. Derived, not sent. */
+  upload_id: string
   file_path: string
   filename: string
   size: number
+}
+
+/** The last segment of a path, whether it was written with `/` or `\`. */
+export function uploadIdFrom(filePath: string): string {
+  return filePath.split(/[/\\]/).pop() ?? ''
+}
+
+/** The stored upload as the calibration route wants to receive it. */
+export function withUploadId(stored: Omit<UploadedBook, 'upload_id'>): UploadedBook {
+  return { ...stored, upload_id: uploadIdFrom(stored.file_path) }
 }
 
 /**
@@ -538,19 +563,37 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+/**
+ * Parse a response body as JSON, throwing an `ApiError` — never a raw
+ * `SyntaxError` — when the server (or a proxy between us and it) answers with
+ * HTML instead. A 502 from Vite's proxy is the usual shape of this: without
+ * the guard, every page's `error.message` handling shows a parser crash
+ * rather than the failure it was meant to report.
+ */
+export function readJsonBody(text: string, status: number): unknown {
+  if (!text) return null
+  try {
+    return JSON.parse(text) as unknown
+  } catch {
+    throw new ApiError('پاسخ خوانا از سرور دریافت نشد.', status)
+  }
+}
+
+function errorMessage(body: unknown, status: number): string {
+  return body && typeof body === 'object' && 'error' in body && typeof body.error === 'string'
+    ? body.error
+    : `HTTP ${status}`
+}
+
+export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     ...init,
     headers: { Accept: 'application/json', ...init?.headers },
   })
   const text = await response.text()
-  const body: unknown = text ? JSON.parse(text) : null
+  const body: unknown = readJsonBody(text, response.status)
   if (!response.ok) {
-    const message =
-      body && typeof body === 'object' && 'error' in body && typeof body.error === 'string'
-        ? body.error
-        : `HTTP ${response.status}`
-    throw new ApiError(message, response.status)
+    throw new ApiError(errorMessage(body, response.status), response.status)
   }
   return body as T
 }
@@ -577,6 +620,20 @@ export const api = {
   readerBlocks: (id: string, chapterId: number) =>
     request<{ items: ChapterBlock[] }>(`/api/reader/${encodeURIComponent(id)}/chapters/${chapterId}/blocks`),
   readerSettings: () => request<{ value: ReadingSettings }>('/api/reader/settings'),
+  /**
+   * Persist reader settings.
+   *
+   * The body is FLAT (`{reading_font_size: 20}`), not `{value: {...}}`: the
+   * backend keeps only keys in `READING_DEFAULTS` and silently drops the rest,
+   * so a nested shape returns `ok: true` while saving nothing. Unknown keys
+   * are ignored server-side, so sending a partial object is safe.
+   */
+  updateReaderSettings: (patch: Partial<ReadingSettings>) =>
+    request<{ ok: boolean; value: ReadingSettings }>('/api/reader/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    }),
 
   models: () => request<{ items: Model[] }>('/api/models'),
   languages: () => request<{ items: Language[] }>('/api/languages'),
@@ -609,13 +666,9 @@ export const api = {
   createJob: async (form: FormData): Promise<{ id: string; book_id: number | null; from_lang: string; to_lang: string }> => {
     const response = await fetch('/api/jobs', { method: 'POST', body: form })
     const text = await response.text()
-    const body: unknown = text ? JSON.parse(text) : null
+    const body: unknown = readJsonBody(text, response.status)
     if (!response.ok) {
-      const message =
-        body && typeof body === 'object' && 'error' in body && typeof body.error === 'string'
-          ? body.error
-          : `HTTP ${response.status}`
-      throw new ApiError(message, response.status)
+      throw new ApiError(errorMessage(body, response.status), response.status)
     }
     return body as { id: string; book_id: number | null; from_lang: string; to_lang: string }
   },
@@ -684,25 +737,21 @@ export const api = {
   /**
    * Store an uploaded book without translating it, and return where it landed.
    *
-   * This exists because `POST /api/jobs` uploads *and* starts a worker thread in
-   * the same request, so there was no moment at which the browser held a file the
-   * server had not already begun paying to translate. Without this the estimate
-   * dialog had no path to measure.
+   * Storing is separate from starting: `POST /api/jobs` uploads *and* starts a
+   * worker thread in the same request, so there was no moment at which the
+   * browser held a file the server had not already begun paying to translate.
+   * The calibration workshop needs exactly that moment.
    */
-  uploadBook: async (file: File) => {
+  uploadBook: async (file: File): Promise<UploadedBook> => {
     const form = new FormData()
     form.set('book', file, file.name)
     const response = await fetch('/api/jobs/upload', { method: 'POST', body: form })
     const text = await response.text()
-    const body: unknown = text ? JSON.parse(text) : null
+    const body: unknown = readJsonBody(text, response.status)
     if (!response.ok) {
-      const message =
-        body && typeof body === 'object' && 'error' in body && typeof body.error === 'string'
-          ? body.error
-          : `HTTP ${response.status}`
-      throw new ApiError(message, response.status)
+      throw new ApiError(errorMessage(body, response.status), response.status)
     }
-    return body as UploadedBook
+    return withUploadId(body as UploadedBook)
   },
 
   /**
@@ -730,7 +779,7 @@ export const api = {
     if (options?.force) form.set('force', 'true')
     const response = await fetch('/api/jobs/rescue/import', { method: 'POST', body: form })
     const text = await response.text()
-    const body: unknown = text ? JSON.parse(text) : null
+    const body: unknown = readJsonBody(text, response.status)
 
     if (response.status === 409 && body && typeof body === 'object' && 'conflict' in body) {
       throw new RescueConflictError(
@@ -739,11 +788,7 @@ export const api = {
       )
     }
     if (!response.ok) {
-      const message =
-        body && typeof body === 'object' && 'error' in body && typeof body.error === 'string'
-          ? body.error
-          : `HTTP ${response.status}`
-      throw new ApiError(message, response.status)
+      throw new ApiError(errorMessage(body, response.status), response.status)
     }
     return body as RescueImport
   },

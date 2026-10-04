@@ -17,6 +17,7 @@ import { AccountPage } from '@/pages/AccountPage'
 import { LandingPage } from '@/pages/LandingPage'
 import { NotFoundPage } from '@/pages/PendingPage'
 import { ConversionPage } from '@/pages/ConversionPage'
+import { CalibrationPage } from '@/pages/CalibrationPage'
 import { ConversionProvider } from '@/components/conversion/ConversionProvider'
 
 /**
@@ -71,8 +72,12 @@ export function App() {
         <Route path="/jobs" element={<JobListPage />} />
         <Route path="/jobs/:id" element={<JobDetailPage />} />
 
-        {/* Phase 3: the translation form and the library. */}
+        {/* Phase 3: the translation form and the library.
+            `/workspace` is intake only now: it stores the upload and opens a
+            calibration workshop at `/calibrations/:id`, where the voice and the
+            glossary are settled on real samples before the book is translated. */}
         <Route path="/workspace" element={<WorkspacePage />} />
+        <Route path="/calibrations/:id" element={<CalibrationPage />} />
         <Route path="/convert" element={<ConversionPage />} />
         <Route path="/library" element={<LibraryPage />} />
 

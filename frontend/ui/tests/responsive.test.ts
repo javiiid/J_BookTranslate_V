@@ -247,6 +247,85 @@ describe('the bottom bar and the page gutter agree', () => {
   })
 })
 
+describe('a long filename must not widen the page', () => {
+  /* The bug this holds.
+   *
+   * `/workspace` lists open workshops by filename, and real filenames are long:
+   * "0434b505f492__Robert C. Martin Series_ Martin R.C.-Clean Architecture_ A
+   * Craftsman's Guide to Software Structure and Design-Pearson Education
+   * _2017_.epub" is 150 characters.
+   *
+   * A grid item defaults to `min-width: auto`, which means "never smaller than my
+   * widest content". The workshop list therefore grew to its max-content and
+   * pushed the document to 1,608px on a 390px phone — every select measured
+   * 1,550px wide and the whole page scrolled sideways.
+   *
+   * `minmax(0,1fr)` on the outer track was already there and did NOT help: that
+   * bounds the TRACK, and the item inside it still refuses to shrink until it is
+   * told it may. So `min-w-0` has to be on the item, which is what this checks.
+   *
+   * No source-level rule catches this in general — a `truncate` with a `min-w-0`
+   * on the wrong element still overflows — so this asserts the concrete shape,
+   * and the numbers were measured in a browser at 390px and 1280px.
+   */
+  const workspace = read('WorkspacePage.tsx')
+
+  it('the intake column may shrink', () => {
+    assert.ok(
+      /<div className="grid min-w-0 gap-4">/.test(workspace),
+      'the intake column has no min-w-0, so a long filename widens the whole page',
+    )
+  })
+
+  it('the workshop row may shrink, at every level of the chain', () => {
+    assert.ok(
+      /<ul className="mt-3 grid min-w-0 gap-2">/.test(workspace),
+      'the workshop list has no min-w-0',
+    )
+    assert.ok(
+      /<li key=\{draft\.id\} className="min-w-0">/.test(workspace),
+      'a workshop row has no min-w-0; it is a grid item and defaults to min-width:auto',
+    )
+    assert.ok(
+      /className="flex min-w-0 items-center justify-between gap-3/.test(workspace),
+      'the workshop link has no min-w-0, so truncate inside it has nothing to shrink against',
+    )
+  })
+
+  it('the state badge cannot be squeezed, because it carries the state', () => {
+    // flex-none, so a long filename truncates instead of the label losing its
+    // last letter — and the badge is short because the state is translated.
+    assert.ok(
+      /className="badge flex-none">\{stateLabel\(draft\.state\)\}/.test(workspace),
+      'the workshop badge is not flex-none, or shows the raw SCREAMING_SNAKE state',
+    )
+  })
+
+  it('the full name is reachable, since the visible one is truncated', () => {
+    assert.ok(
+      /title=\{draft\.filename\}/.test(workspace),
+      'the truncated filename has no title, so the full one is unreadable',
+    )
+  })
+
+  it('the name truncates from the front, so the identifying half survives', () => {
+    // `text-overflow: ellipsis` cuts at the containing block's inline end, and
+    // the page is RTL — so a long filename showed its tail
+    // ("…ructure and Design-Pearson Education _2017_") and the part that names
+    // the book was gone. A `<bdi>` isolate was tried and does NOT help: it
+    // reorders the text but leaves the ellipsis where it was. Only the
+    // direction of the truncating box moves it.
+    assert.ok(
+      /<strong\s+dir="ltr"\s+className="block truncate text-right/.test(workspace),
+      'the truncating filename is not dir=ltr, so the ellipsis cuts off the identifying half',
+    )
+    assert.ok(
+      !/<Ltr>\{draft\.filename\}<\/Ltr>/.test(workspace),
+      'a <bdi> isolate was left around the filename; it does not move the ellipsis',
+    )
+  })
+})
+
 describe('the narrow layout is the default, not an afterthought', () => {
   it('the sm breakpoint the gutter switches at is above the narrowest phone', () => {
     // If the gutter switched at, say, 480px, a 393px phone would get the desktop
@@ -259,5 +338,19 @@ describe('the narrow layout is the default, not an afterthought', () => {
       `.page switches to the wide gutter at ${px}px, at or below the ${NARROWEST}px narrowest phone`,
     )
     assert.ok(px === SM_BREAKPOINT_PX, `expected Tailwind's sm (${SM_BREAKPOINT_PX}px), got ${px}px`)
+  })
+})
+
+describe('the dashboard hero wraps instead of squeezing', () => {
+  it('the greeting block has a wrapping basis beside the nowrap status pill', () => {
+    // The status pill is a `.badge` with `white-space: nowrap` at ~200px. A
+    // bare `flex-1` greeting beside it was squeezed to a word per line on a
+    // 390px phone instead of the pill wrapping underneath. The basis forces
+    // the wrap while `min-w-0` still lets the text shrink inside its own row.
+    const source = read('DashboardPage.tsx')
+    assert.ok(
+      /flex:\s*['"]1 1 12rem['"]/.test(source),
+      'the hero text block lost its 12rem wrapping basis',
+    )
   })
 })

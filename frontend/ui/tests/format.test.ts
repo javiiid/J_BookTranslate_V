@@ -21,7 +21,7 @@ import { describe, it } from 'node:test'
 // `ERR_UNKNOWN_FILE_EXTENSION` before a single assertion ran, because
 // `node --test` strips types but does not transform JSX. `Ltr` is written with
 // `createElement` instead so this stays a plain module.
-import { Ltr, fa, faDate, ltr, maskSecretLike, usd } from '../src/lib/format.ts'
+import { Ltr, badgeClass, fa, faAgo, faDate, ltr, maskSecretLike, statusLabel, usd } from '../src/lib/format.ts'
 
 describe('ltr', () => {
   /* The isolate that keeps a Latin run from being reordered inside Persian text.
@@ -218,5 +218,49 @@ describe('faDate', () => {
     const out = faDate('2026-09-22T19:57:29.649953+00:00')
     assert.notEqual(out, '—')
     assert.ok(out.length > 4)
+  })
+})
+
+describe('faAgo', () => {
+  const NOW = new Date(2026, 8, 30, 12, 0, 0).getTime()
+  const ago = (ms: number): string => new Date(NOW - ms).toISOString()
+
+  it('says moments ago for the last minute', () => {
+    assert.equal(faAgo(ago(10_000), NOW), 'لحظاتی پیش')
+  })
+
+  it('counts minutes, hours and days in Persian digits', () => {
+    assert.equal(faAgo(ago(5 * 60_000), NOW), '۵ دقیقه پیش')
+    assert.equal(faAgo(ago(3 * 3_600_000), NOW), '۳ ساعت پیش')
+    assert.equal(faAgo(ago(2 * 86_400_000), NOW), '۲ روز پیش')
+  })
+
+  it('falls back to a date beyond thirty days', () => {
+    assert.equal(faAgo(ago(47 * 86_400_000), NOW), faDate(ago(47 * 86_400_000)))
+  })
+
+  it('reports nothing usable for missing, broken or future stamps', () => {
+    assert.equal(faAgo(null, NOW), '—')
+    assert.equal(faAgo('not-a-date', NOW), '—')
+    // Clock skew between browser and server must not print a negative age.
+    assert.equal(faAgo(new Date(NOW + 60_000).toISOString(), NOW), 'لحظاتی پیش')
+  })
+})
+
+describe('status badges', () => {
+  it('labels every known status in Persian', () => {
+    assert.equal(statusLabel('running'), 'در حال ترجمه')
+    assert.equal(statusLabel('completed'), 'تکمیل‌شده')
+  })
+
+  it('falls back to the raw value for a status the union does not know', () => {
+    // The backend may add a status before the JobStatus union learns it.
+    // A blank badge is worse than an English one.
+    assert.equal(statusLabel('migrating'), 'migrating')
+  })
+
+  it('renders an unknown status as a neutral badge, not an undefined class', () => {
+    assert.equal(badgeClass('migrating'), 'badge')
+    assert.equal(badgeClass('failed'), 'badge badge-error')
   })
 })

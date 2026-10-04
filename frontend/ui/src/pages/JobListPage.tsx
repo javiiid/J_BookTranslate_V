@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { api } from '@/lib/api'
-import { STATUS_FA, badgeClass, fa, faDate, faDuration } from '@/lib/format'
+import { badgeClass, fa, faDate, faDuration, statusLabel } from '@/lib/format'
 
 /**
  * The job list.
@@ -102,7 +102,7 @@ export function JobListPage() {
                     {/* The badge and the counter travel together, tight, on one
                         line, rather than as two siblings of a wrapping row. */}
                     <span className="flex items-center gap-[var(--spacing-2)]">
-                      <span className={badgeClass(job.status)}>{STATUS_FA[job.status]}</span>
+                      <span className={badgeClass(job.status)}>{statusLabel(job.status)}</span>
                       <span
                         className="text-[length:var(--text-label)] tabular-nums"
                         style={{ color: 'var(--color-text-muted)' }}
@@ -120,7 +120,14 @@ export function JobListPage() {
                        width spent on air. The gap drops to the smallest token
                        below `lg`. */
                     <div className="mt-3 flex items-center gap-[var(--spacing-2)] lg:gap-3">
-                      <div className="progress-track min-w-0 flex-1">
+                      <div
+                        className="progress-track min-w-0 flex-1"
+                        role="progressbar"
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                        aria-valuenow={percent}
+                        aria-label={`پیشرفت ترجمهٔ ${job.filename}`}
+                      >
                         <div className="progress-fill" style={{ width: `${percent}%` }} />
                       </div>
                       <span

@@ -187,23 +187,12 @@ const PAIRS: Pair[] = [
   // surface rather than the page, because that is what it is drawn on.
   ['day', '--color-nav-indicator-ink', '--color-nav-indicator', AA, 'day: the selected bar icon on its fill'],
   ['dark', '--color-nav-indicator-ink', '--color-nav-indicator', AA, 'dark: the selected bar icon on its fill'],
+  ['day', '--color-nav-divider', '--color-surface', AA_NON_TEXT, 'day: mobile bar chrome divider'],
+  ['dark', '--color-nav-divider', '--color-surface', AA_NON_TEXT, 'dark: mobile bar chrome divider'],
   // And the unselected label, which is the other thing on the bar.
   ['day', '--color-text-muted', '--color-surface', AA, 'day: an unselected bar label on the bar'],
-  // The primary action's resting wash: a muted icon on `--color-primary-subtle`,
-  // which is what the bar actually draws for the one item that is neither
-  // selected nor plain.
-  ['day', '--color-text-muted', '--color-primary-subtle', AA, 'day: the resting primary icon on its wash'],
-  ['dark', '--color-text-muted', '--color-primary-subtle', AA, 'dark: the resting primary icon on its wash'],
-  // NOT `--color-text-muted` on `--color-nav-indicator`: that pair is 1.30:1 in
-  // the dark theme, because the selection fill is the aqua there. It is left out
-  // on purpose and the constraint is recorded, because it is the mistake the
-  // indicator invites -- using one fill for both "selected" and "at rest" -- and
-  // it is invisible until the dark theme is rendered. The bar keeps two
-  // distinguishable unselected fills for exactly this reason.
-  // The rule under the selected label carries the selection without relying on
-  // the fill being distinguishable, so it is held to the non-text threshold.
-  ['day', '--color-accent-strong', '--color-surface', AA_NON_TEXT, 'day: the selection rule on the bar'],
-  ['dark', '--color-accent-strong', '--color-surface', AA_NON_TEXT, 'dark: the selection rule on the bar'],
+  // The primary action at rest uses the normal primary/inverse pair above;
+  // its selected state uses the nav indicator pair, so both states stay distinct.
 ]
 
 /**
