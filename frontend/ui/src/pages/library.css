@@ -1,0 +1,486 @@
+/* --------------------------------------------------------------------------
+   The library page.
+
+   Split out of `tokens.css` the way `conversion.css` and `calibration.css` are:
+   the file next to the page that owns it, imported by that page. These are the
+   only rules here that no other page uses.
+
+   Everything is a token or a spacing step. No hex, no Tailwind colour class --
+   `AGENTS.md` makes `tokens.css` the only source of colour, and the contrast
+   audit reads tokens rather than reading this file, so a literal here would be a
+   colour nothing checks.
+   -------------------------------------------------------------------------- */
+
+/* --------------------------------------------------------------------------
+   The header band
+
+   The one place the page goes dark in the light theme. It exists because the
+   heading, the eyebrow and the two buttons were competing with the rail, a
+   status pill and four stat tiles at the same visual level; a band gives the
+   heading a surface of its own without adding a second page.
+
+   The gradient runs on the block axis, so it is written `to bottom` and not
+   mirrored: an RTL page does not flip a vertical gradient, and a horizontal one
+   would put the light end under the buttons and the dark end under the title.
+   -------------------------------------------------------------------------- */
+.library-hero {
+  background: linear-gradient(
+    to bottom,
+    var(--color-hero-from),
+    var(--color-hero-to)
+  );
+  border-radius: var(--radius-card);
+  padding: var(--spacing-6) var(--spacing-5);
+  color: var(--color-hero-ink);
+}
+
+.library-hero-eyebrow {
+  font-size: var(--text-caption);
+  line-height: var(--text-caption--line-height);
+  color: var(--color-hero-ink-muted);
+}
+
+/* The design this was built from sets the title as an outline -- transparent
+   fill with a 1px stroke. It is not reproduced here. An outlined heading is
+   low-contrast by construction: the glyph's own body is unfilled, so its
+   contrast against the band is the contrast of a hairline, and this project
+   holds its headings to the same AA floor as its body text. The title is solid
+   `--color-hero-ink` (13.3:1 by day, 9.2:1 by night) and the eyebrow above it
+   carries the lighter step of the same hue. */
+.library-hero-title {
+  margin-top: var(--spacing-1);
+  font-size: var(--text-h1);
+  font-weight: 800;
+  line-height: var(--text-h1--line-height);
+  color: var(--color-hero-ink);
+}
+
+.library-hero-sub {
+  margin-top: var(--spacing-2);
+  max-width: 46rem;
+  font-size: var(--text-small);
+  line-height: var(--text-small--line-height);
+  color: var(--color-hero-ink-muted);
+}
+
+/* A button on the band cannot be `btn-primary`: that fill is tuned for the page
+   surface, and on a dark band the day theme's #4C7C92 sits at 2.6:1 against
+   #16333f -- a primary action that fails AA on the one surface that gives the
+   page its heading. This is the outline version, drawn in the band's own ink. */
+.library-hero .btn-secondary {
+  background: transparent;
+  border-color: var(--color-hero-ink);
+  color: var(--color-hero-ink);
+}
+.library-hero .btn-secondary:hover {
+  background: var(--color-hero-ink);
+  color: var(--color-hero-to);
+}
+
+/* --------------------------------------------------------------------------
+   Stat tiles
+
+   Four across on a desktop, two on a phone. `--radius-control` rather than
+   `--radius-card`: a tile is a figure, not a document, and four card-radius
+   boxes in a row read as four more cards competing with the list below.
+   -------------------------------------------------------------------------- */
+.lib-tile {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-areas:
+    'icon label'
+    'icon value'
+    'icon hint'
+    'bar bar';
+  column-gap: var(--spacing-3);
+  row-gap: var(--spacing-1);
+  padding: var(--spacing-4);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  box-shadow: var(--shadow-card);
+}
+
+.lib-tile-icon {
+  grid-area: icon;
+  align-self: start;
+  display: grid;
+  place-items: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: var(--radius-control);
+  background: var(--color-primary-subtle);
+  color: var(--color-text-brand);
+}
+
+.lib-tile-label {
+  grid-area: label;
+  align-self: end;
+  font-size: var(--text-caption);
+  line-height: var(--text-caption--line-height);
+  color: var(--color-text-secondary);
+}
+
+.lib-tile-value {
+  grid-area: value;
+  font-size: var(--text-h2);
+  font-weight: 800;
+  line-height: var(--text-h2--line-height);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-primary);
+}
+
+/* The hint gets its own row rather than sharing the label's cell. Both are
+   caption-sized and both are needed at once, so two items in one cell would
+   print over each other. */
+.lib-tile-hint {
+  grid-area: hint;
+  font-size: var(--text-caption);
+  line-height: var(--text-caption--line-height);
+  color: var(--color-text-muted);
+}
+
+/* The tile's bar sits under the figure rather than inside the icon's cell, so a
+   tile with a bar and a tile without one are the same height. */
+.lib-tile-bar {
+  grid-area: bar;
+  margin-top: var(--spacing-3);
+}
+
+.lib-tile-bar .progress-track {
+  height: 4px;
+}
+
+/* --------------------------------------------------------------------------
+   Spotlight cards
+
+   The two-up row. Each card is a question with one answer: which half-done book
+   is closest to done, and what was I last reading. Neither is a stat, so
+   neither belongs in the tiles above.
+   -------------------------------------------------------------------------- */
+.lib-spot {
+  display: grid;
+  gap: var(--spacing-3);
+}
+
+@media (min-width: 64rem) {
+  .lib-spot {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.lib-spot-card {
+  padding: var(--spacing-4);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  box-shadow: var(--shadow-card);
+}
+
+.lib-spot-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--spacing-2);
+}
+
+.lib-spot-title {
+  font-size: var(--text-body);
+  font-weight: 800;
+  line-height: var(--text-body--line-height);
+  color: var(--color-text-primary);
+}
+
+.lib-spot-note {
+  font-size: var(--text-caption);
+  line-height: var(--text-caption--line-height);
+  color: var(--color-text-muted);
+}
+
+/* The mini histogram: five bars, shortest first, drawn from the percent of the
+   five books that got furthest. Each bar's height is its own value -- this is a
+   comparison between books, not a decoration, so a bar that is not its book's
+   percentage would be a lie told in a shape.
+
+   `align-items: flex-end` on a fixed-height row is what makes them read as a
+   bar chart rather than five rectangles of equal height. */
+.lib-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--spacing-2);
+  height: 3.5rem;
+  margin-top: var(--spacing-3);
+}
+
+.lib-bar {
+  flex: 1;
+  min-width: 0;
+  height: var(--bar-height, 0%);
+  background: var(--color-progress-fill);
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+}
+
+.lib-bar-empty {
+  background: var(--color-progress-track);
+}
+
+/* A bar below a legible height stops being a bar and becomes a rectangle, so
+   there is a floor of 2px and the rest is the value. */
+.lib-bar[style*='--bar-height'] {
+  min-height: 2px;
+}
+
+/* --------------------------------------------------------------------------
+   The filter row
+
+   A segmented control rather than a `<select>`. Four fixed options, all of them
+   visible at once, and the count sitting on the tab is the point: a reader
+   choosing "unfinished" wants to know there are fifteen of them before they
+   choose it, and a closed select cannot say that.
+
+   The tabs are real buttons with `aria-pressed`, so the selected one is
+   announced as pressed rather than only looking different.
+   -------------------------------------------------------------------------- */
+.lib-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-2);
+}
+
+.lib-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  min-height: 36px;
+  padding-inline: var(--spacing-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-badge);
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  font-size: var(--text-label);
+  font-weight: 600;
+  line-height: var(--text-label--line-height);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color 0.15s var(--ease-out),
+    border-color 0.15s var(--ease-out),
+    color 0.15s var(--ease-out);
+}
+
+.lib-tab:hover {
+  border-color: var(--color-primary);
+  color: var(--color-text-primary);
+}
+
+/* The selected tab is filled rather than outlined. An outline would sit on the
+   same `--color-border` as the three unselected tabs and be distinguished only
+   by the absence of a line, which is not a state a reader can see. */
+.lib-tab[aria-pressed='true'] {
+  background: var(--color-selected);
+  border-color: var(--color-selected-border);
+  color: var(--color-text-brand);
+}
+
+.lib-tab-count {
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-muted);
+}
+
+.lib-tab[aria-pressed='true'] .lib-tab-count {
+  color: var(--color-text-brand);
+}
+
+/* --------------------------------------------------------------------------
+   Book rows
+
+   The row's *grid* is inline Tailwind on the `<li>`, not here, and that is
+   deliberate: `tests/responsive.test.ts` asserts the row is a grid by reading
+   the markup, and a layout whose guarantee lives in a stylesheet that test
+   cannot see is a guarantee it cannot protect. This file holds the parts of a
+   row that are appearance rather than structure.
+   -------------------------------------------------------------------------- */
+.lib-cover {
+  grid-area: cover;
+  display: grid;
+  place-items: center;
+  /* The tile is a fixed 48x64 box no matter what sits beside it. Without
+     `flex: none` it is a flex item with the default `flex-shrink: 1`, so a
+     long unbroken title -- and these titles are raw filenames -- squeezes the
+     cover narrower on every row. The cover's size must never depend on the
+     text next to it. */
+  flex: none;
+  width: 3rem;
+  height: 4rem;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  background: var(--color-primary-subtle);
+  color: var(--color-text-brand);
+  font-size: var(--text-caption);
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.lib-cover-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+}
+
+.lib-title {
+  display: block;
+  font-size: var(--text-body);
+  font-weight: 700;
+  line-height: var(--text-body--line-height);
+  color: var(--color-text-primary);
+  /* Titles are raw filenames and can be one long dash-joined token. Break
+     them anywhere rather than letting the unbreakable word widen the cell and
+     push the cover, badges and progress column around. */
+  overflow-wrap: anywhere;
+}
+
+.lib-meta {
+  display: block;
+  margin-top: var(--spacing-1);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption--line-height);
+  color: var(--color-text-muted);
+}
+
+.lib-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-2);
+  margin-top: var(--spacing-2);
+}
+
+.lib-progress-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--spacing-2);
+  margin-top: var(--spacing-1);
+}
+
+.lib-progress-figure {
+  font-size: var(--text-caption);
+  line-height: var(--text-caption--line-height);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-muted);
+}
+
+/* The row menu. `<details>` rather than a popover component: it opens on click
+   with no state to keep, closes on Escape with no handler to write, and keeps
+   working if the script that would close it on an outside click is not running --
+   which is the whole of the interaction. The one thing it gives up is closing on
+   an outside click, and a menu whose items are page navigations does not need
+   one.
+
+   It is positioned absolutely out of the flow, so the `<summary>` needs no
+   wrapper of its own for the popover to sit beside -- hence `position: relative`
+   here rather than on a slot in the row's grid. */
+.lib-menu {
+  position: relative;
+  justify-self: end;
+}
+.lib-menu > summary {
+  list-style: none;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  font-weight: 800;
+  line-height: 1;
+}
+
+.lib-menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.lib-menu > summary:hover {
+  border-color: var(--color-primary);
+  color: var(--color-text-primary);
+}
+
+.lib-menu[open] > summary {
+  border-color: var(--color-primary);
+  color: var(--color-text-brand);
+}
+
+.lib-menu-list {
+  position: absolute;
+  z-index: 20;
+  margin-top: var(--spacing-1);
+  min-width: 11rem;
+  padding: var(--spacing-1);
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border-strong-elevated);
+  border-radius: var(--radius-control);
+  box-shadow: var(--shadow-raised);
+}
+
+.lib-menu-list a,
+.lib-menu-list button {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  width: 100%;
+  padding: var(--spacing-2) var(--spacing-3);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-primary);
+  font-size: var(--text-label);
+  font-weight: 600;
+  line-height: var(--text-label--line-height);
+  text-align: start;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.lib-menu-list a:hover,
+.lib-menu-list button:hover {
+  background: var(--color-surface-sunken);
+}
+
+/* Deleting a book deletes its files off the disk and there is no undo, so it is
+   the one item in the menu that is not the same colour as the rest. */
+.lib-menu-danger {
+  color: var(--color-error);
+}
+
+.lib-menu-danger:hover {
+  background: var(--color-error-subtle);
+}
+
+.lib-menu-sep {
+  height: 1px;
+  margin: var(--spacing-1) var(--spacing-2);
+  background: var(--color-border);
+}
+
+/* --------------------------------------------------------------------------
+   The foot
+
+   "Showing 1 to 12 of 31", so the reader knows the list is a page of something
+   larger rather than the whole library.
+   -------------------------------------------------------------------------- */
+.lib-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-3);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption--line-height);
+  color: var(--color-text-muted);
+}

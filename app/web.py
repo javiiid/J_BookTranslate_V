@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from email import policy
 from email.parser import BytesParser
 from http import HTTPStatus
+from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
@@ -46,7 +47,7 @@ from app.pipeline.pipeline import translate
 from app.output.convert import convert_file, normalize_convert_formats
 from app.translation.prompts import get_default_prompt, with_author_voice
 from app.storage.database import db
-from app.reader.service import chapter_blocks as reader_chapter_blocks, chapters as reader_chapters, chapter as reader_chapter, read_asset as reader_read_asset
+from app.reader.service import chapter_blocks as reader_chapter_blocks, chapters as reader_chapters, chapter as reader_chapter, read_asset as reader_read_asset, clean_bookmarks as reader_clean_bookmarks, job_glossary_terms as reader_glossary_terms
 from app.reader.page import reader_page
 from app.welcome.page import welcome_page
 from app.account.page import account_page
@@ -67,6 +68,15 @@ from app.account.service import (
     update_account,
 )
 from app.library.view import library_page
+from app.library import covers as book_covers
+from app.auth.service import (
+    SESSION_COOKIE,
+    SESSION_DAYS,
+    login as auth_login,
+    logout as auth_logout,
+    signup as auth_signup,
+    user_from_token,
+)
 from app.glossary.proposal import (
     _key as _glossary_key,
     merge_approved,
@@ -95,6 +105,7 @@ UTC = timezone.utc
 UPLOAD_DIR = ensure_dir("data") / "uploads"
 WEB_OUTPUT_DIR = ensure_dir("output") / "web"
 JOB_META_DIR = ensure_dir("data") / "jobs"
+COVERS_DIR = ensure_dir("data") / "covers"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 WEB_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 JOB_META_DIR.mkdir(parents=True, exist_ok=True)
@@ -244,7 +255,24 @@ def _ensure_library_source(job: Job) -> int:
     title = Path(job.filename).stem.replace("_", " ").strip() or job.filename
     book_id = db.execute("INSERT INTO library_books(title, created_at, updated_at) VALUES (?, ?, ?)", (title, timestamp, timestamp))
     db.execute("INSERT INTO files(job_id, book_id, path, kind, display_name, extension, mime_type, language, size_bytes, is_readable, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (job.id, book_id, str(job.input_path), "original", job.filename, job.filetype, mimetypes.guess_type(job.filename)[0] or "application/octet-stream", job.source_language, job.file_size, int(job.filetype == "epub"), timestamp))
+    _store_book_cover(int(book_id), job.input_path)
     return int(book_id)
+
+
+def _store_book_cover(book_id: int, source: Path) -> str | None:
+    """Extract a cover for a book and record its URL. Best-effort by design."""
+    try:
+        cover_file = book_covers.extract_cover(Path(source), COVERS_DIR / str(int(book_id)))
+    except Exception:
+        return None
+    if cover_file is None:
+        return None
+    url = book_covers.cover_url(book_id, cover_file.suffix)
+    try:
+        db.execute("UPDATE library_books SET cover_path=?, updated_at=? WHERE id=?", (url, now(), int(book_id)))
+    except Exception:
+        return None
+    return url
 
 
 def _register_library_output(job: Job) -> None:
@@ -408,8 +436,7 @@ def _run_job(job: Job, *, resume: bool = False) -> None:
             else:
                 manifest = translate(client=client, input_path=job.input_path, output_path=job.output_path,
                     from_lang=job.options["from_lang"], to_lang=job.options["to_lang"], mode=mode,
-                    model=job.options["model"], fast=mode not in {"batch", "batchcheck", "resumebatch"},
-                    resume_job_id=job.pipeline_job_id if resume else None, debug=True, filetype=job.filetype,
+                    model=job.options["model"], resume_job_id=job.pipeline_job_id if resume else None, debug=True, filetype=job.filetype,
                     output_formats=job.options.get("outputs"), translation_prompt=prompt, stop_event=job.stop_event,
                     style_preset=job.style,
                     on_job_started=lambda pipeline_id, paths: _on_pipeline_started(job, pipeline_id, paths))
@@ -627,7 +654,7 @@ def _job_payload(job: Job) -> dict:
         "progress": {"completed": completed, "total": total, "percent": round(completed * 100 / total) if total else 0},
         "health": health, "eta_seconds": eta_seconds, "chunks_per_minute": round(rate * 60, 2),
         "log": job.log.getvalue(), "error": job.error,
-        "can_stop": job.status == "running" and job.mode != "batch",
+        "can_stop": job.status == "running",
         "can_cancel": job.status in {"queued", "running", "paused"},
         "can_resume": job.status in {"paused", "failed"} and bool(job.pipeline_job_id) and job.filetype == "epub"}
     result["rescue"] = f"/downloads/rescue/{job.id}"
@@ -676,6 +703,8 @@ READING_DEFAULTS = {
     "reading_width": 760,
     "reading_direction": "auto",
     "reading_last_location": None,
+    "reading_bookmarks": [],
+    "reading_glossary": True,
 }
 
 
@@ -726,7 +755,14 @@ def library_summary(query: str = "") -> dict:
         overall = "archived" if archived_mode else ("completed" if any(s == "completed" for s in statuses) else ("running" if any(s in {"queued", "running"} for s in statuses) else ("failed" if any(s == "failed" for s in statuses) else "available")))
         if status_filter and status_filter not in statuses and status_filter != overall:
             continue
-        items.append({"id": book["id"], "title": book["title"], "author": book.get("author", ""), "cover_path": book.get("cover_path"), "created_at": book["created_at"], "updated_at": book["updated_at"], "status": overall, "variants": variants, "size_bytes": sum(int(item.get("size_bytes", 0)) for item in variants), "translated": any(item["kind"] == "translated" for item in variants), "readable": any(item.get("reader") for item in variants)})
+        cover_path = book.get("cover_path")
+        if not cover_path:
+            # Backfill for books shelved before covers existed. One attempt
+            # per listing at most; a miss simply keeps the initials tile.
+            original = next((v for v in variants if v.get("kind") == "original" and Path(str(v.get("path", ""))).is_file()), None)
+            if original is not None:
+                cover_path = _store_book_cover(int(book["id"]), Path(str(original["path"])))
+        items.append({"id": book["id"], "title": book["title"], "author": book.get("author", ""), "cover_path": cover_path, "created_at": book["created_at"], "updated_at": book["updated_at"], "status": overall, "variants": variants, "size_bytes": sum(int(item.get("size_bytes", 0)) for item in variants), "translated": any(item["kind"] == "translated" for item in variants), "readable": any(item.get("reader") for item in variants)})
     total = len(items)
     try: page, limit = max(1, int(params.get("page", [1])[0])), max(1, min(100, int(params.get("limit", [24])[0])))
     except ValueError: page, limit = 1, 24
@@ -736,7 +772,7 @@ def library_summary(query: str = "") -> dict:
 
 PAGE = r'''<!doctype html><html lang="fa" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>KALIMA</title><style>
 @import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;600;700;800&display=swap');:root{--bg:#f4f7fb;--surface:#fff;--ink:#142033;--muted:#6d7a90;--line:#e3e9f2;--blue:#356df6;--purple:#7257e8;--cyan:#0ca6a6;--green:#08966c;--red:#e24a4a;--shadow:0 18px 55px rgba(38,57,93,.08)}*{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(circle at 8% 0,#e6efff 0,transparent 32%),radial-gradient(circle at 96% 11%,#eee9ff 0,transparent 27%),var(--bg);font:15px Vazirmatn,Segoe UI,Tahoma,sans-serif;color:var(--ink)}.shell{max-width:1180px;margin:auto;padding:34px 22px 62px}.top{display:flex;align-items:center;justify-content:space-between;gap:18px;margin-bottom:26px}.brand{display:flex;align-items:center;gap:14px}.logo{width:49px;height:49px;border-radius:15px;display:grid;place-items:center;background:linear-gradient(140deg,var(--blue),var(--purple));color:#fff;font-size:25px;box-shadow:0 9px 24px #506ff466}.brand h1{font-size:22px;margin:0;font-weight:800}.brand p{margin:3px 0 0;color:var(--muted);font-size:13px}.api-pill{display:flex;align-items:center;gap:8px;background:#fff;border:1px solid var(--line);border-radius:999px;padding:8px 12px;color:var(--muted);font-size:12px;box-shadow:0 4px 16px #26395a0a}.dot{width:8px;height:8px;border-radius:50%;background:#aeb8c7}.dot.ready{background:var(--green);box-shadow:0 0 0 4px #12b9811b}.dot.error{background:var(--red)}.dashboard{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:20px}.card{background:rgba(255,255,255,.92);border:1px solid rgba(224,230,240,.9);border-radius:20px;box-shadow:var(--shadow)}.form-card{padding:27px}.side{display:grid;gap:20px;align-content:start}.side .card{padding:21px}.section-title{display:flex;justify-content:space-between;align-items:center;margin-bottom:23px}.section-title h2{font-size:18px;margin:0}.step{font-size:12px;color:var(--blue);background:#edf3ff;padding:5px 10px;border-radius:999px}.drop{position:relative;border:1.5px dashed #9ab4eb;background:linear-gradient(135deg,#f8faff,#f0f5ff);border-radius:15px;min-height:136px;display:grid;place-items:center;text-align:center;padding:18px;transition:.2s}.drop.drag{border-color:var(--blue);background:#eaf1ff}.drop input{position:absolute;inset:0;width:100%;opacity:0;cursor:pointer}.upload-icon{font-size:28px;color:var(--blue)}.drop strong{display:block;margin:5px 0 3px}.drop small{color:var(--muted)}.file-info{display:none;margin-top:12px;padding:10px 12px;background:#eff8f5;border-radius:9px;color:#166b55;font-size:13px}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:13px}label{display:block;font-size:13px;font-weight:700;margin:18px 0 7px}input,select,textarea{width:100%;font:inherit;border:1px solid #d9e1ed;border-radius:10px;padding:10px 12px;background:#fff;color:var(--ink)}input:focus,select:focus,textarea:focus{outline:0;border-color:var(--blue);box-shadow:0 0 0 3px #356df61a}textarea{resize:vertical;min-height:100px}.optional{font-weight:400;color:var(--muted)}.advanced{margin-top:17px}.advanced summary{cursor:pointer;color:var(--blue);font-weight:700;font-size:13px}.check{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:13px;margin-top:14px}.check input{width:auto;accent-color:var(--blue)}button{border:0;font:700 14px Vazirmatn,Segoe UI,sans-serif;cursor:pointer;border-radius:10px;padding:12px 15px;transition:.15s}button:hover:not(:disabled){filter:brightness(.97);transform:translateY(-1px)}button:disabled{cursor:not-allowed;opacity:.55}.primary{width:100%;margin-top:21px;color:#fff;background:linear-gradient(135deg,var(--blue),#5a62e8);box-shadow:0 10px 20px #4268d338}.secondary{background:#eef3ff;color:#2d5ed4}.danger{background:#fff0f0;color:#ca3636}.intro{display:flex;gap:11px;line-height:1.8;color:#506078;font-size:13px}.intro i{font-style:normal;display:grid;place-items:center;min-width:34px;height:34px;border-radius:10px;background:#eaf1ff;color:var(--blue)}.fact{display:flex;justify-content:space-between;padding:12px 0;border-bottom:1px solid var(--line);font-size:13px}.fact span{color:var(--muted)}.job{display:none;margin-top:20px;padding:23px}.job-head{display:flex;justify-content:space-between;align-items:flex-start;gap:15px}.job-name{font-weight:800;font-size:16px;word-break:break-word}.job-meta{margin-top:4px;color:var(--muted);font-size:12px}.chip{white-space:nowrap;font-size:12px;font-weight:700;border-radius:999px;padding:6px 10px;background:#f0f3f7;color:#687587}.chip.running{background:#eaf1ff;color:#2b62df}.chip.completed{background:#e6f8f1;color:#087d5c}.chip.stopped,.chip.finished{background:#fff5df;color:#a96b00}.chip.failed{background:#fff0f0;color:#c03636}.progress-row{display:flex;justify-content:space-between;margin:21px 0 8px;font-size:13px;font-weight:700}.progress-track{height:10px;background:#e9eef7;border-radius:99px;overflow:hidden}.progress-value{height:100%;width:0;border-radius:inherit;background:linear-gradient(90deg,var(--blue),var(--cyan));transition:width .45s}.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin-top:16px}.stat{background:#f8faff;border:1px solid #edf1f7;border-radius:11px;padding:10px}.stat span{display:block;color:var(--muted);font-size:11px;margin-bottom:3px}.stat strong{font-size:13px}.job-actions{display:flex;flex-wrap:wrap;gap:9px;margin-top:18px}.job-actions button,.download{padding:9px 12px;text-decoration:none;display:inline-block}.download{border-radius:10px;background:var(--green);color:#fff;font-size:13px;font-weight:700}.error{display:none;margin-top:14px;background:#fff2f2;color:#a93434;border:1px solid #ffd9d9;border-radius:10px;padding:11px;font-size:13px}.logs{margin-top:19px}.logs summary{cursor:pointer;color:var(--muted);font-weight:700;font-size:13px}.logs pre{direction:ltr;text-align:left;white-space:pre-wrap;max-height:280px;overflow:auto;background:#101827;color:#c9f8df;border-radius:11px;padding:13px;font:12px ui-monospace,Consolas,monospace}.small{font-size:12px;color:var(--muted)}@media(max-width:850px){.dashboard{grid-template-columns:1fr}.side{grid-template-columns:1fr 1fr}.top{align-items:flex-start}}@media(max-width:570px){.shell{padding:22px 13px}.top{display:block}.api-pill{display:inline-flex;margin-top:14px}.form-card{padding:19px}.grid2,.side,.stats{grid-template-columns:1fr}.job-head{display:block}.chip{display:inline-block;margin-top:10px}}
-</style></head><body><main class="shell"><header class="top"><div class="brand"><div class="logo">__KALIMA_LOGO__</div><div><h1>KALIMA</h1><p>داشبورد ترجمهٔ امن EPUB و PDF</p></div></div><div class="api-pill"><i class="dot" id="api-dot"></i><span id="api-status">در حال بررسی تنظیمات API…</span><button class="secondary" id="verify-api" aria-label="بررسی اتصال provider" style="padding:5px 9px;font-size:11px">بررسی اتصال</button></div></header><div class="dashboard"><section><div class="card form-card"><div class="section-title"><h2>ترجمهٔ جدید</h2><span class="step">گام ۱ از ۱</span></div><form id="translate-form"><div class="drop" id="drop"><input required type="file" id="book" name="book" accept=".epub,.pdf"><div><div class="upload-icon">⇧</div><strong>کتاب را اینجا رها کنید یا انتخاب کنید</strong><small>فرمت‌های EPUB و PDF تا حداکثر ۱ گیگابایت</small></div></div><div class="file-info" id="file-info"></div><div class="grid2"><div><label>زبان مبدأ</label><select name="from_lang"><option value="EN" selected>انگلیسی</option><option value="FA">فارسی</option><option value="AR">عربی</option><option value="FR">فرانسوی</option><option value="DE">آلمانی</option><option value="ES">اسپانیایی</option><option value="IT">ایتالیایی</option><option value="RU">روسی</option><option value="TR">ترکی</option><option value="ZH">چینی</option><option value="JA">ژاپنی</option><option value="KO">کره‌ای</option></select></div><div><label>زبان مقصد</label><select name="to_lang"><option value="EN">انگلیسی</option><option value="FA" selected>فارسی</option><option value="AR">عربی</option><option value="FR">فرانسوی</option><option value="DE">آلمانی</option><option value="ES">اسپانیایی</option><option value="IT">ایتالیایی</option><option value="RU">روسی</option><option value="TR">ترکی</option><option value="ZH">چینی</option><option value="JA">ژاپنی</option><option value="KO">کره‌ای</option></select></div></div><div class="grid2"><div><label>مدل ترجمه</label><select name="model" aria-label="مدل ترجمه"><option value="gpt-5.6-terra">gpt-5.6-terra — High-quality translation model</option><option value="gpt-5.6-luna">gpt-5.6-luna — Primary translation model</option><option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite — Fast, lower-cost translation model</option></select></div><div><label>حالت اجرا</label><select name="mode"><option value="">سریع (پیشنهادی)</option><option value="batch">Batch</option><option value="pdfbilingual">PDF دوزبانه</option></select></div></div><details class="advanced"><summary>تنظیمات پیشرفته و دستور ترجمه</summary><label>دستور ترجمه <span class="optional">(اختیاری)</span></label><textarea name="prompt" placeholder="خالی بگذارید تا دستور استاندارد برنامه استفاده شود."></textarea><label class="check"><input type="checkbox" name="debug" value="true" checked>نگهداری فایل‌های موقت برای ادامهٔ امن کار</label></details><button class="primary" id="submit" type="submit">شروع ترجمه</button></form></div><section class="card job" id="job"><div class="job-head"><div><div class="job-name" id="job-name"></div><div class="job-meta" id="job-meta"></div></div><span class="chip" id="chip">در انتظار</span></div><div class="progress-row"><span id="progress-label">در حال آماده‌سازی…</span><span id="percent">۰٪</span></div><div class="progress-track"><div class="progress-value" id="progress"></div></div><div class="stats"><div class="stat"><span>Chunk تکمیل‌شده</span><strong id="completed">۰</strong></div><div class="stat"><span>زمان شروع</span><strong id="started">—</strong></div><div class="stat"><span>آخرین فعالیت</span><strong id="activity">—</strong></div></div><div class="error" id="error"></div><div id="quality-box" style="display:none;margin-top:12px;padding:14px;background:#f0f7ff;border:1px solid #356df633;border-radius:12px"><div class="section-title"><h2>گزارش کیفیت</h2></div><div id="quality-content"></div></div><div class="job-actions"><button class="danger" hidden id="stop">توقف امن</button><button class="secondary" hidden id="resume">ادامهٔ ترجمه</button><a class="download" hidden id="download">دریافت خروجی</a></div><details class="logs"><summary>نمایش لاگ فنی</summary><pre id="log"></pre></details></section></section><aside class="side"><div class="card"><div class="section-title"><h2>پیش از شروع</h2></div><div class="intro"><i>✓</i><div>کلید API هرگز به مرورگر ارسال یا در صفحه نمایش داده نمی‌شود. فایل‌ها فقط روی همین دستگاه پردازش می‌شوند.</div></div></div><div class="card"><div class="section-title"><h2>تنظیمات فعال</h2></div><div class="fact"><span>محدودهٔ اجرا</span><strong>فقط محلی</strong></div><div class="fact"><span>ذخیرهٔ پیشرفت</span><strong>بعد از هر chunk</strong></div><div class="fact"><span>ادامهٔ کار</span><strong>برای EPUB</strong></div><p class="small">برای توقف امن، درخواست در حال اجرا تمام و ذخیره می‌شود؛ سپس ترجمه پیش از chunk بعدی متوقف خواهد شد.</p></div></aside></div></main><script>
+</style></head><body><main class="shell"><header class="top"><div class="brand"><div class="logo">__KALIMA_LOGO__</div><div><h1>KALIMA</h1><p>داشبورد ترجمهٔ امن EPUB و PDF</p></div></div><div class="api-pill"><i class="dot" id="api-dot"></i><span id="api-status">در حال بررسی تنظیمات API…</span><button class="secondary" id="verify-api" aria-label="بررسی اتصال provider" style="padding:5px 9px;font-size:11px">بررسی اتصال</button></div></header><div class="dashboard"><section><div class="card form-card"><div class="section-title"><h2>ترجمهٔ جدید</h2><span class="step">گام ۱ از ۱</span></div><form id="translate-form"><div class="drop" id="drop"><input required type="file" id="book" name="book" accept=".epub,.pdf"><div><div class="upload-icon">⇧</div><strong>کتاب را اینجا رها کنید یا انتخاب کنید</strong><small>فرمت‌های EPUB و PDF تا حداکثر ۱ گیگابایت</small></div></div><div class="file-info" id="file-info"></div><div class="grid2"><div><label>زبان مبدأ</label><select name="from_lang"><option value="EN" selected>انگلیسی</option><option value="FA">فارسی</option><option value="AR">عربی</option><option value="FR">فرانسوی</option><option value="DE">آلمانی</option><option value="ES">اسپانیایی</option><option value="IT">ایتالیایی</option><option value="RU">روسی</option><option value="TR">ترکی</option><option value="ZH">چینی</option><option value="JA">ژاپنی</option><option value="KO">کره‌ای</option></select></div><div><label>زبان مقصد</label><select name="to_lang"><option value="EN">انگلیسی</option><option value="FA" selected>فارسی</option><option value="AR">عربی</option><option value="FR">فرانسوی</option><option value="DE">آلمانی</option><option value="ES">اسپانیایی</option><option value="IT">ایتالیایی</option><option value="RU">روسی</option><option value="TR">ترکی</option><option value="ZH">چینی</option><option value="JA">ژاپنی</option><option value="KO">کره‌ای</option></select></div></div><div class="grid2"><div><label>مدل ترجمه</label><select name="model" aria-label="مدل ترجمه"><option value="gpt-5.6-terra">gpt-5.6-terra — High-quality translation model</option><option value="gpt-5.6-luna">gpt-5.6-luna — Primary translation model</option><option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite — Fast, lower-cost translation model</option></select></div><div><label>حالت اجرا</label><select name="mode"><option value="">سریع (پیشنهادی)</option><option value="pdfbilingual">PDF دوزبانه</option></select></div></div><details class="advanced"><summary>تنظیمات پیشرفته و دستور ترجمه</summary><label>دستور ترجمه <span class="optional">(اختیاری)</span></label><textarea name="prompt" placeholder="خالی بگذارید تا دستور استاندارد برنامه استفاده شود."></textarea><label class="check"><input type="checkbox" name="debug" value="true" checked>نگهداری فایل‌های موقت برای ادامهٔ امن کار</label></details><button class="primary" id="submit" type="submit">شروع ترجمه</button></form></div><section class="card job" id="job"><div class="job-head"><div><div class="job-name" id="job-name"></div><div class="job-meta" id="job-meta"></div></div><span class="chip" id="chip">در انتظار</span></div><div class="progress-row"><span id="progress-label">در حال آماده‌سازی…</span><span id="percent">۰٪</span></div><div class="progress-track"><div class="progress-value" id="progress"></div></div><div class="stats"><div class="stat"><span>Chunk تکمیل‌شده</span><strong id="completed">۰</strong></div><div class="stat"><span>زمان شروع</span><strong id="started">—</strong></div><div class="stat"><span>آخرین فعالیت</span><strong id="activity">—</strong></div></div><div class="error" id="error"></div><div id="quality-box" style="display:none;margin-top:12px;padding:14px;background:#f0f7ff;border:1px solid #356df633;border-radius:12px"><div class="section-title"><h2>گزارش کیفیت</h2></div><div id="quality-content"></div></div><div class="job-actions"><button class="danger" hidden id="stop">توقف امن</button><button class="secondary" hidden id="resume">ادامهٔ ترجمه</button><a class="download" hidden id="download">دریافت خروجی</a></div><details class="logs"><summary>نمایش لاگ فنی</summary><pre id="log"></pre></details></section></section><aside class="side"><div class="card"><div class="section-title"><h2>پیش از شروع</h2></div><div class="intro"><i>✓</i><div>کلید API هرگز به مرورگر ارسال یا در صفحه نمایش داده نمی‌شود. فایل‌ها فقط روی همین دستگاه پردازش می‌شوند.</div></div></div><div class="card"><div class="section-title"><h2>تنظیمات فعال</h2></div><div class="fact"><span>محدودهٔ اجرا</span><strong>فقط محلی</strong></div><div class="fact"><span>ذخیرهٔ پیشرفت</span><strong>بعد از هر chunk</strong></div><div class="fact"><span>ادامهٔ کار</span><strong>برای EPUB</strong></div><p class="small">برای توقف امن، درخواست در حال اجرا تمام و ذخیره می‌شود؛ سپس ترجمه پیش از chunk بعدی متوقف خواهد شد.</p></div></aside></div></main><script>
 const $=s=>document.querySelector(s),form=$('#translate-form'),submit=$('#submit'),jobBox=$('#job'),drop=$('#drop'),book=$('#book'),fileInfo=$('#file-info'),apiDot=$('#api-dot'),apiStatus=$('#api-status');let jobId,timer;const fa=n=>new Intl.NumberFormat('fa-IR').format(n||0),date=v=>v?new Intl.DateTimeFormat('fa-IR',{hour:'2-digit',minute:'2-digit',year:'numeric',month:'short',day:'numeric'}).format(new Date(v)):'—',size=n=>n<1024*1024?(n/1024).toFixed(0)+' KB':(n/1024/1024).toFixed(1)+' MB';function fileChanged(){const f=book.files[0];if(!f){fileInfo.style.display='none';return}fileInfo.textContent=`${f.name} · ${f.name.split('.').pop().toUpperCase()} · ${size(f.size)}`;fileInfo.style.display='block'}book.addEventListener('change',fileChanged);['dragenter','dragover'].forEach(e=>drop.addEventListener(e,x=>{x.preventDefault();drop.classList.add('drag')}));['dragleave','drop'].forEach(e=>drop.addEventListener(e,x=>{x.preventDefault();drop.classList.remove('drag')}));drop.addEventListener('drop',e=>{e.preventDefault();if(e.dataTransfer&&e.dataTransfer.files[0]){book.files=e.dataTransfer.files;fileChanged()}});async function health(verify=false){try{const r=await fetch('/api/health'+(verify?'?verify=1':'')),d=await r.json();apiStatus.textContent=d.message;apiDot.className='dot '+(d.status==='ready'?'ready':'error')}catch{apiStatus.textContent='وضعیت API نامشخص است';apiDot.className='dot error'}}$('#verify-api').onclick=()=>health(true);health();form.addEventListener('submit',async e=>{e.preventDefault();if(!book.files[0])return;submit.disabled=true;submit.textContent='در حال ایجاد کار…';try{const r=await fetch('/api/jobs',{method:'POST',body:new FormData(form)}),d=await r.json();if(!r.ok)throw Error(d.error||'ایجاد job ناموفق بود');jobId=d.id;if(window.jbtGlossary&&d.book_id)window.jbtGlossary.setBook(d.book_id,d.from_lang,d.to_lang);jobBox.style.display='block';$('#error').style.display='none';watch()}catch(err){alert(err.message);submit.disabled=false;submit.textContent='شروع ترجمه'}});async function action(name){if(!jobId)return;const r=await fetch(`/api/jobs/${jobId}/${name}`,{method:'POST'}),d=await r.json();if(!r.ok)alert(d.error||'عملیات انجام نشد');watch()}$('#stop').onclick=()=>action('stop');$('#resume').onclick=()=>action('resume');function render(d){const p=d.progress;$('#job-name').textContent=d.filename;$('#job-meta').textContent=`${d.filetype} · ${size(d.file_size)} · ${d.id}`;$('#chip').textContent={queued:'در صف',running:'در حال ترجمه',stopping:'در حال توقف',stopped:'متوقف شده',completed:'تکمیل شد',finished:'پایان یافت',failed:'خطا'}[d.status]||d.status;$('#chip').className='chip '+d.status;$('#progress').style.width=p.percent+'%';$('#percent').textContent=fa(p.percent)+'٪';$('#progress-label').textContent=p.total?`${fa(p.completed)} از ${fa(p.total)} chunk`:'در حال آماده‌سازی chunkها…';$('#completed').textContent=p.total?`${fa(p.completed)} / ${fa(p.total)}`:fa(p.completed);$('#started').textContent=date(d.started_at);$('#activity').textContent=date(d.last_activity);$('#log').textContent=d.log||'در انتظار شروع…';const error=$('#error');error.textContent=d.error||'';error.style.display=d.error?'block':'none';const ql=document.getElementById('quality-box');if(ql){ql.style.display=d.quality?'block':'none';if(d.quality){document.getElementById('quality-content').innerHTML='<div style="padding:8px 0"><strong>Quality Report</strong><br>Total chunks: '+d.quality.total_chunks+' · Flagged: '+d.quality.flagged_count+' · Average: '+d.quality.average_composite+'</div>'}}$('#stop').hidden=!d.can_stop;$('#resume').hidden=!d.can_resume;const dl=$('#download');dl.hidden=!d.download;if(d.download)dl.href=d.download;const active=['queued','running','stopping'].includes(d.status);if(!active){clearInterval(timer);submit.disabled=false;submit.textContent='شروع ترجمه'}}function watch(){clearInterval(timer);const tick=async()=>{try{const r=await fetch('/api/jobs/'+jobId),d=await r.json();if(!r.ok)throw Error();render(d)}catch{clearInterval(timer)}};tick();timer=setInterval(tick,1000)}
 </script></body></html>'''.replace("__DEFAULT_MODEL__", DEFAULT_MODEL)
 
@@ -799,7 +835,6 @@ PAGE = PAGE.replace('</textarea><label class="check"><input type="checkbox" name
 <option value="conversational">💬 محاوره‌ای</option>
 <option value="formal">🏛️ رسمی</option>
 </select></label><label class="check"><input type="checkbox" name="debug"''', 1)
-PAGE = PAGE.replace('</body>', '''<script>(()=>{const mode=document.querySelector('[name="mode"]'),auto=document.querySelector('[name="auto_glossary"]');function sync(){auto.disabled=mode.value==='batch'}mode.addEventListener('change',sync);sync()})();</script></body>''', 1)
 
 
 CONVERT_CARD_HTML = r'''<div class="card form-card" id="convert-card" style="margin-top:18px"><div class="section-title"><h2>تبدیل سریع فایل</h2><span class="step">بدون ترجمه</span></div><p class="small" style="color:var(--muted);margin:-8px 0 14px;line-height:1.7">فایل EPUB / PDF / SRT / TXT را انتخاب کنید و فرمت‌های خروجی را تیک بزنید — فایل شما بدون استفاده از هوش مصنوعی، مستقیم به فرمت‌های دیگر تبدیل می‌شود.</p><form id="convert-form"><div class="drop" id="convert-drop"><input type="file" id="convert-book" name="convert_book" accept=".epub,.pdf,.srt,.txt,.md"><div><div class="upload-icon">⇄</div><strong>فایل را اینجا رها کنید یا انتخاب کنید</strong><small>EPUB · PDF · SRT · TXT تا ۱ گیگابایت</small></div></div><div class="file-info" id="convert-file-info" style="display:none"></div><div class="grid2"><div style="grid-column:1/-1"><label>فرمت‌های خروجی</label><div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px"><label class="check"><input type="checkbox" name="convert_outputs" value="txt_bilingual">TXT</label><label class="check"><input type="checkbox" name="convert_outputs" value="markdown">Markdown</label><label class="check"><input type="checkbox" name="convert_outputs" value="docx">DOCX</label><label class="check"><input type="checkbox" name="convert_outputs" value="translated_pdf">PDF</label><label class="check"><input type="checkbox" name="convert_outputs" value="json_segments">JSON</label></div><small style="display:block;color:#8892a0;margin-top:6px">حداقل یک فرمت را انتخاب کنید. خروجی‌ها از متن اصلی فایل ساخته می‌شوند.</small></div></div><button class="primary" id="convert-submit" type="submit" aria-label="تبدیل فایل به فرمت انتخاب شده">تبدیل فایل</button></form><div id="convert-result" style="display:none;margin-top:16px;padding:14px;background:#f4f7ff;border:1px solid #e3e9f2;border-radius:12px"></div></div>'''
@@ -1113,9 +1148,22 @@ class Handler(BaseHTTPRequestHandler):
         self._reject("این درخواست از مبدأ مجاز ارسال نشده است.")
         return False
 
-    def _json(self, payload: dict, status: int = 200) -> None:
+    def _json(self, payload: dict, status: int = 200, headers: dict[str, str] | None = None) -> None:
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        self.send_response(status); self.send_header("Content-Type", "application/json; charset=utf-8"); self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data)
+        self.send_response(status); self.send_header("Content-Type", "application/json; charset=utf-8"); self.send_header("Content-Length", str(len(data)))
+        for name, value in (headers or {}).items(): self.send_header(name, value)
+        self.end_headers(); self.wfile.write(data)
+    def _session_token(self) -> str:
+        """Read the session cookie. A missing or unparsable cookie is no session."""
+        try:
+            morsel = SimpleCookie(self.headers.get("Cookie") or "").get(SESSION_COOKIE)
+        except Exception:
+            return ""
+        return morsel.value if morsel else ""
+    def _set_session_cookie(self, token: str) -> dict[str, str]:
+        return {"Set-Cookie": f"{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={SESSION_DAYS * 86400}"}
+    def _clear_session_cookie(self) -> dict[str, str]:
+        return {"Set-Cookie": f"{SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"}
     def _job(self, job_id: str) -> Job | None:
         with JOBS_LOCK: return JOBS.get(job_id)
     def _request_json(self) -> dict:
@@ -1155,6 +1203,11 @@ class Handler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/reader/settings":
             self._json({"value": reading_settings()}); return
+        if parsed.path.startswith("/api/reader/") and parsed.path.endswith("/glossary"):
+            job = self._job(parsed.path.split("/")[3])
+            if not job or job.filetype != "epub":
+                self._json({"error": "Translated EPUB is not available yet."}, 404); return
+            self._json({"items": reader_glossary_terms(job.paths if isinstance(job.paths, dict) else None)}); return
         if parsed.path.startswith("/api/reader/") and parsed.path.endswith("/chapters"):
             job = self._job(parsed.path.split("/")[3])
             if not job or job.filetype != "epub" or not job.output_path or not job.output_path.is_file():
@@ -1209,6 +1262,10 @@ class Handler(BaseHTTPRequestHandler):
             data = reader_page(job.id).encode("utf-8"); self.send_response(HTTPStatus.OK); self.send_header("Content-Type", "text/html; charset=utf-8"); self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data); return
         if parsed.path == "/api/dashboard/summary":
             self._json(dashboard_summary()); return
+        if parsed.path == "/api/auth/me":
+            user = user_from_token(db, self._session_token())
+            if user is None: self._json({"error": "وارد نشده‌اید."}, 401); return
+            self._json({"user": user}); return
         if parsed.path == "/api/account/portal":
             self._json({"overview": account_overview(), "plans": plans_catalog(), "packages": credit_packages(), "api_keys": account_api_keys(), "marketplace": account_marketplace(), "orders": account_orders(), "publisher": publisher_overview()}); return
         if parsed.path == "/api/account/marketplace":
@@ -1287,6 +1344,18 @@ class Handler(BaseHTTPRequestHandler):
             job=self._job(parsed.path.rsplit("/",1)[-1])
             if not job: self._json({"error":"کار موردنظر پیدا نشد."},404); return
             self._json(_job_payload(job)); return
+        if parsed.path.startswith("/covers/"):
+            name = parsed.path[len("/covers/"):]
+            if not re.fullmatch(r"[0-9]+\.(jpg|jpeg|png|webp|gif)", name):
+                self.send_error(404); return
+            cover_file = COVERS_DIR / name
+            if not cover_file.is_file():
+                self.send_error(404); return
+            mime = mimetypes.guess_type(name)[0] or "application/octet-stream"
+            self.send_response(200); self.send_header("Content-Type", mime); self.send_header("Cache-Control", "public, max-age=86400"); self.send_header("Content-Length", str(cover_file.stat().st_size)); self.end_headers()
+            with cover_file.open("rb") as stream:
+                shutil.copyfileobj(stream, self.wfile)
+            return
         if parsed.path.startswith("/downloads/"):
             if parsed.path.startswith("/downloads/convert/"):
                 rest = parsed.path[len("/downloads/convert/"):]
@@ -1336,6 +1405,21 @@ class Handler(BaseHTTPRequestHandler):
         if not self._guarded(): return
         if calibration_route(self, "POST"): return
         path=urlparse(self.path).path
+        if path in {"/api/auth/signup", "/api/auth/login", "/api/auth/logout"}:
+            try: body = self._request_json()
+            except (ValueError, json.JSONDecodeError) as exc: self._json({"error": str(exc)}, 400); return
+            if path == "/api/auth/logout":
+                auth_logout(db, self._session_token())
+                self._json({"ok": True}, headers=self._clear_session_cookie()); return
+            try:
+                if path == "/api/auth/signup":
+                    auth_signup(db, body.get("email"), body.get("password"), body.get("display_name", ""))
+                user, token = auth_login(db, body.get("email"), body.get("password"))
+            except LookupError as exc:
+                status = 409 if path == "/api/auth/signup" else 401
+                self._json({"error": str(exc)}, status); return
+            except (ValueError, TypeError) as exc: self._json({"error": str(exc)}, 400); return
+            self._json({"user": user}, 201 if path == "/api/auth/signup" else 200, headers=self._set_session_cookie(token)); return
         if path.startswith('/api/library/') and path.endswith('/translate'):
             try:
                 body = self._request_json()
@@ -1570,7 +1654,6 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/api/jobs/") and path.endswith("/stop"):
             job=self._job(path.split("/")[-2])
             if not job or job.status!="running": self._json({"error":"این کار قابل توقف نیست."},400); return
-            if job.options.get("mode")=="batch": self._json({"error":"Batch پس از ارسال به سرویس متوقف نمی‌شود."},400); return
             job.stop_event.set(); job.last_activity=job.updated_at=now(); _persist_job(job); _job_event(job, "stop_requested", "درخواست توقف امن ثبت شد."); self._json({"ok":True}); return
         if path.startswith("/api/jobs/") and path.endswith("/cancel"):
             job=self._job(path.split("/")[-2])
@@ -1664,6 +1747,10 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"error": "مدل «%s» پشتیبانی نمی‌شود." % options["model"]}, 400)
             return
         options["mode"] = options["mode"] or "fast"
+        # Batch modes were removed: a stale page or archive may still send one,
+        # and it must become the fast run it will actually be, not a failure.
+        if options["mode"] not in {"fast", "resume", "test", "pdfbilingual"}:
+            options["mode"] = "fast"
         options["outputs"] = fields.get("outputs", "")
         options["style_preset"] = fields.get("style_preset", "literary")
         job=Job(job_id,filename,input_path,suffix.lstrip("."),len(upload_data),options,options["from_lang"],options["to_lang"],options["model"],options["mode"],style=options.get("style_preset","literary"))
@@ -1676,7 +1763,7 @@ class Handler(BaseHTTPRequestHandler):
             snapshot = get_glossary(db, book_id, options['from_lang'], options['to_lang'])
             # glossary_mode is the explicit switch; the form field is only a
             # compatibility shim for clients that still send the old checkbox.
-            snapshot['auto_extract'] = fields.get('auto_glossary', 'false') == 'true' and options['mode'] not in {'batch', 'resumebatch', 'batchcheck', 'test'}
+            snapshot['auto_extract'] = fields.get('auto_glossary', 'false') == 'true' and options['mode'] != 'test'
             options['glossary_snapshot'] = json.dumps(snapshot, ensure_ascii=False)
             _persist_job(job)
         except Exception:
@@ -1747,7 +1834,9 @@ class Handler(BaseHTTPRequestHandler):
             if "reading_line_height" in clean: clean["reading_line_height"] = max(1.4, min(2.6, float(clean["reading_line_height"])))
             if "reading_width" in clean: clean["reading_width"] = max(560, min(1000, int(clean["reading_width"])))
             if "reading_direction" in clean and clean["reading_direction"] not in {"auto", "rtl", "ltr"}: clean["reading_direction"] = "auto"
-            if "reading_theme" in clean and clean["reading_theme"] not in {"light", "night", "sepia"}: clean["reading_theme"] = "light"
+            if "reading_theme" in clean and clean["reading_theme"] not in {"light", "night", "sepia", "contrast"}: clean["reading_theme"] = "light"
+            if "reading_glossary" in clean: clean["reading_glossary"] = bool(clean["reading_glossary"])
+            if "reading_bookmarks" in clean: clean["reading_bookmarks"] = reader_clean_bookmarks(clean["reading_bookmarks"])
             if "reading_mode" in clean and clean["reading_mode"] not in {"translation", "bilingual", "columns", "original"}: clean["reading_mode"] = "translation"
             for key, value in clean.items(): db.execute("INSERT INTO settings(key, value_json, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json, updated_at=excluded.updated_at", (key, json.dumps(value, ensure_ascii=False), now()))
             self._json({"ok": True, "value": reading_settings()}); return

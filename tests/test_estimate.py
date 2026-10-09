@@ -26,7 +26,6 @@ from app.jobs.estimate import (
     GLOSSARY_OUTPUT_CAP,
     GLOSSARY_OUTPUT_RATIO,
     GLOSSARY_SYSTEM_TOKENS,
-    LATENCY_BATCH_SECONDS,
     LATENCY_FAST_SECONDS,
     OUTPUT_RATIO,
     PRICING,
@@ -111,8 +110,8 @@ class TestSecondsFor:
         assert seconds_for(13, 12, "fast", False) == math.ceil(2 * LATENCY_FAST_SECONDS)
         assert seconds_for(12, 12, "fast", False) == math.ceil(LATENCY_FAST_SECONDS)
 
-    def test_batch_is_slower_than_fast(self):
-        assert seconds_for(50, 4, "batch", False) > seconds_for(50, 4, "fast", False)
+    def test_unknown_modes_fall_back_to_fast_latency(self):
+        assert seconds_for(50, 4, "batch", False) == seconds_for(50, 4, "fast", False)
 
     def test_concurrency_of_zero_or_less_does_not_divide_by_zero(self):
         assert seconds_for(10, 0, "fast", False) > 0
@@ -527,8 +526,11 @@ class TestEstimate:
 
     def test_mode_is_carried_through(self, tmp_path):
         book = make_epub(tmp_path / "book.epub", paragraphs=6)
-        for mode in ("fast", "batch"):
-            assert estimate(str(book), "gpt-5.6-luna", 4, mode=mode).mode == mode
+        assert estimate(str(book), "gpt-5.6-luna", 4, mode="fast").mode == "fast"
+
+    def test_removed_batch_modes_normalize_to_fast(self, tmp_path):
+        book = make_epub(tmp_path / "book.epub", paragraphs=6)
+        assert estimate(str(book), "gpt-5.6-luna", 4, mode="batch").mode == "fast"
 
     def test_an_unknown_model_does_not_raise(self, tmp_path):
         book = make_epub(tmp_path / "book.epub", paragraphs=4)

@@ -10,7 +10,6 @@ Responsibilities
 - Process PDF files
 - Create and resume translation jobs
 - Manage translation state
-- Handle batch status checks
 - Save translation progress
 - Reassemble translated EPUB files
 - Create translated PDF files
@@ -38,8 +37,6 @@ from app.translation.translator import (
     process_translations,
     load_test_translations,
 )
-
-from app.translation.batch import check_batch_status
 
 from app.pipeline.epub_handler import EPUBHandler
 from app.pipeline.epub_pipeline import reassemble_translation
@@ -110,7 +107,7 @@ def _cleanup_job(
     debug=False,
 ):
     """
-    Remove temporary files and remote batch files.
+    Remove temporary files.
 
     In debug mode nothing is deleted.
     """
@@ -201,7 +198,6 @@ def _translate_epub(
     to_lang,
     mode,
     model,
-    fast,
     resume_job_id,
     debug,
     translation_prompt,
@@ -252,7 +248,6 @@ def _translate_epub(
 
         if mode in (
             "resume",
-            "resumebatch",
         ) and resume_job_id is None:
 
             resume_job_id = select_resumable_job(
@@ -455,11 +450,7 @@ def _translate_epub(
 
         if not mode:
 
-            mode = (
-                "fast"
-                if fast
-                else "batch"
-            )
+            mode = "fast"
 
         print(
             f"Processing mode: "
@@ -539,50 +530,6 @@ def _translate_epub(
             paths,
             translations,
         )
-
-        # ====================================================
-        # BATCH MODE
-        # ====================================================
-
-        if mode in (
-            "batch",
-            "resumebatch",
-        ):
-
-            if status is not None:
-
-                current_status = getattr(
-                    status,
-                    "status",
-                    None,
-                )
-
-                print(
-                    f"Batch status: "
-                    f"{current_status} "
-                    f"[translate]"
-                )
-
-                # Batch is not finished yet.
-                if current_status in (
-                    "validating",
-                    "in_progress",
-                    "finalizing",
-                    "cancelling",
-                ):
-
-                    print(
-                        "Batch is still processing. "
-                        "[translate]"
-                    )
-
-                    print(
-                        "Run --mode batchcheck "
-                        "later to check the result. "
-                        "[translate]"
-                    )
-
-                    return
 
         # ====================================================
         # EMPTY TRANSLATION CHECK
@@ -783,340 +730,6 @@ def _translate_epub(
 
     return manifest_outputs
 # ============================================================
-# EPUB BATCH CHECK
-# ============================================================
-
-def _check_epub_batch(
-    client,
-    input_path,
-    output_path,
-    from_lang,
-    to_lang,
-    model,
-    debug,
-    output_formats=None,
-):
-    """
-    Check the status of an existing EPUB batch job.
-    """
-
-    print()
-    print(
-        "=" * 60
-    )
-    print(
-        "CHECKING BATCH STATUS"
-    )
-    print(
-        "=" * 60
-    )
-
-    state, state_file, status = (
-        check_batch_status(
-            client,
-            debug,
-        )
-    )
-
-    if not state:
-
-        print(
-            "No batch state found. "
-            "[translate]"
-        )
-
-        return
-
-    if status is None:
-
-        print(
-            "Batch status could not be retrieved. "
-            "[translate]"
-        )
-
-        return
-
-    current_status = getattr(
-        status,
-        "status",
-        None,
-    )
-
-    print(
-        f"Batch status: "
-        f"{current_status} [translate]"
-    )
-
-    # ========================================================
-    # STILL RUNNING
-    # ========================================================
-
-    if current_status not in (
-        "completed",
-        "failed",
-        "expired",
-        "cancelled",
-    ):
-
-        print(
-            "Batch is still running. "
-            "[translate]"
-        )
-
-        print(
-            "Run batchcheck again later. "
-            "[translate]"
-        )
-
-        return
-
-    # ========================================================
-    # FAILED
-    # ========================================================
-
-    if current_status != "completed":
-
-        print(
-            f"Batch finished with status: "
-            f"{current_status} [translate]"
-        )
-
-        print(
-            "Temporary files have been "
-            "preserved. [translate]"
-        )
-
-        return
-
-    # ========================================================
-    # COMPLETED
-    # ========================================================
-
-    timestamp = state.get(
-        "timestamp"
-    )
-
-    if not timestamp:
-
-        print(
-            "Batch state does not contain "
-            "a valid timestamp. [translate]"
-        )
-
-        return
-
-    job_id = create_job_id(
-        input_path,
-        from_lang,
-        to_lang,
-        model,
-        timestamp,
-    )
-
-    paths = ensure_temp_structure(
-        job_id
-    )
-
-    chapter_map_data = state.get(
-        "job_metadata",
-        {},
-    ).get(
-        "chapter_map",
-        {},
-    )
-
-    chapter_map = {
-        chunk_id: (
-            data["item"],
-            data["pos"],
-        )
-        for chunk_id, data
-        in chapter_map_data.items()
-    }
-
-    translations, input_file_id, final_status = (
-        process_translations(
-            client,
-            [],
-            {},
-            "batchcheck",
-            from_lang,
-            to_lang,
-            {
-                key: Path(value)
-                for key, value
-                in state["paths"].items()
-            },
-            model=model,
-            debug=debug,
-            chapter_map=chapter_map_data,
-            filetype="epub",
-        )
-    )
-
-    if not translations:
-
-        print(
-            "No translations were returned "
-            "from the completed batch. "
-            "[translate]"
-        )
-
-        return
-
-    # ========================================================
-    # SAVE
-    # ========================================================
-
-    save_translations(
-        paths,
-        translations,
-    )
-
-        # ============================================================
-        # EXTRA OUTPUT FORMATS
-        # ============================================================
-
-    if output_formats:
-
-        print()
-        print(
-            "Generating additional output "
-            "formats... [translate]"
-        )
-
-        state_loaded = load_job_state(paths) or {}
-
-        output_result = generate_outputs(
-            build_segments(
-                state_loaded.get("chunks", []),
-                translations,
-                chapter_map,
-                filetype="epub",
-            ),
-            requested=output_formats,
-            output_dir=output_path.parent,
-            base_name=output_path.stem,
-            filetype="epub",
-            title=input_path.stem,
-            to_lang=to_lang,
-            scorer=make_scorer(
-                output_formats,
-                client=client,
-                model=model,
-                source_lang=from_lang,
-                target_lang=to_lang,
-                filetype="epub",
-                all_chunks=state_loaded.get("chunks", []),
-                translations=translations,
-                paths=paths,
-            ),
-        )
-
-        translations = {
-            chunk_id: strip_markers(value)
-            for chunk_id, value
-            in translations.items()
-        }
-
-        for name, item_path in sorted(
-            output_result["generated"].items()
-        ):
-
-            print(
-                f"  {name:<18}: {item_path} "
-                f"[translate]"
-            )
-
-        if output_result["flagged"]:
-
-            print(
-                f"  QA: {output_result['flagged']} "
-                "flagged segment(s). [translate]"
-            )
-
-    # ========================================================
-    # REASSEMBLE
-    # ========================================================
-
-    reassemble_translation(
-        input_path,
-        output_path,
-        chapter_map,
-        translations,
-    )
-
-    print()
-    print(
-        f"Translated EPUB saved to: "
-        f"{output_path} [translate]"
-    )
-
-    # ========================================================
-    # CLEANUP
-    # ========================================================
-
-    if debug:
-
-        print(
-            "Debug mode: batch files preserved. "
-            "[translate]"
-        )
-
-        return
-
-    file_ids = []
-
-    if input_file_id:
-        file_ids.append(
-            input_file_id
-        )
-
-    if final_status is not None:
-
-        output_file_id = getattr(
-            final_status,
-            "output_file_id",
-            None,
-        )
-
-        if output_file_id:
-            file_ids.append(
-                output_file_id
-            )
-
-    job_dir = Path(
-        state["paths"]["job_dir"]
-    )
-
-    cleanup_files(
-        client,
-        file_ids,
-        temp_dir=job_dir,
-        keep_temp=False,
-    )
-
-    try:
-
-        if state_file.exists():
-
-            state_file.unlink()
-
-            print(
-                "Batch state file removed. "
-                "[translate]"
-            )
-
-    except Exception as exc:
-
-        print(
-            f"Warning: Could not remove "
-            f"batch state file: {exc} "
-            f"[translate]"
-        )
-
-
-# ============================================================
 # PDF PIPELINE
 # ============================================================
 
@@ -1177,19 +790,6 @@ def _translate_pdf(
 
         if on_job_started:
             on_job_started(job_id, paths)
-
-        # ====================================================
-        # BATCHCHECK
-        # ====================================================
-
-        if mode == "batchcheck":
-
-            print(
-                "PDF batchcheck is not implemented "
-                "in this pipeline. [translate]"
-            )
-
-            return
 
         # ====================================================
         # TRANSCRIBE PDF
@@ -1482,7 +1082,6 @@ def translate(
     to_lang="FA",
     mode=None,
     model=None,
-    fast=False,
     resume_job_id=None,
     debug=False,
     filetype="epub",
@@ -1517,9 +1116,6 @@ def translate(
 
     model:
         Model name.
-
-    fast:
-        Whether fast mode is preferred.
 
     resume_job_id:
         Existing job ID for resume.
@@ -1617,11 +1213,7 @@ def translate(
 
     if mode is None:
 
-        mode = (
-            "fast"
-            if fast
-            else "batch"
-        )
+        mode = "fast"
 
     # ========================================================
     # PRINT PIPELINE INFORMATION
@@ -1681,23 +1273,6 @@ def translate(
     if filetype == "epub":
 
         # ----------------------------------------------------
-        # BATCH CHECK
-        # ----------------------------------------------------
-
-        if mode == "batchcheck":
-
-            return _check_epub_batch(
-                client=client,
-                input_path=input_path,
-                output_path=output_path,
-                from_lang=from_lang,
-                to_lang=to_lang,
-                model=model,
-                debug=debug,
-                output_formats=output_formats,
-            )
-
-        # ----------------------------------------------------
         # NORMAL EPUB TRANSLATION
         # ----------------------------------------------------
 
@@ -1709,7 +1284,6 @@ def translate(
             to_lang=to_lang,
             mode=mode,
             model=model,
-            fast=fast,
             resume_job_id=resume_job_id,
             debug=debug,
             translation_prompt=translation_prompt,

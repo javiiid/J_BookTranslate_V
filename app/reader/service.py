@@ -249,3 +249,62 @@ def chapter_blocks(paths: dict, epub_path: str | Path, chapter_id: int, *, asset
         })
 
     return sorted(blocks, key=lambda item: item["position"])
+
+
+def job_glossary_terms(paths: dict | None, limit: int = 40) -> list[dict]:
+    """Approved glossary pairs for highlighting in the reader.
+
+    Reads the job's own snapshot (the same file translation uses), so the
+    reader shows exactly the terminology the book was translated with.
+    Only entries with both sides filled are returned, longest source
+    first, capped so a chapter never becomes a wall of marks.
+    """
+    if not paths:
+        return []
+    try:
+        from app.glossary.service import load_snapshot
+        snapshot = load_snapshot(paths)
+    except (OSError, ValueError, KeyError):
+        return []
+    terms = snapshot.get("terms", []) if isinstance(snapshot, dict) else []
+    pairs = []
+    for term in terms:
+        if not isinstance(term, dict):
+            continue
+        if term.get("approved") is False:
+            continue
+        source = str(term.get("source_term", "")).strip()
+        target = str(term.get("target_term", "")).strip()
+        if source and target:
+            pairs.append({"source_term": source, "target_term": target})
+    pairs.sort(key=lambda item: len(item["source_term"]), reverse=True)
+    return pairs[:max(0, limit)]
+
+
+def clean_bookmarks(value: object, limit: int = 50) -> list[dict]:
+    """Coerce untrusted bookmark input into a bounded, well-shaped list.
+
+    One bad entry must never discard the reader's other marks, and the
+    list can never grow without bound: the oldest entries beyond the cap
+    are dropped, never the request rejected.
+    """
+    if not isinstance(value, list):
+        return []
+    cleaned = []
+    for entry in value:
+        if not isinstance(entry, dict):
+            continue
+        try:
+            chapter = int(entry.get("chapter"))
+        except (TypeError, ValueError):
+            continue
+        if chapter < 0:
+            continue
+        try:
+            block = int(entry.get("block", 0))
+        except (TypeError, ValueError):
+            block = 0
+        note = str(entry.get("note", ""))[:500]
+        created = str(entry.get("created", ""))
+        cleaned.append({"chapter": chapter, "block": max(0, block), "note": note, "created": created})
+    return cleaned[-max(1, limit):]

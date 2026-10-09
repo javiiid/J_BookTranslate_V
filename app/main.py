@@ -119,7 +119,7 @@ def main():
 
         job_id = None
 
-        if args.mode in {"resume", "resumebatch"}:
+        if args.mode in {"resume"}:
 
             print()
             print(
@@ -251,15 +251,6 @@ def main():
 
                 print()
                 print("No resumable jobs found.")
-
-                if args.mode == "resumebatch":
-
-                    print(
-                        "Please run with "
-                        "--mode batch first."
-                    )
-
-                    sys.exit(1)
 
                 choice = input(
                     "Start a new translation job? "
@@ -540,17 +531,6 @@ def main():
             args.to_lang,
             mode=args.mode,
             model=args.model,
-
-            # Fast mode is enabled unless
-            # the user explicitly selected a batch mode.
-            fast=(
-                args.mode
-                not in {
-                    "batch",
-                    "batchcheck",
-                    "resumebatch",
-                }
-            ),
 
             resume_job_id=job_id,
 

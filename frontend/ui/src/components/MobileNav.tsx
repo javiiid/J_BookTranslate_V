@@ -1,7 +1,9 @@
 import { NavLink } from 'react-router-dom'
 import { MOBILE_NAV } from './nav'
+import type { StringKey } from '@/i18n/fa.ts'
+import { useLanguage } from '@/i18n/useLanguage.ts'
 import { NavIcon } from './NavIcon'
-import { ThemeToggle } from './AppShell'
+import { LanguageToggle, ThemeToggle } from './AppShell'
 
 /**
  * The bottom bar for narrow screens.
@@ -48,9 +50,10 @@ import { ThemeToggle } from './AppShell'
  * sits exactly where the labels are.
  */
 export function MobileNav() {
+  const { t } = useLanguage()
   return (
     <nav
-      aria-label="ناوبری اصلی"
+      aria-label={t('shell.mainNav')}
       /* `inset-x-0`, not `inset-inline-0`: the latter is not a utility, so it
          generated nothing and left a `fixed` bar with no width. */
       className="mobile-nav fixed inset-x-0 bottom-0 z-40 border-t lg:hidden"
@@ -64,7 +67,7 @@ export function MobileNav() {
     >
       <div className="flex w-full items-stretch">
         <ul className="flex flex-1 items-stretch" style={{ minHeight: 'var(--mobile-nav-height)' }}>
-          {MOBILE_NAV.map(({ to, short, icon, primary: isPrimary }) => (
+          {MOBILE_NAV.map(({ to, key, icon, primary: isPrimary }) => (
             <li key={to} className="flex min-w-0 flex-1">
               <NavLink
                 to={to}
@@ -119,7 +122,7 @@ export function MobileNav() {
                           color: strong ? 'var(--color-nav-indicator-ink)' : 'var(--color-nav-idle)',
                         }}
                       >
-                        {short}
+                        {t(`nav.${key}.short` as StringKey)}
                       </span>
                     </>
                   )
@@ -144,7 +147,10 @@ export function MobileNav() {
             labels, not under them. The hairline before it is drawn by
             `.mobile-nav > div > ul + div` in `tokens.css`. */}
         <div className="flex flex-none items-center ps-[var(--spacing-1)]">
-          <ThemeToggle />
+          <span className="flex items-center gap-[var(--spacing-1)]">
+            <ThemeToggle />
+            <LanguageToggle />
+          </span>
         </div>
       </div>
     </nav>

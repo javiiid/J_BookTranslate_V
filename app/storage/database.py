@@ -40,6 +40,7 @@ class Database:
             connection.executescript(schema); self._seed_defaults(connection)
             self._migrate_library(connection)
             self._migrate_account_portal(connection)
+            self._migrate_auth(connection)
             connection.execute("""CREATE TABLE IF NOT EXISTS book_glossaries (
                 book_id INTEGER NOT NULL REFERENCES library_books(id) ON DELETE CASCADE,
                 source_language TEXT NOT NULL, target_language TEXT NOT NULL,
@@ -116,6 +117,25 @@ class Database:
             ("technical-clear", "template", "سبک فنی روان", "Clear technical style", "ترجمه دقیق و خوانا برای کتاب‌های تخصصی", "Accurate readable style for technical books", "J Book", "EN→FA", 0, 4.6, 0),
         ]
         connection.executemany("INSERT OR IGNORE INTO marketplace_items(id,kind,title_fa,title_en,description_fa,description_en,owner_name,language_pair,price_usd,rating,featured) VALUES (?,?,?,?,?,?,?,?,?,?,?)", items)
+
+    @staticmethod
+    def _migrate_auth(connection):
+        """Create local password-auth tables without disturbing existing installs."""
+        connection.execute("""CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            email TEXT NOT NULL UNIQUE,
+            display_name TEXT NOT NULL DEFAULT '',
+            password_hash TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )""")
+        connection.execute("""CREATE TABLE IF NOT EXISTS auth_sessions (
+            token_hash TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            created_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL
+        )""")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_auth_sessions_user_id ON auth_sessions(user_id)")
 
     @staticmethod
     def _seed_defaults(connection):

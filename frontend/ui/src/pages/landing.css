@@ -1,0 +1,1056 @@
+/* --------------------------------------------------------------------------
+   The landing page.
+
+   Split out of `tokens.css` the way `library.css` and `conversion.css` are:
+   the file next to the page that owns it, imported by that page. These are
+   the only rules here that no other page uses.
+
+   Everything is a token or a spacing step. No hex, no Tailwind colour class --
+   `tokens.css` is the only colour source, and the contrast audit reads tokens
+   rather than reading this file, so a literal here would be a colour nothing
+   checks.
+   -------------------------------------------------------------------------- */
+
+.landing-shell {
+  width: min(72rem, 100%);
+  margin-inline: auto;
+  min-width: 0;
+}
+
+/* The sticky header reserves 80px of scroll padding in tokens.css; anchored
+   sections carry their own margin as well so a focused heading never sits
+   under the floating bar. */
+.landing-section[id] {
+  scroll-margin-top: 96px;
+}
+
+/* --------------------------------------------------------------------------
+   Floating navigation
+
+   The one controlled use of glass on the page: a floating bar, blurred over
+   the content it passes. `color-mix` keeps it a tint of the theme surface
+   rather than a second surface.
+   -------------------------------------------------------------------------- */
+.landing-nav {
+  position: sticky;
+  top: var(--spacing-3);
+  z-index: 30;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-panel);
+  background: color-mix(in srgb, var(--color-surface) 88%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: var(--shadow-raised);
+}
+
+.landing-nav-inner {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-3);
+  padding: var(--spacing-2) var(--spacing-3);
+}
+
+.landing-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  min-width: 0;
+  margin-inline-end: auto;
+  color: inherit;
+  text-decoration: none;
+}
+
+.landing-links {
+  display: none;
+  align-items: center;
+  gap: var(--spacing-1);
+}
+
+.landing-links a {
+  padding: var(--spacing-2) var(--spacing-3);
+  border-radius: var(--radius-control);
+  color: var(--color-text-secondary);
+  font-size: var(--text-label);
+  font-weight: 600;
+  line-height: var(--text-label--line-height);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.landing-links a:hover {
+  background: var(--color-surface-elevated);
+  color: var(--color-text-primary);
+}
+
+.landing-nav-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  min-width: 0;
+}
+
+/* The bar at 375px holds the brand, one toggle, the CTA and the hamburger.
+   A second toggle plus the login link do not fit next to them (measured:
+   ~370px of chrome in a 351px gutter), so below `lg` the language switch
+   lives one tap away in the hamburger panel instead of in the bar. */
+.landing-lang-narrow {
+  display: none;
+}
+
+.landing-login {
+  display: none;
+}
+
+.landing-menu-btn {
+  display: inline-grid;
+}
+
+@media (min-width: 64rem) {
+  .landing-links {
+    display: flex;
+  }
+  .landing-lang-narrow {
+    display: inline-flex;
+  }
+  .landing-login {
+    display: inline-flex;
+  }
+  .landing-menu-btn {
+    display: none;
+  }
+}
+
+/* The mobile panel: a vertical stack under the bar, thumb-sized rows. */
+.landing-menu {
+  display: grid;
+  gap: var(--spacing-1);
+  padding: var(--spacing-2) var(--spacing-3) var(--spacing-3);
+  border-top: 1px solid var(--color-border);
+}
+
+.landing-menu a {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  padding-inline: var(--spacing-3);
+  border-radius: var(--radius-control);
+  color: var(--color-text-primary);
+  font-size: var(--text-small);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.landing-menu a:hover {
+  background: var(--color-surface-elevated);
+}
+
+.landing-menu-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  min-height: 44px;
+  padding-inline: var(--spacing-3);
+  font-size: var(--text-small);
+  color: var(--color-text-secondary);
+}
+
+@media (min-width: 64rem) {
+  .landing-menu {
+    display: none;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Type helpers
+   -------------------------------------------------------------------------- */
+.landing-eyebrow {
+  font-size: var(--text-label);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--color-text-brand);
+}
+
+.landing-lead {
+  font-size: var(--text-small);
+  line-height: var(--text-small--line-height);
+  color: var(--color-text-secondary);
+}
+
+.landing-section-title {
+  font-size: var(--text-h1);
+  font-weight: 800;
+  line-height: var(--text-h1--line-height);
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+
+.landing-section-sub {
+  margin-top: var(--spacing-2);
+  max-width: 44rem;
+  font-size: var(--text-body);
+  line-height: var(--text-body--line-height);
+  color: var(--color-text-secondary);
+}
+
+/* --------------------------------------------------------------------------
+   Hero: text + product preview side by side on desktop, stacked on mobile.
+   -------------------------------------------------------------------------- */
+.landing-hero {
+  display: grid;
+  gap: var(--spacing-6);
+  align-items: center;
+}
+
+@media (min-width: 64rem) {
+  .landing-hero {
+    grid-template-columns: 1.05fr 0.95fr;
+  }
+}
+
+.landing-hero-title {
+  margin-top: var(--spacing-3);
+  font-size: var(--text-display);
+  font-weight: 800;
+  line-height: var(--text-display--line-height);
+  letter-spacing: -0.02em;
+  text-wrap: balance;
+}
+
+/* A 44px display heading is four dense lines on a 375px phone. Step it down
+   to H1 below `sm` so the hero stays scannable and the CTAs stay near. */
+@media (max-width: 42.99rem) {
+  .landing-hero-title {
+    font-size: var(--text-h1);
+    line-height: var(--text-h1--line-height);
+  }
+}
+
+/* The preview is a static mock of the real product surface, built from the
+   same tokens and components. `aria-hidden` in the markup: it illustrates,
+   it does not report data. */
+.landing-preview {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-panel);
+  background: linear-gradient(140deg, var(--color-hero-from), var(--color-hero-to));
+  padding: var(--spacing-4);
+  box-shadow: var(--shadow-raised);
+}
+
+.landing-preview-card {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+  background: var(--color-surface);
+  padding: var(--spacing-4);
+}
+
+.landing-preview-cap {
+  font-size: var(--text-caption);
+  font-weight: 600;
+  line-height: var(--text-caption--line-height);
+  color: var(--color-text-muted);
+}
+
+.landing-sample-src {
+  border-radius: var(--radius-control);
+  background: var(--color-surface-elevated);
+  color: var(--color-text-secondary);
+  padding: var(--spacing-3);
+  font-size: var(--text-small);
+  line-height: 1.8;
+}
+
+.landing-sample-dst {
+  border-radius: var(--radius-control);
+  background: var(--color-primary-subtle);
+  color: var(--color-text-primary);
+  padding: var(--spacing-3);
+  font-size: var(--text-small);
+  line-height: 1.9;
+}
+
+/* --------------------------------------------------------------------------
+   Proof strip: four capability figures, never testimonials.
+   -------------------------------------------------------------------------- */
+.landing-proof {
+  display: grid;
+  gap: var(--spacing-2);
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+.landing-proof-value {
+  display: block;
+  font-size: var(--text-h2);
+  font-weight: 800;
+  line-height: var(--text-h2--line-height);
+  font-variant-numeric: tabular-nums;
+}
+
+.landing-proof-label {
+  display: block;
+  margin-top: var(--spacing-1);
+  font-size: var(--text-small);
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.landing-proof-hint {
+  display: block;
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+}
+
+/* --------------------------------------------------------------------------
+   Problem -> solution: two panels with a reading-direction transition.
+   -------------------------------------------------------------------------- */
+.landing-split {
+  display: grid;
+  gap: var(--spacing-3);
+}
+
+@media (min-width: 64rem) {
+  .landing-split {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
+
+.landing-problem-list,
+.landing-solution-list {
+  margin: var(--spacing-3) 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: var(--spacing-2);
+}
+
+.landing-problem-list li,
+.landing-solution-list li {
+  display: flex;
+  gap: var(--spacing-2);
+  align-items: flex-start;
+  font-size: var(--text-small);
+  line-height: 1.8;
+}
+
+.landing-problem-list li {
+  color: var(--color-text-secondary);
+}
+
+.landing-solution-list li {
+  color: var(--color-text-primary);
+}
+
+.landing-marker-bad,
+.landing-marker-good {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  margin-top: 0.15rem;
+  border-radius: var(--radius-badge);
+  font-size: var(--text-caption);
+  font-weight: 800;
+}
+
+.landing-marker-bad {
+  background: var(--color-error-subtle);
+  color: var(--color-error);
+}
+
+.landing-marker-good {
+  background: var(--color-success-subtle);
+  color: var(--color-success);
+}
+
+/* --------------------------------------------------------------------------
+   Features: one column on a phone, two on a tablet, three on a desktop.
+   -------------------------------------------------------------------------- */
+.landing-features {
+  display: grid;
+  gap: var(--spacing-3);
+}
+
+@media (min-width: 43rem) {
+  .landing-features {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 64rem) {
+  .landing-features {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.landing-feature-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: var(--radius-control);
+  background: var(--color-primary-subtle);
+  color: var(--color-text-brand);
+}
+
+.landing-feature-what {
+  margin-top: var(--spacing-3);
+  font-size: var(--text-small);
+  line-height: 1.8;
+  color: var(--color-text-secondary);
+}
+
+.landing-feature-why {
+  margin-top: var(--spacing-2);
+  font-size: var(--text-small);
+  line-height: 1.8;
+  color: var(--color-text-primary);
+}
+
+.landing-feature-why strong {
+  color: var(--color-text-brand);
+}
+
+/* The schematic under each feature: decoration, hidden from assistive tech
+   in the markup, so it may be simple shapes. */
+.landing-mini {
+  margin-top: var(--spacing-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  background: var(--color-surface-elevated);
+  padding: var(--spacing-3);
+}
+
+.landing-mini-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-2);
+  font-size: var(--text-caption);
+  color: var(--color-text-secondary);
+}
+
+.landing-mini-row + .landing-mini-row {
+  margin-top: var(--spacing-2);
+}
+
+/* --------------------------------------------------------------------------
+   Showcase: explanation beside a large annotated mock.
+   -------------------------------------------------------------------------- */
+.landing-showcase {
+  display: grid;
+  gap: var(--spacing-4);
+}
+
+@media (min-width: 64rem) {
+  .landing-showcase {
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+    align-items: start;
+  }
+}
+
+.landing-annot-list {
+  margin: var(--spacing-4) 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: var(--spacing-3);
+}
+
+.landing-annot-list li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--spacing-3);
+  align-items: start;
+}
+
+.landing-annot-key {
+  flex: none;
+  font-size: var(--text-caption);
+  font-weight: 800;
+  color: var(--color-text-brand);
+  background: var(--color-primary-subtle);
+  border-radius: var(--radius-sm);
+  padding: var(--spacing-1) var(--spacing-2);
+  white-space: nowrap;
+}
+
+.landing-monitor {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-panel);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-raised);
+}
+
+.landing-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-2);
+  padding: var(--spacing-3) var(--spacing-4);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface-elevated);
+}
+
+.landing-chunk {
+  display: grid;
+  gap: var(--spacing-2);
+  padding: var(--spacing-3) var(--spacing-4);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+@media (min-width: 43rem) {
+  .landing-chunk {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: var(--spacing-3);
+  }
+}
+
+.landing-chunk-id {
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+}
+
+/* --------------------------------------------------------------------------
+   Steps: vertical on mobile, four across on desktop.
+   -------------------------------------------------------------------------- */
+.landing-steps {
+  display: grid;
+  gap: var(--spacing-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+@media (min-width: 64rem) {
+  .landing-steps {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.landing-step-index {
+  display: block;
+  font-size: var(--text-h2);
+  font-weight: 800;
+  line-height: 1;
+  color: var(--color-text-brand);
+  font-variant-numeric: tabular-nums;
+}
+
+/* --------------------------------------------------------------------------
+   Use cases and differentiation
+   -------------------------------------------------------------------------- */
+.landing-cases {
+  display: grid;
+  gap: var(--spacing-3);
+}
+
+@media (min-width: 43rem) {
+  .landing-cases {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.landing-compare {
+  margin: var(--spacing-4) 0 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+  overflow: hidden;
+  background: var(--color-surface);
+}
+
+.landing-compare-row {
+  display: grid;
+  gap: var(--spacing-1);
+  padding: var(--spacing-3) var(--spacing-4);
+}
+
+.landing-compare-row + .landing-compare-row {
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+@media (min-width: 43rem) {
+  .landing-compare-row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: var(--spacing-4);
+  }
+}
+
+.landing-compare-dim {
+  font-size: var(--text-label);
+  font-weight: 800;
+  color: var(--color-text-primary);
+}
+
+.landing-compare-generic {
+  font-size: var(--text-small);
+  color: var(--color-text-muted);
+}
+
+.landing-compare-kalima {
+  font-size: var(--text-small);
+  color: var(--color-text-primary);
+}
+
+/* --------------------------------------------------------------------------
+   Pricing: the four plans from the account portal, presented as-is.
+   -------------------------------------------------------------------------- */
+.landing-plans {
+  display: grid;
+  gap: var(--spacing-3);
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.landing-price {
+  display: flex;
+  align-items: baseline;
+  gap: var(--spacing-1);
+  margin-top: var(--spacing-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.landing-price-amount {
+  font-size: var(--text-h1);
+  font-weight: 800;
+  line-height: 1;
+}
+
+.landing-price-per {
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+}
+
+.landing-plan-list {
+  margin: var(--spacing-3) 0 var(--spacing-4);
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: var(--spacing-2);
+  font-size: var(--text-small);
+  color: var(--color-text-secondary);
+}
+
+.landing-plan-list li {
+  display: flex;
+  gap: var(--spacing-2);
+  align-items: flex-start;
+  line-height: 1.8;
+}
+
+/* --------------------------------------------------------------------------
+   FAQ: native details, so keyboard, Escape and reduced-motion come free.
+   -------------------------------------------------------------------------- */
+.landing-faq {
+  display: grid;
+  gap: var(--spacing-2);
+  max-width: 48rem;
+}
+
+/* Desktop: the Q&A spans the full page width instead of a narrow column. */
+@media (min-width: 64rem) {
+  .landing-faq {
+    max-width: none;
+  }
+}
+
+.landing-faq details {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+}
+
+.landing-faq summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-3);
+  min-height: 44px;
+  padding: var(--spacing-3) var(--spacing-4);
+  font-size: var(--text-small);
+  font-weight: 700;
+  color: var(--color-text-primary);
+  cursor: pointer;
+  list-style: none;
+}
+
+.landing-faq summary::-webkit-details-marker {
+  display: none;
+}
+
+.landing-faq summary::after {
+  content: '+';
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: var(--radius-badge);
+  background: var(--color-surface-elevated);
+  color: var(--color-text-brand);
+  font-size: var(--text-small);
+  font-weight: 800;
+}
+
+.landing-faq details[open] summary::after {
+  content: '−';
+}
+
+.landing-faq-body {
+  padding: 0 var(--spacing-4) var(--spacing-4);
+  font-size: var(--text-small);
+  line-height: 1.9;
+  color: var(--color-text-secondary);
+}
+
+/* --------------------------------------------------------------------------
+   Closing band and footer
+   -------------------------------------------------------------------------- */
+.landing-band {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-panel);
+  background: linear-gradient(140deg, var(--color-hero-from), var(--color-hero-to));
+  padding: var(--spacing-8) var(--spacing-4);
+  text-align: center;
+  box-shadow: var(--shadow-raised);
+}
+
+@media (min-width: 43rem) {
+  .landing-band {
+    padding: var(--spacing-8) var(--spacing-8);
+  }
+}
+
+.landing-band-title {
+  max-width: 32rem;
+  margin-inline: auto;
+  font-size: var(--text-h1);
+  font-weight: 800;
+  line-height: var(--text-h1--line-height);
+  color: var(--color-hero-ink);
+  text-wrap: balance;
+}
+
+.landing-band-sub {
+  max-width: 30rem;
+  margin: var(--spacing-3) auto 0;
+  font-size: var(--text-body);
+  line-height: var(--text-body--line-height);
+  color: var(--color-hero-ink-muted);
+}
+
+/* A button on the band cannot be `btn-primary`: that fill is tuned for the
+   page surface and fails contrast on the dark band in the day theme. The
+   outline version below is drawn in the band's own ink, the same answer the
+   library header band gives. */
+.landing-band .btn-secondary {
+  background: transparent;
+  border-color: var(--color-hero-ink);
+  color: var(--color-hero-ink);
+}
+
+.landing-band .btn-secondary:hover:not(:disabled) {
+  background: var(--color-hero-ink);
+  border-color: var(--color-hero-ink);
+  color: var(--color-hero-to);
+}
+
+.landing-foot {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--spacing-4);
+  padding-top: var(--spacing-6);
+  border-top: 1px solid var(--color-border);
+}
+
+/* Mobile: the links pair up in two columns instead of one long vertical
+   list. Headings stay on top, the brand row stays horizontal, and the
+   fineprint centers at the very bottom. */
+@media (max-width: 42.99rem) {
+  .landing-foot {
+    text-align: center;
+  }
+  .landing-foot > div > span {
+    justify-content: center;
+  }
+  .landing-foot > nav {
+    border-top: 1px solid var(--color-border-subtle);
+    padding-top: var(--spacing-3);
+  }
+  .landing-foot-group {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--spacing-1) var(--spacing-3);
+  }
+  .landing-foot-group a {
+    display: flex;
+    justify-content: center;
+    min-height: 44px;
+  }
+  .landing-fineprint {
+    text-align: center;
+  }
+}
+
+@media (min-width: 43rem) {
+  .landing-foot {
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
+
+.landing-foot-group {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: var(--spacing-1);
+  font-size: var(--text-small);
+}
+
+.landing-foot-group a {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  color: var(--color-text-secondary);
+  text-decoration: none;
+}
+
+.landing-foot-group a:hover {
+  color: var(--color-text-primary);
+}
+
+.landing-foot-head {
+  font-size: var(--text-caption);
+  font-weight: 800;
+  color: var(--color-text-muted);
+  margin-bottom: var(--spacing-1);
+}
+
+.landing-fineprint {
+  margin-top: var(--spacing-4);
+  padding-top: var(--spacing-4);
+  border-top: 1px solid var(--color-border-subtle);
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+}
+
+/* --------------------------------------------------------------------------
+   Entrance: one subtle rise, applied by an IntersectionObserver in the page.
+   No animation library, no JS-driven motion beyond adding a class.
+   -------------------------------------------------------------------------- */
+.landing-reveal {
+  opacity: 0;
+  transform: translateY(12px);
+  transition:
+    opacity 0.35s var(--ease-out),
+    transform 0.35s var(--ease-out);
+}
+
+.landing-reveal.is-visible {
+  opacity: 1;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing-reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Hero motion: hand-built, dependency-free.
+
+   No downloaded files, no CDN, no player library. The repo is local-first
+   and offline (fonts are served from this origin, not Google Fonts), and the
+   spec forbids introducing a library for a decorative effect -- so the
+   "translation flow" is pure CSS: dots stream from source to translation
+   and the two stat cards breathe gently. Everything below only runs under
+   `no-preference`; the global reduced-motion rule in tokens.css is the
+   backstop that freezes it otherwise.
+   -------------------------------------------------------------------------- */
+.landing-flow {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  margin-top: var(--spacing-3);
+}
+
+.landing-flow-label {
+  flex: none;
+  font-size: var(--text-caption);
+  line-height: var(--text-caption--line-height);
+  color: var(--color-text-muted);
+}
+
+.landing-flow-track {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  height: 8px;
+  border-radius: var(--radius-badge);
+  background: var(--color-progress-track);
+  overflow: hidden;
+}
+
+.landing-flow-dot {
+  position: absolute;
+  top: 1px;
+  inset-inline-start: 4px;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-badge);
+  background: var(--color-progress-fill);
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .landing-float {
+    animation: landing-float 7s ease-in-out infinite;
+  }
+  .landing-float-alt {
+    animation-delay: -3.5s;
+  }
+  .landing-flow-dot {
+    animation: landing-flow 2.4s linear infinite;
+  }
+  .landing-flow-dot:nth-child(2) {
+    animation-delay: 0.8s;
+  }
+  .landing-flow-dot:nth-child(3) {
+    animation-delay: 1.6s;
+  }
+}
+
+/* Right-to-left travel: inset-inline-start is the right edge here, so a
+   negative X drift reads as forward progress, source to translation. */
+@keyframes landing-flow {
+  0% {
+    transform: translateX(0);
+    opacity: 0;
+  }
+  15% {
+    opacity: 1;
+  }
+  85% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(-72px);
+    opacity: 0;
+  }
+}
+
+@keyframes landing-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Imagery: brand glow, benchmark chart, book illustration.
+
+   Still no downloaded assets: the glow is layered radial gradients mixed
+   from the theme tokens, the chart draws the verified readme benchmark
+   (12 chunks, request count fixed at 24), and the book is hand-drawn SVG
+   using token colours only. Nothing here introduces a hue or a hex.
+   -------------------------------------------------------------------------- */
+.landing-hero-glow {
+  border-radius: var(--radius-panel);
+  background:
+    radial-gradient(
+      circle at 85% 8%,
+      color-mix(in srgb, var(--color-primary) 12%, transparent),
+      transparent 60%
+    ),
+    radial-gradient(
+      circle at 8% 95%,
+      color-mix(in srgb, var(--color-accent) 16%, transparent),
+      transparent 55%
+    );
+  padding: var(--spacing-6) var(--spacing-4);
+}
+
+@media (min-width: 43rem) {
+  .landing-hero-glow {
+    padding: var(--spacing-8) var(--spacing-6);
+  }
+}
+
+.landing-bench {
+  margin-top: var(--spacing-4);
+  display: grid;
+  gap: var(--spacing-3);
+}
+
+.landing-bench-row {
+  display: grid;
+  grid-template-columns: 5.5rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--spacing-3);
+  min-width: 0;
+}
+
+.landing-bench-label {
+  font-size: var(--text-label);
+  font-weight: 700;
+  color: var(--color-text-secondary);
+}
+
+.landing-bench-track {
+  min-width: 0;
+  height: 12px;
+  border-radius: var(--radius-badge);
+  background: var(--color-progress-track);
+  overflow: hidden;
+}
+
+.landing-bench-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--color-primary), var(--color-text-brand));
+}
+
+.landing-bench-value {
+  font-size: var(--text-label);
+  font-weight: 700;
+  color: var(--color-text-primary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.landing-bench-note {
+  margin-top: var(--spacing-3);
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+}
+
+/* Hand-drawn book: strokes and washes come from the band ink on dark
+   surfaces. Opacity (not colour) separates the layers. */
+.landing-art-line {
+  fill: none;
+  stroke: var(--color-hero-ink);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.landing-art-faint {
+  stroke: var(--color-hero-ink-muted);
+  stroke-width: 1.5;
+}
+
+.landing-art-soft {
+  fill: var(--color-hero-ink);
+  opacity: 0.16;
+}
+
+.landing-art-mid {
+  fill: var(--color-hero-ink);
+  opacity: 0.35;
+}

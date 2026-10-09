@@ -58,12 +58,13 @@ describe('nothing but the API is proxied', () => {
   /**
    * The paths that may be proxied to the backend.
    *
-   * `/api` and `/downloads` are the API. `/reader` is the one deliberate
-   * exception and it is listed separately below, so that adding a second
-   * exception has to mean changing this list on purpose rather than by
-   * appending a line to the config.
+   * `/api` and `/downloads` are the API, and `/covers` is the backend's
+   * cover-image route (`GET /covers/<id>.<ext>` out of `data/covers`).
+   * `/reader` is the one deliberate exception and it is listed separately
+   * below, so that adding a second exception has to mean changing this list
+   * on purpose rather than by appending a line to the config.
    */
-  const API_PREFIXES = ['/api', '/downloads']
+  const API_PREFIXES = ['/api', '/downloads', '/covers']
   /** The one exception, and why it is temporary. */
   const EXCEPTIONS = ['/reader']
 

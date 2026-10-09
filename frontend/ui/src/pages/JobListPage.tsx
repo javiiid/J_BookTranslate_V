@@ -1,7 +1,8 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { api } from '@/lib/api'
-import { badgeClass, fa, faDate, faDuration, statusLabel } from '@/lib/format'
+import { badgeClass, fa, faDate, faDuration, serverError, statusLabel } from '@/lib/format'
+import { useLanguage } from '@/i18n/useLanguage.ts'
 
 /**
  * The job list.
@@ -11,6 +12,7 @@ import { badgeClass, fa, faDate, faDuration, statusLabel } from '@/lib/format'
  * job never changes, so there is nothing to poll for.
  */
 export function JobListPage() {
+  const { t, dir, lang } = useLanguage()
   const jobs = useQuery({
     queryKey: ['jobs'],
     queryFn: api.jobs,
@@ -26,29 +28,29 @@ export function JobListPage() {
   const running = items.filter((job) => job.status === 'running').length
 
   return (
-    <main className="page" dir="rtl">
+    <main className="page" dir={dir}>
       <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-[length:var(--text-h1)] font-extrabold tracking-tight">
-            پایش ترجمه
+            {t('monitor.title')}
           </h1>
           <p
             className="mt-1 text-[length:var(--text-small)]"
             style={{ color: 'var(--color-text-muted)' }}
           >
             {jobs.isPending
-              ? 'در حال دریافت…'
-              : `${fa(items.length)} کار${running ? ` · ${fa(running)} در حال ترجمه` : ''}`}
+              ? t('jobs.loading')
+              : `${t('jobs.count', { n: fa(items.length) })}${running ? ` · ${t('jobs.runningNow', { r: fa(running) })}` : ''}`}
           </p>
         </div>
         <Link to="/workspace" className="btn btn-primary">
-          افزودن کتاب
+          {t('dashboard.addBook')}
         </Link>
       </header>
 
       {jobs.isError ? (
         <p role="alert" className="alert alert-error">
-          دریافت کارها ممکن نشد. مطمئن شوید سرور پایتون روی ۸۷۶۵ اجرا است.
+          {t('dashboard.jobsError')}
         </p>
       ) : jobs.isPending ? (
         <ul className="grid gap-2">
@@ -59,7 +61,7 @@ export function JobListPage() {
           ))}
         </ul>
       ) : items.length === 0 ? (
-        <p className="empty">هنوز کاری ثبت نشده است.</p>
+        <p className="empty">{t('dashboard.noJobs')}</p>
       ) : (
         <ul className="grid gap-2">
           {items.map((job) => {
@@ -86,22 +88,26 @@ export function JobListPage() {
                       the same "too little here, too much there" the dashboard
                       had. A grid gives each its own row on a phone and puts
                       them back on one line on a desktop. */}
-                  <div className="grid gap-[var(--spacing-2)] lg:grid-cols-[minmax(0,1fr)_auto_auto] lg:items-center lg:gap-3">
+                  <div className="grid gap-[var(--spacing-2)] lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center lg:gap-3">
                     <div className="min-w-0">
-                      <strong className="block truncate text-[length:var(--text-body)]">
-                        {job.filename}
-                      </strong>
+                      <span className="flex min-w-0 items-center gap-[var(--spacing-2)]">
+                        <span className="badge flex-none">{job.filetype}</span>
+                        <strong className="block min-w-0 flex-1 truncate text-[length:var(--text-body)]">
+                          {job.filename}
+                        </strong>
+                      </span>
                       <span
-                        className="block text-[length:var(--text-caption)]"
+                        className="mt-[var(--spacing-1)] block break-words text-[length:var(--text-caption)]"
                         style={{ color: 'var(--color-text-muted)' }}
                       >
                         {job.source_language} → {job.target_language} · {job.model} ·{' '}
                         {faDate(job.created_at)}
                       </span>
                     </div>
-                    {/* The badge and the counter travel together, tight, on one
-                        line, rather than as two siblings of a wrapping row. */}
-                    <span className="flex items-center gap-[var(--spacing-2)]">
+                    {/* The badge sits above the counter, stacked, in one wrapper:
+                        badge first, count beneath it. They travel as one unit
+                        so they can never separate onto opposite ends of a row. */}
+                    <span className="flex flex-col items-center gap-[var(--spacing-1)]">
                       <span className={badgeClass(job.status)}>{statusLabel(job.status)}</span>
                       <span
                         className="text-[length:var(--text-label)] tabular-nums"
@@ -126,15 +132,15 @@ export function JobListPage() {
                         aria-valuemin={0}
                         aria-valuemax={100}
                         aria-valuenow={percent}
-                        aria-label={`پیشرفت ترجمهٔ ${job.filename}`}
+                        aria-label={t('jobs.progressAria', { name: job.filename })}
                       >
                         <div className="progress-fill" style={{ width: `${percent}%` }} />
                       </div>
                       <span
-                        className="text-[length:var(--text-caption)] tabular-nums"
+                        className="flex-none text-[length:var(--text-caption)] tabular-nums"
                         style={{ color: 'var(--color-text-muted)' }}
                       >
-                        {fa(percent)}٪
+                        {fa(percent)}{lang === 'en' ? '%' : '٪'}
                       </span>
                     </div>
                   ) : null}
@@ -144,7 +150,7 @@ export function JobListPage() {
                       className="mt-2 text-[length:var(--text-caption)]"
                       style={{ color: 'var(--color-error)' }}
                     >
-                      {job.error}
+                      {serverError(job.error)}
                     </p>
                   ) : null}
                 </Link>

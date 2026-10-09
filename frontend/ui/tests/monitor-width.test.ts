@@ -67,7 +67,7 @@ describe('the job list card', () => {
     // `flex-wrap` with a `flex-1` title puts the badge and the counter on
     // their own line at the far edge on a phone, and leaves a gap the width of
     // the title next to them.
-    const row = /<div className="grid gap-\[var\(--spacing-2\)\] lg:grid-cols-\[minmax\(0,1fr\)_auto_auto\]/.test(
+    const row = /<div className="grid gap-\[var\(--spacing-2\)\] lg:grid-cols-\[minmax\(0,1fr\)_auto\]/.test(
       jobList,
     )
     assert.ok(row, 'the job card is still a wrapping flex row')
@@ -78,10 +78,11 @@ describe('the job list card', () => {
   })
 
   it('the badge and the counter are wrapped together', () => {
+    // Stacked by design -- badge above, counter beneath -- in one wrapper.
     // Two free siblings in a wrapping row is what put one at each end of a
     // line. They have to travel as one unit or they can separate again.
     assert.ok(
-      /<span className="flex items-center gap-\[var\(--spacing-2\)\]">\s*<span className=\{badgeClass/.test(
+      /<span className="flex flex-col[^"]*">\s*<span className=\{badgeClass/.test(
         jobList,
       ),
       'the status badge and the counter are not in a single wrapper',

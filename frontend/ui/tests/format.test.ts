@@ -21,7 +21,8 @@ import { describe, it } from 'node:test'
 // `ERR_UNKNOWN_FILE_EXTENSION` before a single assertion ran, because
 // `node --test` strips types but does not transform JSX. `Ltr` is written with
 // `createElement` instead so this stays a plain module.
-import { Ltr, badgeClass, fa, faAgo, faDate, ltr, maskSecretLike, statusLabel, usd } from '../src/lib/format.ts'
+import { Ltr, badgeClass, fa, faAgo, faDate, ltr, maskSecretLike, serverError, statusLabel, usd } from '../src/lib/format.ts'
+import { setLocale } from '../src/lib/locale.ts'
 
 describe('ltr', () => {
   /* The isolate that keeps a Latin run from being reordered inside Persian text.
@@ -262,5 +263,40 @@ describe('status badges', () => {
   it('renders an unknown status as a neutral badge, not an undefined class', () => {
     assert.equal(badgeClass('migrating'), 'badge')
     assert.equal(badgeClass('failed'), 'badge badge-error')
+  })
+})
+
+describe('server errors', () => {
+  /* Failure reasons arrive in Persian from `_friendly_error` in app/web.py.
+     The English UI renders the known ones translated and passes everything
+     else through untouched -- a new backend message shows in Persian, never
+     blank, until its mirror is added. */
+  const FALLBACK = 'ترجمه متوقف شد. جزئیات فنی در لاگ در دسترس است.'
+
+  it('passes everything through in Persian', () => {
+    setLocale('fa')
+    assert.equal(serverError(FALLBACK), FALLBACK)
+    assert.equal(serverError('چیزی که سرور گفته'), 'چیزی که سرور گفته')
+  })
+
+  it('translates the known backend messages in English', () => {
+    setLocale('en')
+    try {
+      assert.equal(
+        serverError(FALLBACK),
+        'Translation stopped. Technical details are in the log.',
+      )
+    } finally {
+      setLocale('fa')
+    }
+  })
+
+  it('never blanks an unknown message', () => {
+    setLocale('en')
+    try {
+      assert.equal(serverError('چیزی که سرور گفته'), 'چیزی که سرور گفته')
+    } finally {
+      setLocale('fa')
+    }
   })
 })

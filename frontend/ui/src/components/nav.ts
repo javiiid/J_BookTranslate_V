@@ -39,9 +39,17 @@ export type NavIconName =
   | 'library'
   | 'reader'
   | 'account'
+  | 'help'
 
 export interface NavItem {
   to: string
+  /**
+   * The dictionary key for the label. Components render `t(key)` and fall
+   * back to `label`/`short` below, which stay Persian: they are the default
+   * language's own words, and `tests/mobile-nav.test.ts` reads them directly
+   * to assert the bar's shape without rendering anything.
+   */
+  key: 'dashboard' | 'workspace' | 'convert' | 'jobs' | 'library' | 'reader' | 'account' | 'help'
   /** The full label, for the rail, where there is room for it. */
   label: string
   /**
@@ -60,13 +68,17 @@ export interface NavItem {
 
 /** Every destination, in rail order. */
 export const NAV: readonly NavItem[] = [
-  { to: '/', label: 'داشبورد', short: 'داشبورد', icon: 'dashboard' },
-  { to: '/workspace', label: 'افزودن کتاب', short: 'افزودن', icon: 'add', primary: true },
-  { to: '/convert', label: 'تبدیل فایل', short: 'تبدیل', icon: 'convert' },
-  { to: '/jobs', label: 'پایش ترجمه', short: 'پایش', icon: 'monitor' },
-  { to: '/library', label: 'کتابخانه', short: 'کتابخانه', icon: 'library' },
-  { to: '/reader', label: 'مطالعه', short: 'مطالعه', icon: 'reader' },
-  { to: '/account', label: 'پنل کاربری', short: 'حساب', icon: 'account' },
+  { to: '/', key: 'dashboard', label: 'داشبورد', short: 'داشبورد', icon: 'dashboard' },
+  { to: '/workspace', key: 'workspace', label: 'افزودن کتاب', short: 'افزودن', icon: 'add', primary: true },
+  { to: '/convert', key: 'convert', label: 'تبدیل فایل', short: 'تبدیل', icon: 'convert' },
+  { to: '/jobs', key: 'jobs', label: 'پایش ترجمه', short: 'پایش', icon: 'monitor' },
+  { to: '/library', key: 'library', label: 'کتابخانه', short: 'کتابخانه', icon: 'library' },
+  { to: '/reader', key: 'reader', label: 'مطالعه', short: 'مطالعه', icon: 'reader' },
+  { to: '/account', key: 'account', label: 'پنل کاربری', short: 'حساب', icon: 'account' },
+  /* Help rides the rail only. The bottom bar stays five: a sixth label would
+     drop under the 12px floor at 393px (`tests/mobile-nav.test.ts` holds it).
+     On phones the center is one tap from the dashboard quick-access card. */
+  { to: '/help', key: 'help', label: 'مرکز راهنما', short: 'راهنما', icon: 'help' },
 ]
 
 /**

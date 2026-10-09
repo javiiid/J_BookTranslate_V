@@ -1,6 +1,8 @@
 import { NavLink } from 'react-router-dom'
 import type { ReactNode } from 'react'
 import { useTheme } from '@/hooks/useTheme'
+import { useLanguage } from '@/i18n/useLanguage.ts'
+import type { StringKey } from '@/i18n/fa.ts'
 import { NAV } from './nav'
 import { NavIcon } from './NavIcon'
 import { MobileNav } from './MobileNav'
@@ -43,6 +45,7 @@ export function KalimaMark({ size = 34 }: { size?: number }) {
  */
 export function ThemeToggle() {
   const { theme, toggle } = useTheme()
+  const { t } = useLanguage()
   const dark = theme === 'dark'
   return (
     <button
@@ -53,12 +56,66 @@ export function ThemeToggle() {
          The name used to flip with the theme as well, so a screen reader in
          dark mode heard "turn on light mode, pressed" -- a label and a state
          that contradict each other. The tooltip may still name the action. */
-      aria-label="حالت تاریک"
-      title={dark ? 'تغییر به حالت روشن' : 'تغییر به حالت تاریک'}
+      aria-label={t('shell.darkMode')}
+      title={dark ? t('shell.darkModeOn') : t('shell.darkModeOff')}
       className="btn-icon"
     >
-      <ThemeIcon dark={dark} />
+      <span key={dark ? 'dark' : 'light'} className="tool-swap">
+        <ThemeIcon dark={dark} />
+      </span>
     </button>
+  )
+}
+
+/**
+ * The language switch.
+ *
+ * Beside the theme switch in every chrome that carries one, for the same
+ * reason: a preference that is only reachable from one page is not
+ * reachable. The button names the *other* language in its own script --
+ * "EN" here, "فا" there -- so it is readable whichever side you are on.
+ */
+export function LanguageToggle() {
+  const { lang, setLang, t } = useLanguage()
+  const english = lang === 'en'
+  return (
+    <button
+      type="button"
+      onClick={() => setLang(english ? 'fa' : 'en')}
+      aria-pressed={english}
+      aria-label={t('shell.language')}
+      title={t(english ? 'shell.languageToFa' : 'shell.languageToEn')}
+      className="btn-icon btn-lang"
+    >
+      <GlobeIcon />
+      <span aria-hidden="true">{english ? 'فا' : 'EN'}</span>
+    </button>
+  )
+}
+
+/**
+ * A globe on the same 24px / 1.75 stroke as `NavIcon`, so the language pill
+ * reads as one of the set rather than as text in a box -- which is what the
+ * bare "EN"/"فا" square was.
+ */
+function GlobeIcon() {
+  return (
+    <svg
+      width={16}
+      height={16}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.75}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <circle cx="12" cy="12" r="10" />
+      <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+      <path d="M2 12h20" />
+    </svg>
   )
 }
 
@@ -128,11 +185,12 @@ export function ThemeToggleOnNarrow() {
  * `visibility`-hidden one is still focusable and announces itself.
  */
 export function Sidebar() {
+  const { t } = useLanguage()
   return (
     <aside
       className="fixed inset-y-0 end-0 z-40 hidden w-60 flex-col border-s bg-[var(--color-surface)] pe-4 ps-3 lg:flex"
       style={{ borderColor: 'var(--color-border)' }}
-      aria-label="ناوبری اصلی"
+      aria-label={t('shell.mainNav')}
     >
       <div
         className="flex items-center gap-[var(--spacing-3)] py-4 pe-1"
@@ -150,7 +208,7 @@ export function Sidebar() {
       </div>
 
       <nav className="grid gap-0.5 py-3">
-        {NAV.map(({ to, label, icon }) => (
+        {NAV.map(({ to, key, icon }) => (
           <NavLink
             key={to}
             to={to}
@@ -166,23 +224,26 @@ export function Sidebar() {
             <span className="flex flex-none items-center justify-center" aria-hidden="true">
               <NavIcon name={icon} size={18} />
             </span>
-            {label}
+            {t(`nav.${key}` as StringKey)}
           </NavLink>
         ))}
       </nav>
 
-      {/* This footer carried a migration note ("React front end on the same
-          Python API, backend untouched"). That is a message from the
-          developer to the developer; to everyone else it was noise on every
-          page, so the footer is the theme switch and nothing else. */}
-      <div className="mt-auto flex items-center pb-3">
-        <ThemeToggle />
+      {/* View preferences sit at the bottom of the rail, centered -- clear
+          of the navigation above and easy to find in one fixed spot. */}
+      <div className="mt-auto flex justify-center pb-3">
+        <span className="tool-cluster">
+          <ThemeToggle />
+          <span className="tool-divider" aria-hidden="true" />
+          <LanguageToggle />
+        </span>
       </div>
     </aside>
   )
 }
 
 export function AppShell({ children }: { children: ReactNode }) {
+  const { t } = useLanguage()
   return (
     /* No `min-h-dvh` on either div. `body` already owns the minimum height in
        tokens.css, and this stack had three of them: the body rule, this div and
@@ -205,7 +266,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           document.getElementById('content')?.focus()
         }}
       >
-        پرش به محتوا
+        {t('shell.skip')}
       </a>
       <Sidebar />
       <MobileNav />

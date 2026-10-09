@@ -8,7 +8,7 @@ import pytest
 from app.storage.database import Database
 
 
-@pytest.mark.parametrize(('mode', 'enabled', 'expected'), [('fast', True, True), ('fast', False, False), ('batch', True, False)])
+@pytest.mark.parametrize(('mode', 'enabled', 'expected'), [('fast', True, True), ('fast', False, False), ('test', True, False)])
 def test_upload_captures_automatic_glossary_choice(tmp_path, monkeypatch, mode, enabled, expected):
     from app import web
     monkeypatch.setattr(web, 'db', Database(tmp_path / 'library.db'))

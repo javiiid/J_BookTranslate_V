@@ -100,18 +100,13 @@ OUTPUT_RATIO = 1.1
 # price point cannot be exact.
 RANGE = 0.15
 
-# Seconds of latency per chunk, by mode.
+# Seconds of latency per chunk.
 #
 # 6.5 is measured, not guessed: this project benchmarked 12 chunks at 72 seconds
 # sequentially and 6.6 seconds at concurrency 12, so a wave of twelve costs about
 # 6.6 seconds. The specification this replaced proposed 4.5, which is 30% optimistic
 # against a measurement taken on this provider.
-#
-# The batch figure has not been measured here -- batch jobs go through a different
-# provider path with its own queueing -- so it is a guess and is marked as one. The
-# two are the only numbers in this module not grounded in a run of the product.
 LATENCY_FAST_SECONDS = 6.5
-LATENCY_BATCH_SECONDS = 8.0
 
 # One LLM call per chunk when the glossary learns inline or deferred.
 #
@@ -433,9 +428,7 @@ def seconds_for(
     if chunk_count <= 0:
         return 0
     workers = max(1, int(concurrency))
-    latency = (
-        LATENCY_BATCH_SECONDS if str(mode).lower() == "batch" else LATENCY_FAST_SECONDS
-    )
+    latency = LATENCY_FAST_SECONDS
     # Wavefronts: N chunks over W workers is ceil(N / W) rounds.
     rounds = math.ceil(chunk_count / workers)
     total = rounds * latency
@@ -547,6 +540,11 @@ def estimate(
     context_window: int = 2,
 ) -> Estimate:
     """Estimate a translation run. Never raises for a bad file; degrades instead."""
+    # Batch modes were removed: anything that is not a live mode is priced as
+    # the fast run it will actually become (e.g. a stale rescue archive that
+    # still carries mode="batch").
+    if str(mode).lower() not in {"fast", "resume", "test", "pdfbilingual"}:
+        mode = "fast"
     path = Path(file_path)
     if not path.is_absolute():
         # Relative paths are resolved against the working directory, which is

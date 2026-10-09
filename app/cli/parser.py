@@ -70,11 +70,8 @@ def parse_args():
     parser.add_argument(
         "--mode",
         choices=[
-            "batch",
             "resume",
             "test",
-            "batchcheck",
-            "resumebatch",
             "pdfbilingual"
         ],
         default=None,

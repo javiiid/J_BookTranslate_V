@@ -20,7 +20,7 @@ export default defineConfig({
   server: {
     host: '0.0.0.0',  // Listen on all interfaces (IPv4 + IPv6)
     port: 5173,
-    // Only /api and the file downloads go to the backend.
+    // Only /api, the file downloads and the cover images go to the backend.
     //
     // The six bare-path rules this replaces -- /reader, /library, /account,
     // /workspace, /landing, /welcome -- were all paths the React router also
@@ -51,6 +51,12 @@ export default defineConfig({
     proxy: {
       '/api': { target: BACKEND, changeOrigin: true },
       '/downloads': { target: BACKEND, changeOrigin: true },
+      // Library cover images. `GET /covers/<id>.<ext>` is served from
+      // `data/covers` by the backend (see `app/library/covers.py`); the React
+      // tiles reference it with the relative `cover_path` the API returns, so
+      // in dev the prefix has to reach the backend or Vite answers with the
+      // SPA's HTML and the image breaks.
+      '/covers': { target: BACKEND, changeOrigin: true },
       // TEMPORARY: the Python reader, until the React one is finished. See the
       // note above, and `src/pages/ReaderPage.tsx` for what is missing.
       '/reader': { target: BACKEND, changeOrigin: true },

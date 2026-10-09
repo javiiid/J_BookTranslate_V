@@ -1,5 +1,6 @@
 import type { JobEvent } from '@/lib/api'
 import { faDate } from '@/lib/format'
+import { useLanguage } from '@/i18n/useLanguage.ts'
 
 /** Levels the Python page treats as problems rather than progress. */
 const TONE: Record<string, string> = {
@@ -19,14 +20,15 @@ export function LogsTab({
   isError: boolean
   onRetry: () => void
 }) {
+  const { t } = useLanguage()
   if (isError) {
     return (
       <div className="surface-card p-[var(--spacing-5)]">
         <p role="alert" className="alert alert-error">
-          دریافت لاگ‌ها ممکن نشد.
+          {t('monitor.logs.loadError')}
         </p>
         <button type="button" className="btn btn-secondary" onClick={onRetry} style={{ marginTop: 12 }}>
-          تلاش دوباره
+          {t('monitor.retry')}
         </button>
       </div>
     )
@@ -42,7 +44,7 @@ export function LogsTab({
 
   const items = events ?? []
   if (items.length === 0) {
-    return <div className="surface-card empty">هنوز رویدادی ثبت نشده است.</div>
+    return <div className="surface-card empty">{t('monitor.logs.empty')}</div>
   }
 
   return (

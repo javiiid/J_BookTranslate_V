@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ChunkRow } from '@/lib/chunks'
 import { fa } from '@/lib/format'
+import { useLanguage } from '@/i18n/useLanguage.ts'
 import { FALLBACK_VIEWPORT, ROW_H, computeWindow } from '@/lib/virtual'
 import { CHUNK_COLUMNS } from '@/lib/chunks-columns'
 
@@ -41,6 +42,7 @@ export interface VirtualChunkTableProps {
 }
 
 function Row({ row }: { row: ChunkRow }) {
+  const { t } = useLanguage()
   const translated = row.target !== ''
   return (
     <tr style={{ height: ROW_H }} data-flagged={row.flagged}>
@@ -64,11 +66,11 @@ function Row({ row }: { row: ChunkRow }) {
       </td>
       <td data-label={CHUNK_COLUMNS.status.label} style={{ width: CHUNK_COLUMNS.status.width }}>
         {row.flagged ? (
-          <span className="flag-pill">پرچم</span>
+          <span className="flag-pill">{t('monitor.table.flagged')}</span>
         ) : translated ? (
-          <span className="badge badge-completed">انجام شد</span>
+          <span className="badge badge-completed">{t('monitor.table.done')}</span>
         ) : (
-          <span className="badge badge-queued">در انتظار</span>
+          <span className="badge badge-queued">{t('monitor.table.pending')}</span>
         )}
         {row.notes.length > 0 ? (
           <div style={{ marginTop: 6 }}>
@@ -185,6 +187,7 @@ export function VirtualChunkTable({
 
 /** A short summary for the QA tab, matching the Python `flagged.slice(0, 50)`. */
 export function FlaggedList({ rows }: { rows: ChunkRow[] }) {
+  const { t } = useLanguage()
   const flagged = rows.filter((row) => row.flagged)
   if (flagged.length === 0) return null
   return (
@@ -209,7 +212,7 @@ export function FlaggedList({ rows }: { rows: ChunkRow[] }) {
       </ul>
       {flagged.length > 50 ? (
         <p className="text-[length:var(--text-label)]" style={{ marginTop: 10, color: 'var(--color-text-muted)' }}>
-          {fa(flagged.length - 50)} مورد دیگر در تب «بخش‌ها» هست.
+          {t('monitor.table.more', { n: fa(flagged.length - 50) })}
         </p>
       ) : null}
     </div>

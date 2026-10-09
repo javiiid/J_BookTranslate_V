@@ -221,9 +221,10 @@ describe('a book and a job row do not leave a gap beside the title', () => {
 
   it('the job row keeps its badge and its ETA in one wrapper, so they cannot separate', () => {
     const source = read('DashboardPage.tsx')
+    // Stacked by design -- badge above, ETA beneath -- in one wrapper.
     // Two free siblings in a wrapping row is what put one at each end of a
     // line. They have to travel together.
-    const group = /<span className="flex items-center gap-\[var\(--spacing-2\)\]">\s*<span className=\{badgeClass/.test(
+    const group = /<span className="flex flex-col[^"]*">\s*<span className=\{badgeClass/.test(
       source.replace(/\s+/g, ' '),
     )
     assert.ok(group, 'the status badge and the ETA are not in a single wrapper')

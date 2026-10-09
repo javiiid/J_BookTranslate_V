@@ -41,26 +41,6 @@ def test_terms_reach_translation_request():
     assert 'آن' not in client.chat.completions.create.call_args.kwargs['messages'][0]['content']
 
 
-def test_batch_uses_snapshot(tmp_path, monkeypatch):
-    from app.translation import batch
-    snapshot = {'terms': [dict(source_term='Ann', target_term='آن')]}
-    (tmp_path / 'glossary.json').write_text(json.dumps(snapshot), encoding='utf-8')
-    monkeypatch.setattr(batch, 'ensure_dir', lambda name: tmp_path)
-    monkeypatch.setattr(batch.time, 'sleep', lambda seconds: None)
-    client = Mock()
-    uploaded = []
-    def upload(file, purpose):
-        uploaded.extend(json.loads(line) for line in file)
-        file.close()
-        return SimpleNamespace(id='file-id')
-    client.files.create.side_effect = upload
-    client.batches.create.return_value = SimpleNamespace(id='batch-id')
-    client.batches.retrieve.return_value = SimpleNamespace(status='in_progress', request_counts=SimpleNamespace(completed=0, total=2))
-    batch.batch_translate_chunks(client, [('1', 'Ann arrived.'), ('2', 'Annual report.')], 'EN', 'FA', paths={'job_dir': tmp_path})
-    assert 'آن' in uploaded[0]['body']['messages'][0]['content']
-    assert 'آن' not in uploaded[1]['body']['messages'][0]['content']
-
-
 def test_pipeline_snapshot_is_not_overwritten(tmp_path, monkeypatch):
     from app import web
     monkeypatch.setattr(web, '_persist_job', lambda job: None)

@@ -8,6 +8,13 @@ import type { NavIconName } from './nav'
  * so it inherits whatever the theme resolved, and no fill -- these are outlines
  * because a filled glyph at 20px turns to mud in the dark theme.
  *
+ * The drawings are Lucide's (lucide-static 0.469.0, ISC licence -- free to
+ * use and modify, no attribution in the UI), inlined here rather than taken
+ * through the `lucide-react` package: this project ships zero runtime UI
+ * dependencies, and seven icons do not justify one. The wrapper below is the
+ * project's own (1.75 stroke, hidden from assistive tech); only the inner
+ * path data comes from Lucide.
+ *
  * `aria-hidden` on every one: the visible label beside each icon already names
  * the destination, so announcing the shape as well would read it twice.
  */
@@ -46,56 +53,68 @@ function Stroke({ size = 24, children, ...rest }: NavIconProps & { children: Rea
 }
 
 const GLYPHS: Record<NavIconName, Glyph> = {
-  /** A dashboard: four panes. */
+  /** A dashboard: four panes of unequal weight (Lucide `layout-dashboard`). */
   dashboard: (p) => (
     <Stroke {...p}>
-      <rect x="3" y="3" width="7.5" height="7.5" rx="1.5" />
-      <rect x="13.5" y="3" width="7.5" height="7.5" rx="1.5" />
-      <rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5" />
-      <rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.5" />
+      <rect width="7" height="9" x="3" y="3" rx="1" />
+      <rect width="7" height="5" x="14" y="3" rx="1" />
+      <rect width="7" height="9" x="14" y="12" rx="1" />
+      <rect width="7" height="5" x="3" y="16" rx="1" />
     </Stroke>
   ),
-  /** Add a book: a document with a plus. The app's primary action. */
+  /** Add a book: a document with a plus (Lucide `book-plus`). The app's primary action. */
   add: (p) => (
     <Stroke {...p}>
-      <path d="M12 6.75v7M8.5 10.25h7" />
-      <path d="M5 4.75A1.75 1.75 0 0 1 6.75 3H18a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H6.75A1.75 1.75 0 0 1 5 19.25z" />
+      <path d="M12 7v6" />
+      <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H19a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H6.5a1 1 0 0 1 0-5H20" />
+      <path d="M9 10h6" />
     </Stroke>
   ),
-  /** Convert: two arrows swapping direction. */
+  /** Convert: two arrows swapping direction (Lucide `arrow-right-left`). */
   convert: (p) => (
     <Stroke {...p}>
-      <path d="M4 8.5h14l-3.5-3.5" />
-      <path d="M20 15.5H6l3.5 3.5" />
+      <path d="m16 3 4 4-4 4" />
+      <path d="M20 7H4" />
+      <path d="m8 21-4-4 4-4" />
+      <path d="M4 17h16" />
     </Stroke>
   ),
-  /** Watch a translation run: a clock. */
+  /** Watch a translation run: a pulse (Lucide `activity`). */
   monitor: (p) => (
     <Stroke {...p}>
-      <circle cx="12" cy="12" r="8.5" />
-      <path d="M12 7.25V12l3.25 2.25" />
+      <path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2" />
     </Stroke>
   ),
-  /** Library: three spines on a shelf. */
+  /** Library: four leaning spines (Lucide `library`). */
   library: (p) => (
     <Stroke {...p}>
-      <path d="M4 5.75A1.75 1.75 0 0 1 5.75 4H8v16H5.75A1.75 1.75 0 0 1 4 18.25z" />
-      <path d="M10 4h3.25v16H10z" />
-      <path d="M15.25 4h3A1.75 1.75 0 0 1 20 5.75v12.5A1.75 1.75 0 0 1 18.25 20h-3z" />
+      <path d="m16 6 4 14" />
+      <path d="M12 6v14" />
+      <path d="M8 8v12" />
+      <path d="M4 4v16" />
     </Stroke>
   ),
-  /** Read: an open page. */
+  /** Read: an open book (Lucide `book-open`). */
   reader: (p) => (
     <Stroke {...p}>
-      <path d="M12 6.5C10.5 5 8.5 4.5 6 4.5H3.5v13H6c2.5 0 4.5.5 6 2 1.5-1.5 3.5-2 6-2h2.5v-13H18c-2.5 0-4.5.5-6 2z" />
-      <path d="M12 6.5v13" />
+      <path d="M12 7v14" />
+      <path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z" />
     </Stroke>
   ),
-  /** Account: a person. */
+  /** Account: a person in a circle (Lucide `circle-user-round`). */
   account: (p) => (
     <Stroke {...p}>
-      <circle cx="12" cy="8" r="3.75" />
-      <path d="M4.75 20a7.25 7.25 0 0 1 14.5 0" />
+      <path d="M18 20a6 6 0 0 0-12 0" />
+      <circle cx="12" cy="10" r="4" />
+      <circle cx="12" cy="12" r="10" />
+    </Stroke>
+  ),
+  /** Help: a question mark in a circle (Lucide `circle-help`). */
+  help: (p) => (
+    <Stroke {...p}>
+      <circle cx="12" cy="12" r="10" />
+      <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+      <path d="M12 17h.01" />
     </Stroke>
   ),
 }

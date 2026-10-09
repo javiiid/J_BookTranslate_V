@@ -45,6 +45,17 @@ const NAME = 'کالیما'
 /** The four-letter core a suffix may follow. */
 const ROOT = 'کالیم'
 
+/**
+ * Distinct words that merely open with the same three letters.
+ *
+ * `کالیبراسیون` (calibration) is the product's own term for the
+ * calibration workshop -- the UI says «کارگاه کالیبراسیون» in the
+ * landing and workspace strings. It is not a misspelling of the name,
+ * so an exact full-word match is skipped. Anything else opening with
+ * کالی still fails: the allowlist is one whole word, not a prefix.
+ */
+const KNOWN_WORDS = new Set(['کالیبراسیون'])
+
 describe('the product name', () => {
   it('is spelled کالیما wherever it appears', () => {
     const offenders: string[] = []
@@ -53,7 +64,9 @@ describe('the product name', () => {
       // Any run of Persian letters that opens with the product's first three
       // letters but is not the name is a misspelling, whatever follows it.
       for (const match of source.matchAll(/کا[‌ ]?ل[‌ ]?ی[‌ ]?[\u0600-\u06ff]*/g)) {
-        if (!match[0].startsWith(NAME)) offenders.push(`${name}: ${match[0]}`)
+        if (!match[0].startsWith(NAME) && !KNOWN_WORDS.has(match[0])) {
+          offenders.push(`${name}: ${match[0]}`)
+        }
       }
     }
     assert.deepEqual(

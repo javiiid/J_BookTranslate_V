@@ -5,6 +5,7 @@
    `tsc`, and fails under the test runner with ERR_MODULE_NOT_FOUND — so the
    whole file, and the decisions in it, would be untestable. */
 import { request } from './api.ts'
+import { getLocale, localeTag } from './locale.ts'
 
 export type ToneId = 'modern' | 'literary' | 'academic' | 'faithful'
 export interface TextSlot { id: string; text: string }
@@ -107,8 +108,19 @@ const STATE_FA: Record<string, string> = {
   PAUSED: 'متوقف‌شده',
 }
 
+const STATE_EN: Record<string, string> = {
+  AWAITING_USER_CALIBRATION: 'Awaiting review',
+  CALIBRATED_AND_ESTIMATED: 'Ready to start',
+  FULL_PROCESSING: 'Translating book',
+  COMPLETED: 'Completed',
+  FAILED: 'Failed',
+  CANCELLED: 'Cancelled',
+  PAUSED: 'Paused',
+}
+
 export function stateLabel(state: string): string {
-  return STATE_FA[state] ?? state
+  const table = getLocale() === 'fa' ? STATE_FA : STATE_EN
+  return table[state] ?? state
 }
 
 export function canSeal(s: Calibration): boolean {
@@ -130,6 +142,7 @@ export function replaceSample(s: Calibration, previous: string, next: string): s
 }
 
 export function formatCost(value: number | null): string {
-  if (value === null) return 'نامشخص'
-  return `${new Intl.NumberFormat('fa-IR', { maximumFractionDigits: 5 }).format(value)} دلار`
+  if (value === null) return getLocale() === 'fa' ? 'نامشخص' : 'Unknown'
+  const amount = new Intl.NumberFormat(localeTag(), { maximumFractionDigits: 5 }).format(value)
+  return getLocale() === 'fa' ? `${amount} دلار` : `${amount} USD`
 }

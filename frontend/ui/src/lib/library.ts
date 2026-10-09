@@ -110,6 +110,8 @@ export interface LibraryStats {
   total: number
   running: number
   completed: number
+  /** The endpoint's `failed` bucket: work that broke rather than never started. */
+  failed: number
   /** Neither running nor finished. Includes `failed` and `available`. */
   unfinished: number
   /** Finished books, as a share of the library, or `null` when it is empty. */
@@ -120,12 +122,14 @@ export function libraryStats(input: {
   total: number
   running: number
   completed: number
+  failed: number
 }): LibraryStats {
-  const { total, running, completed } = input
+  const { total, running, completed, failed } = input
   return {
     total,
     running,
     completed,
+    failed,
     unfinished: Math.max(0, total - completed),
     completedShare: total > 0 ? Math.round((completed * 100) / total) : null,
   }
@@ -141,43 +145,36 @@ export interface LibraryFilterTab {
   key: LibraryStatusFilter | ''
   label: string
   /** Which counter in `LibraryStats` fills the tab's number. */
-  count: keyof Pick<LibraryStats, 'total' | 'running' | 'completed' | 'unfinished'>
+  count: keyof Pick<LibraryStats, 'total' | 'running' | 'completed' | 'failed'>
 }
 
 /**
- * The four tabs, in reading order: everything, then what is moving, then what is
- * stuck, then what is done.
+ * The four tabs, in reading order: everything, then what is moving, then what
+ * broke, then what is done.
  *
- * The order is the order of "what do I do about it", so the numbers read as a
- * funnel. `unfinished` is sent as the endpoint's own `failed` filter and then
- * widened -- see `matchesFilter` -- because a book that was never started
- * (`available`) is just as unfinished as one that broke halfway.
+ * Every one of these is a bucket the endpoint can filter on, and every one of
+ * these numbers comes from the endpoint's own `total` for that filter. An
+ * earlier version had a fifth state -- "unfinished", meaning `failed` plus the
+ * books that were never queued -- and it was a mismatch that showed: the tab
+ * said 15 while the list it opened held 11, because the endpoint's `failed`
+ * filter cannot express "or never started". The compromise was to widen the
+ * bucket in JavaScript, which made the tab honest and the list a lie.
+ *
+ * So the tab is `failed`, labelled as such, and the wider "unfinished" idea
+ * survives where it is true: the `جلد ناتمام` figure above it, which is a
+ * count and not a filter, and is computed as `total - completed`.
+ *
+ * `available` books -- uploaded, never queued -- are reachable through "همه" and
+ * through the row's own badge. They get no tab, because a tab that hides three
+ * quarters of the library's non-finished books is a worse default than not
+ * offering it.
  */
 export const LIBRARY_TABS: readonly LibraryFilterTab[] = [
   { key: '', label: 'همه کتاب‌ها', count: 'total' },
   { key: 'running', label: 'در حال ترجمه', count: 'running' },
-  { key: 'failed', label: 'ناتمام', count: 'unfinished' },
+  { key: 'failed', label: 'خطادار', count: 'failed' },
   { key: 'completed', label: 'تکمیل‌شده', count: 'completed' },
 ]
-
-/**
- * Whether a book belongs in a tab, for the tabs the endpoint cannot express.
- *
- * The endpoint's `status=failed` matches a book whose status is `failed`, and
- * nothing else. But the tab is labelled "unfinished", and a book sitting
- * `available` -- uploaded, never queued -- is the *most* unfinished thing in the
- * library. So this widens the bucket locally.
- *
- * It exists at all because the list is server-filtered and paged while the tab's
- * count is whole-library: without it, "ناتمام ۱۵" would sit above a list holding
- * only the 11 that failed. The honest fix is a backend filter; until then this is
- * the smaller of the two mismatches, and the page prefers the server's list.
- */
-export function matchesFilter(book: LibraryBook, key: LibraryStatusFilter | ''): boolean {
-  if (key === '') return true
-  if (key === 'failed') return book.status !== 'completed'
-  return book.status === key
-}
 
 /** A book picked for one of the two spotlight cards. */
 export interface Spotlight {
@@ -218,6 +215,40 @@ export function furthestProgress(books: readonly LibraryBook[]): Spotlight | nul
     }
   }
   return best
+}
+
+/**
+ * The unfinished books that got furthest, best first, capped at `count`.
+ *
+ * This is the data behind the spotlight card's small histogram. It is the same
+ * ordering as `furthestProgress` over a set of books rather than one, so the
+ * tallest bar in the chart is always the book named in the card beside it --
+ * a chart whose peak is some other book than the one the heading claims is a
+ * chart that contradicts its own caption.
+ *
+ * Books at 100% are excluded for the same reason `furthestProgress` excludes
+ * them: a finished book is not a candidate for "furthest along without being
+ * finished", and drawing it at full height would put a completed book at the
+ * top of a card about incomplete ones.
+ */
+export function progressLadder(
+  books: readonly LibraryBook[],
+  count = 5,
+): Spotlight[] {
+  const rows: Spotlight[] = []
+  for (const book of books) {
+    if (book.status === 'completed') continue
+    const variant = activeVariant(book)
+    const percent = percentOf(variant)
+    if (percent === null || percent >= 100 || !variant) continue
+    rows.push({ book, variant, percent })
+  }
+  rows.sort(
+    (a, b) =>
+      b.percent - a.percent ||
+      (b.book.updated_at > a.book.updated_at ? 1 : b.book.updated_at < a.book.updated_at ? -1 : 0),
+  )
+  return rows.slice(0, Math.max(0, count))
 }
 
 /**
@@ -277,13 +308,14 @@ export function pageCount(total: number, limit: number): number {
 /**
  * Two letters for a cover that has no image.
  *
- * `cover_path` is null for every book in the database this was written against
- * -- the column is populated by the Python page's upload path and nothing has
- * written to it yet -- so a design with a cover column needs a cover that is not
- * a cover. Falling back to the extension rather than the title is deliberate:
- * titles here are raw filenames (`overthesevensea.epub`), so an initial of the
- * title is an `o` on thirty-one rows and tells the reader nothing, while `EP`
- * against a `PD` is at least a distinction they can act on.
+ * `cover_path` carries a real extracted cover for books shelved through the
+ * current backend (`app/library/covers.py` reads it from the EPUB package or
+ * renders the PDF's first page). This fallback remains for books whose file
+ * has no usable image. Falling back to the extension rather than the title
+ * is deliberate: titles here are raw filenames (`overthesevensea.epub`), so
+ * an initial of the title is an `o` on thirty-one rows and tells the reader
+ * nothing, while `EP` against a `PD` is at least a distinction they can act
+ * on.
  *
  * A word in the title is preferred when there is one, so a library of properly
  * titled books shows two of its own letters instead.
@@ -293,7 +325,12 @@ export function coverInitials(book: LibraryBook): string {
   const extension = variant?.extension?.trim()
   if (extension) return extension.slice(0, 2).toUpperCase()
   const word = book.title.trim().split(/\s+/).find((part) => /[\p{L}]/u.test(part))
-  return (word ?? book.title).slice(0, 2)
+  return (word ?? book.title)
+    .slice(0, 2)
+    // Uppercased like the extension branch above: the two letters sit in the
+    // same box in the same face, and a tile reading `th` next to tiles reading
+    // `EP` looks like two different kinds of thing rather than one fallback.
+    .toUpperCase()
 }
 
 /** The status of a book's active variant, falling back to the book's own. */

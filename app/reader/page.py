@@ -14,6 +14,7 @@ _READER_TEMPLATE = r"""<!doctype html><html lang="fa" dir="rtl"><head><meta char
 :root{--app:#eef2f8;--surface:#fff;--surface-2:#f7f9fc;--text:#16202e;--muted:#69788e;--accent:#356df6;--accent-2:#7257e8;--accent-soft:#356df614;--line:#e2e8f1;--shadow:0 20px 50px rgba(30,48,80,.10);--font-size:18px;--line-height:1.9;--reading-width:760px;--radius:22px}
 body.theme-night{--app:#14161a;--surface:#1e2126;--surface-2:#24272d;--text:#ddd8ce;--muted:#9b978f;--accent:#c9ad74;--accent-2:#b08d55;--accent-soft:#c9ad7420;--line:#33383f;--shadow:0 16px 44px rgba(0,0,0,.35)}
 body.theme-sepia{--app:#efe3cd;--surface:#fbf4e4;--surface-2:#f5ead4;--text:#41341f;--muted:#8b785a;--accent:#a8763e;--accent-2:#8f5f2c;--accent-soft:#a8763e1f;--line:#e6d8bd;--shadow:0 18px 46px rgba(90,64,30,.12)}
+body.theme-contrast{--app:#000;--surface:#0a0a0a;--surface-2:#161616;--text:#fff;--muted:#e8e8e8;--accent:#ffd60a;--accent-2:#ffb800;--accent-soft:#ffd60a26;--line:#5a5a5a;--shadow:none}
 *{box-sizing:border-box}
 html{scroll-behavior:smooth}
 body{margin:0;min-height:100vh;color:var(--text);background:radial-gradient(circle at 8% 0,#e8efff 0,transparent 32%),radial-gradient(circle at 96% 6%,#f1ecff 0,transparent 28%),var(--app);font:15px Vazirmatn,"Segoe UI",Tahoma,sans-serif;-webkit-font-smoothing:antialiased;transition:background .25s,color .25s}
@@ -65,6 +66,14 @@ body.bar-hidden .bar{transform:translateY(-115%)}
 .content td,.content th{border:1px solid var(--line);padding:8px 10px}
 @keyframes fadeIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
 .fade-in{animation:fadeIn .38s ease}
+.gloss{border-bottom:2px dotted var(--accent);cursor:help;position:relative}
+.gloss:hover:after,.gloss:focus-visible:after{content:attr(data-tip);position:absolute;bottom:135%;inset-inline-start:0;z-index:40;max-width:220px;padding:8px 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--text);font-size:12px;line-height:1.8;white-space:normal;box-shadow:var(--shadow)}
+.speaking{outline:2px solid var(--accent);outline-offset:4px;border-radius:8px}
+.marks{margin-top:4px;border-top:1px solid var(--line);padding-top:12px}
+.marks-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:10px;font-weight:800;font-size:14px}
+.mark-row{display:flex;gap:8px;align-items:center;margin-bottom:8px}
+.mark-row input{flex:1;min-width:0;padding:9px 12px;border:1px solid var(--line);border-radius:11px;background:var(--surface-2);color:var(--text)}
+.mark-go{flex:none;max-width:42%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:9px 12px;border:1px solid var(--line);border-radius:11px;background:var(--accent-soft);color:var(--accent);font-weight:700;font-size:12px}
 
 .chapter-nav{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:30px;padding-top:20px;border-top:1px solid var(--line)}
 .chapter-nav button{font-weight:700;font-size:13px;padding:10px 16px;color:var(--accent);background:var(--accent-soft);border:1px solid transparent;border-radius:11px}
@@ -140,6 +149,8 @@ body.bar-hidden .bar{transform:translateY(-115%)}
 <span class="chip" id="time-chip" hidden></span>
 <button type="button" class="icon-btn" id="toc-btn" aria-label="فهرست فصل‌ها" aria-expanded="false" title="فهرست (T)">☰</button>
 <button type="button" class="icon-btn" id="columns-btn" aria-label="دو ستون هماهنگ" aria-pressed="false" title="دو ستون هماهنگ (C)">▤</button>
+<button type="button" class="icon-btn" id="mark-btn" aria-label="ذخیره نشان برای این موقعیت" title="نشان (B)">🔖</button>
+<button type="button" class="icon-btn" id="speak-btn" aria-label="خوانش صوتی از اینجا" aria-pressed="false" title="خوانش صوتی (V)">🔊</button>
 <button type="button" class="icon-btn" id="settings-btn" aria-label="تنظیمات مطالعه" aria-expanded="false" title="تنظیمات (S)">⚙</button>
 <button type="button" class="icon-btn" id="night-btn" aria-label="حالت شب" aria-pressed="false" title="شب/روز (N)">🌙</button>
 </div>
@@ -172,7 +183,7 @@ body.bar-hidden .bar{transform:translateY(-115%)}
 <div class="sheet-inner">
 <div class="sheet-grip"></div>
 <div class="sheet-head"><span>تنظیمات مطالعه</span><button type="button" class="icon-btn" id="settings-close" aria-label="بستن تنظیمات">✕</button></div>
-<div class="field"><span class="field-label">پوسته</span><div class="segmented" role="group" aria-label="پوسته"><button type="button" data-theme="light">روشن</button><button type="button" data-theme="sepia">گرم</button><button type="button" data-theme="night">شب</button></div></div>
+<div class="field"><span class="field-label">پوسته</span><div class="segmented" role="group" aria-label="پوسته"><button type="button" data-theme="light">روشن</button><button type="button" data-theme="sepia">گرم</button><button type="button" data-theme="night">شب</button><button type="button" data-theme="contrast">کنتراست</button></div></div>
 <div class="field"><label class="field-label" for="mode">نوع نمایش</label><select id="mode"><option value="translation">فقط ترجمه</option><option value="bilingual">دوزبانه (پشت سر هم)</option><option value="columns">دو ستون هماهنگ</option><option value="original">فقط متن اصلی</option></select></div>
 <div class="field-grid">
 <div class="field"><label class="field-label" for="font">اندازهٔ متن</label><select id="font"><option value="16">کوچک</option><option value="18">معمولی</option><option value="20">بزرگ</option><option value="22">خیلی بزرگ</option></select></div>
@@ -180,8 +191,10 @@ body.bar-hidden .bar{transform:translateY(-115%)}
 <div class="field"><label class="field-label" for="width">عرض متن</label><select id="width"><option value="640">باریک</option><option value="760">استاندارد</option><option value="880">عریض</option></select></div>
 <div class="field"><label class="field-label" for="direction">جهت متن</label><select id="direction"><option value="auto">خودکار</option><option value="rtl">راست‌به‌چپ</option><option value="ltr">چپ‌به‌راست</option></select></div>
 </div>
+<div class="field"><span class="field-label">هایلایت واژه‌نامه</span><div class="segmented" role="group" aria-label="هایلایت واژه‌نامه"><button type="button" data-gloss="on">روشن</button><button type="button" data-gloss="off">خاموش</button></div></div>
+<div class="marks" id="marks"><div class="marks-head"><span>نشان‌های من</span><span class="hint" style="margin:0">در حساب شما ذخیره می‌شود</span></div><div id="marks-list"></div></div>
 <div class="sheet-actions"><button type="button" id="reset-btn">بازنشانی تنظیمات</button></div>
-<p class="hint">میان‌بر صفحه‌کلید: ←/→ جابه‌جایی فصل • N شب/روز • S تنظیمات • T فهرست • C دو ستون • F تمام‌صفحه • Esc بستن</p>
+<p class="hint">میان‌بر صفحه‌کلید: ←/→ جابه‌جایی فصل • N شب/روز • S تنظیمات • T فهرست • C دو ستون • B نشان • V خوانش صوتی • F تمام‌صفحه • Esc بستن</p>
 </div>
 </div>
 <div class="backdrop" id="sheet-backdrop"></div>
@@ -193,7 +206,7 @@ const $$=(sel,root=document)=>Array.prototype.slice.call(root.querySelectorAll(s
 const faNum=n=>new Intl.NumberFormat('fa-IR').format(n);
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
-const DEFAULTS={study_night_mode:false,reading_theme:'light',reading_mode:'translation',reading_font_size:18,reading_line_height:1.9,reading_width:760,reading_direction:'auto',reading_last_location:null};
+const DEFAULTS={study_night_mode:false,reading_theme:'light',reading_mode:'translation',reading_font_size:18,reading_line_height:1.9,reading_width:760,reading_direction:'auto',reading_last_location:null,reading_bookmarks:[],reading_glossary:true};
 let settings=Object.assign({},DEFAULTS);
 let chapters=[];
 let currentId=null;
@@ -222,6 +235,7 @@ function apply(){
   const t=theme();
   document.body.classList.toggle('theme-night',t==='night');
   document.body.classList.toggle('theme-sepia',t==='sepia');
+  document.body.classList.toggle('theme-contrast',t==='contrast');
   const root=document.documentElement.style;
   root.setProperty('--font-size',(Number(settings.reading_font_size)||18)+'px');
   root.setProperty('--line-height',String(Number(settings.reading_line_height)||1.9));
@@ -237,6 +251,9 @@ function apply(){
   $('#width').value=String(settings.reading_width);
   $('#direction').value=settings.reading_direction;
   $$('[data-theme]').forEach(b=>b.classList.toggle('active',b.dataset.theme===t));
+  const glossOn=settings.reading_glossary!==false;
+  $$('[data-gloss]').forEach(b=>b.classList.toggle('active',(b.dataset.gloss==='on')===glossOn));
+  renderMarks();
 }
 
 async function save(extra){
@@ -301,17 +318,17 @@ function renderToc(filter){
 function renderBlocks(blocks,mode){
   const visible=blocks.filter(x=>mode==='original'||x.translation_html);
   if(!visible.length)return '';
-  return '<div class="parallel-list">'+visible.map(x=>{
-    if(mode==='original')return '<div class="parallel-block"><div class="parallel-side" dir="auto">'+x.original_html+'</div></div>';
-    return '<div class="parallel-block"><div class="parallel-side" dir="auto"><span class="side-label">متن اصلی</span>'+x.original_html+'</div><div class="parallel-side" dir="auto"><span class="side-label">ترجمه</span>'+x.translation_html+'</div></div>';
+  return '<div class="parallel-list">'+visible.map((x,bi)=>{
+    if(mode==='original')return '<div class="parallel-block" data-bi="'+bi+'"><div class="parallel-side" dir="auto">'+x.original_html+'</div></div>';
+    return '<div class="parallel-block" data-bi="'+bi+'"><div class="parallel-side" dir="auto"><span class="side-label">متن اصلی</span>'+x.original_html+'</div><div class="parallel-side" dir="auto"><span class="side-label">ترجمه</span>'+x.translation_html+'</div></div>';
   }).join('')+'</div>';
 }
 
 function renderColumns(blocks){
   const visible=blocks.filter(x=>x.translation_html);
   if(!visible.length)return '';
-  const original=visible.map(x=>'<div class="col-block" dir="auto">'+x.original_html+'</div>').join('');
-  const translation=visible.map(x=>'<div class="col-block" dir="auto">'+x.translation_html+'</div>').join('');
+  const original=visible.map((x,bi)=>'<div class="col-block" data-bi="'+bi+'" dir="auto">'+x.original_html+'</div>').join('');
+  const translation=visible.map((x,bi)=>'<div class="col-block" data-bi="'+bi+'" dir="auto">'+x.translation_html+'</div>').join('');
   const source=visible.map(x=>x.original_html).join('');
   const target=visible.map(x=>x.translation_html).join('');
   return '<div class="columns2">'+
@@ -332,6 +349,7 @@ function showError(id){
 
 async function loadChapter(id){
   const token=++loadToken;
+  stopSpeak();
   setStatus('');
   $('#chapter-title').textContent='';
   $('#chapter-eyebrow').textContent='';
@@ -359,6 +377,7 @@ async function loadChapter(id){
     const content=$('#content');
     content.innerHTML='<div class="fade-in">'+html+'</div>';
     content.setAttribute('dir',(settings.reading_mode==='bilingual'||settings.reading_mode==='columns')?'auto':directionFor(html));
+    applyGloss();
     wordCount=content.textContent.trim().split(/\s+/).filter(Boolean).length;
     currentId=id;
     readSet.add(id);saveRead();
@@ -457,6 +476,7 @@ async function init(){
     start=serverLoc.chapter;
   }
   renderToc('');
+  loadGloss();
   await loadChapter(chapters[start].id);
   if(restoreFrac>0){
     setTimeout(()=>{
@@ -487,6 +507,42 @@ $('#night-btn').addEventListener('click',()=>{
   save({reading_theme:next}).then(()=>toast(next==='night'?'حالت شب روشن شد':'حالت روشن فعال شد'));
 });
 $$('[data-theme]').forEach(b=>b.addEventListener('click',()=>save({reading_theme:b.dataset.theme})));
+$$('[data-gloss]').forEach(b=>b.addEventListener('click',()=>{
+  const on=b.dataset.gloss==='on';
+  save({reading_glossary:on}).then(()=>{
+    if(on){loadGloss().then(()=>applyGloss())}
+    else{clearGloss()}
+  });
+}));
+$('#mark-btn').addEventListener('click',()=>{
+  if(currentId===null)return;
+  const bi=currentBlockIndex();
+  const marks=settings.reading_bookmarks||[];
+  const at=marks.findIndex(m=>m.chapter===currentId&&m.block===bi);
+  let next;
+  if(at!==-1){next=marks.filter((_,k)=>k!==at);toast('نشان حذف شد')}
+  else{next=marks.concat([{chapter:currentId,block:bi,note:'',created:new Date().toISOString()}]).slice(-50);toast('نشان ذخیره شد')}
+  save({reading_bookmarks:next});
+});
+$('#marks-list').addEventListener('click',e=>{
+  const go=e.target.closest('[data-go]');
+  if(go){jumpMark(Number(go.dataset.go));return}
+  const del=e.target.closest('[data-del]');
+  if(del){
+    const idx=Number(del.dataset.del);
+    save({reading_bookmarks:(settings.reading_bookmarks||[]).filter((_,k)=>k!==idx)}).then(()=>toast('نشان حذف شد'));
+  }
+});
+$('#marks-list').addEventListener('change',e=>{
+  const input=e.target.closest('[data-note]');
+  if(!input)return;
+  const idx=Number(input.dataset.note);
+  const marks=(settings.reading_bookmarks||[]).slice();
+  if(!marks[idx])return;
+  marks[idx]=Object.assign({},marks[idx],{note:String(input.value).slice(0,500)});
+  save({reading_bookmarks:marks});
+});
+$('#speak-btn').addEventListener('click',toggleSpeak);
 function setMode(m){
   settings.reading_mode=m;apply();
   save({reading_mode:m});
@@ -527,14 +583,190 @@ document.addEventListener('keydown',e=>{
     case 's':case 'S':if(!e.ctrlKey&&!e.metaKey){e.preventDefault();toggleSettings()}break;
     case 't':case 'T':if(!e.ctrlKey&&!e.metaKey){e.preventDefault();toggleToc()}break;
     case 'c':case 'C':if(!e.ctrlKey&&!e.metaKey){e.preventDefault();$('#columns-btn').click()}break;
+    case 'b':case 'B':if(!e.ctrlKey&&!e.metaKey){e.preventDefault();$('#mark-btn').click()}break;
+    case 'v':case 'V':if(!e.ctrlKey&&!e.metaKey){e.preventDefault();toggleSpeak()}break;
     case 'f':case 'F':toggleFullscreen();break;
     case '?':toggleSettings();break;
     case 'Escape':
+      stopSpeak();
       if($('#settings-sheet').classList.contains('open'))closeSettings();
       else if($('#toc').classList.contains('open'))closeToc();
       break;
   }
 });
+/* ---- glossary highlight: approved terms only, client-side, longest first ---- */
+let glossTerms=[];
+let glossReady=false;
+function normStr(s){try{return String(s).normalize('NFKC').toLowerCase()}catch(e){return String(s).toLowerCase()}}
+async function loadGloss(){
+  if(glossReady)return;
+  glossReady=true;
+  try{
+    const res=await fetch('/api/reader/'+jobId+'/glossary');
+    if(!res.ok)return;
+    const data=await res.json();
+    glossTerms=((data&&data.items)||[]).slice(0,40).map(t=>({s:String(t.source_term||''),t:String(t.target_term||'').slice(0,60)})).filter(t=>t.s&&t.t);
+    if(currentId!==null)applyGloss();
+  }catch(e){}
+}
+function glossSide(node){
+  const host=node.parentElement&&node.parentElement.closest?node.parentElement.closest('.col-trans,.col-original,.parallel-side'):null;
+  if(!host)return 'target';
+  if(host.classList.contains('col-trans'))return 'target';
+  if(host.classList.contains('col-original'))return 'source';
+  const sibs=Array.prototype.slice.call(host.parentElement.children).filter(c=>c.classList.contains('parallel-side'));
+  return sibs[0]===host?'source':'target';
+}
+function clearGloss(){
+  $$('#content mark.gloss').forEach(m=>{
+    const parent=m.parentNode;
+    if(!parent)return;
+    parent.replaceChild(document.createTextNode(m.textContent||''),m);
+    parent.normalize();
+  });
+}
+function applyGloss(){
+  if(settings.reading_glossary===false||!glossTerms.length)return;
+  const root=$('#content');
+  if(!root||root.querySelector('mark.gloss'))return;
+  const walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT);
+  const queue=[];
+  let nd;
+  while((nd=walker.nextNode())){if(nd.nodeValue&&nd.nodeValue.trim())queue.push(nd)}
+  const compiled=glossTerms.map(g=>({s:g.s,t:g.t,ns:normStr(g.s),nt:normStr(g.t)}));
+  let marks=0;
+  while(queue.length&&marks<200){
+    const node=queue.shift();
+    if(!node.parentElement||node.parentElement.closest('mark.gloss,script,style'))continue;
+    const side=glossSide(node);
+    const text=node.nodeValue;
+    const low=text.toLowerCase();
+    let best=null;
+    let at=-1;
+    compiled.forEach(g=>{
+      const rawFind=side==='source'?g.s:g.t;
+      const rawTip=side==='source'?g.t:g.s;
+      // Exact path first: case-insensitive search of the original term in
+      // the original text, so offsets and casing are always right.
+      let i=low.indexOf(rawFind.toLowerCase());
+      let shown=rawFind;
+      if(i===-1){
+        // Rare fallback: normalized search for compatibility characters.
+        // Offsets can shift when NFKC changes length, so this stays cosmetic.
+        const needle=side==='source'?g.ns:g.nt;
+        if(!needle)return;
+        i=low.indexOf(needle);
+        if(i===-1)return;
+        shown=text.slice(i,i+needle.length);
+      }
+      if(best===null||shown.length>best.len){best={find:shown,tip:rawTip,len:shown.length};at=i}
+    });
+    if(!best)continue;
+    // Re-slice from the original text so casing is preserved on screen.
+    const shown=text.slice(at,at+best.len);
+    const before=document.createTextNode(text.slice(0,at));
+    const after=document.createTextNode(text.slice(at+best.len));
+    const mark=document.createElement('mark');
+    mark.className='gloss';
+    mark.setAttribute('tabindex','0');
+    mark.setAttribute('data-tip',best.tip);
+    mark.setAttribute('aria-label','واژه‌نامه: '+shown+' یعنی '+best.tip);
+    mark.textContent=shown;
+    const parent=node.parentNode;
+    parent.insertBefore(before,node);
+    parent.insertBefore(mark,node);
+    parent.insertBefore(after,node);
+    parent.removeChild(node);
+    if(after.nodeValue)queue.push(after);
+    marks++;
+  }
+}
+
+/* ---- bookmarks + notes: server-persisted, capped at 50 ---- */
+function blockTargets(){
+  const mode=settings.reading_mode;
+  if(mode==='columns'){const c=$$('#content .col-trans .col-block');if(c.length)return c}
+  const paired=$$('#content .parallel-block');
+  if(paired.length)return paired;
+  return $$('#content .fade-in > *').filter(el=>el.textContent&&el.textContent.trim());
+}
+function currentBlockIndex(){
+  const els=blockTargets();
+  for(let k=0;k<els.length;k++){if(els[k].getBoundingClientRect().top>=0)return k}
+  return Math.max(0,els.length-1);
+}
+function renderMarks(){
+  const box=$('#marks-list');
+  if(!box)return;
+  const marks=settings.reading_bookmarks||[];
+  if(!marks.length){box.innerHTML='<p class="toc-empty">هنوز نشانی ثبت نشده. با 🔖 موقعیت فعلی را ذخیره کنید.</p>';return}
+  box.innerHTML=marks.map((mk,idx)=>{
+    const ch=chapters.find(c=>c.id===mk.chapter);
+    const label=ch?esc(ch.title):('فصل '+faNum(mk.chapter+1));
+    return '<div class="mark-row" data-i="'+idx+'"><button type="button" class="mark-go" data-go="'+idx+'" title="پرش به نشان">'+label+'</button>'+
+      '<input maxlength="500" placeholder="یادداشت…" value="'+esc(mk.note||'')+'" data-note="'+idx+'" aria-label="یادداشت نشان '+label+'">'+
+      '<button type="button" class="icon-btn" data-del="'+idx+'" aria-label="حذف نشان">✕</button></div>';
+  }).join('');
+}
+async function jumpMark(idx){
+  const mk=(settings.reading_bookmarks||[])[idx];
+  if(!mk)return;
+  closeSettings();
+  if(mk.chapter!==currentId)await loadChapter(mk.chapter);
+  requestAnimationFrame(()=>{
+    const els=blockTargets();
+    const el=els[Math.min(mk.block,els.length-1)];
+    if(el)el.scrollIntoView({block:'center'});
+  });
+}
+
+/* ---- Persian TTS, block by block, fa voice or nothing ---- */
+let speaking=false;
+function faVoice(){
+  try{
+    const vs=(window.speechSynthesis?window.speechSynthesis.getVoices():[])||[];
+    return vs.find(v=>v.lang&&v.lang.toLowerCase().indexOf('fa')===0)||null;
+  }catch(e){return null}
+}
+function stopSpeak(){
+  try{if(window.speechSynthesis)window.speechSynthesis.cancel()}catch(e){}
+  speaking=false;
+  $$('.speaking').forEach(el=>el.classList.remove('speaking'));
+  const b=$('#speak-btn');
+  if(b)b.setAttribute('aria-pressed','false');
+}
+function speakOne(el,text){
+  return new Promise(function(resolve){
+    const u=new SpeechSynthesisUtterance(text);
+    const v=faVoice();
+    if(v){u.voice=v;u.lang=v.lang}else{u.lang='fa-IR'}
+    u.onend=resolve;
+    u.onerror=resolve;
+    el.classList.add('speaking');
+    window.speechSynthesis.speak(u);
+  }).then(()=>{el.classList.remove('speaking')});
+}
+async function toggleSpeak(){
+  if(speaking){stopSpeak();return}
+  if(!('speechSynthesis' in window)){toast('خوانش صوتی در این مرورگر پشتیبانی نمی‌شود');return}
+  if(!faVoice()){toast('صدای فارسی روی این دستگاه پیدا نشد');return}
+  const els=blockTargets();
+  if(!els.length)return;
+  const start=currentBlockIndex();
+  speaking=true;
+  $('#speak-btn').setAttribute('aria-pressed','true');
+  for(let k=start;k<els.length&&speaking;k++){
+    const el=els[k];
+    const sides=el.querySelectorAll?el.querySelectorAll('.parallel-side'):null;
+    const raw=sides&&sides.length?sides[sides.length-1].textContent:el.textContent;
+    const text=String(raw||'').trim().replace(/\s+/g,' ').slice(0,600);
+    if(!text)continue;
+    el.scrollIntoView({block:'center'});
+    await speakOne(el,text);
+  }
+  stopSpeak();
+}
+
 init();
 </script></body></html>"""
 

@@ -11,22 +11,14 @@
    `rtl = str(to_lang).upper() in {"FA","AR","UR","HE"}` was False and a Persian
    translation was laid out left-to-right in every PDF/DOCX export.
 
-3. `save_partial_batch_results` called `save_translations(...)` without
-   importing it. The NameError was swallowed by a broad `except` and the caller
-   had already deleted the batch state file, so translations the provider had
-   already billed for were dropped and the user was told "No batch state found."
-
-4. `auto_extract` forced max_workers=1, so every default web job translated one
+3. `auto_extract` forced max_workers=1, so every default web job translated one
    chunk at a time despite concurrency being configurable, and glossary
    learning ran inline on the commit loop. `glossary_mode` now makes the
    tradeoff explicit: "deferred" (default) keeps chunks in flight and learns
    terms afterwards; "inline" keeps propagation and forces sequential.
 """
-import io
 import json
 import socket
-import sys
-import tempfile
 import threading
 import time
 import zipfile
@@ -37,7 +29,6 @@ from types import SimpleNamespace
 import pytest
 
 from app.output.formats import generate_outputs
-from app.translation.batch import save_partial_batch_results
 from app.web import _loopback_authority, _origin_permitted
 
 PERSIAN = "این یک جملهٔ فارسی است که باید از راست به چپ رندر شود."
@@ -238,7 +229,9 @@ def test_pipeline_passes_to_lang_to_generate_outputs():
     source = Path(__file__).resolve().parents[1] / "app" / "pipeline" / "pipeline.py"
     text = source.read_text(encoding="utf-8")
     calls = text.count("generate_outputs(")
-    assert calls >= 3, f"expected 3 generate_outputs call sites, found {calls}"
+    # Two sites: the EPUB path and the PDF path. (A third lived in the removed
+    # batch-check path; batch modes are gone, so it went with them.)
+    assert calls >= 2, f"expected 2 generate_outputs call sites, found {calls}"
     # Every call must forward to_lang.
     import re
     blocks = re.findall(r"generate_outputs\((?:[^()]|\([^()]*\))*\)", text, re.S)
@@ -247,94 +240,7 @@ def test_pipeline_passes_to_lang_to_generate_outputs():
 
 
 # --------------------------------------------------------------------------
-# 3. A completed batch must not lose its translations
-# --------------------------------------------------------------------------
-
-def _batch_line(chunk_id, text):
-    """One line of a downloaded provider batch output file."""
-    return json.dumps({
-        "custom_id": chunk_id,
-        "response": {
-            "error": None,
-            "body": {"choices": [{"message": {"content": text}}]},
-        },
-    })
-
-
-def test_partial_batch_results_are_persisted(tmp_path):
-    """A batch that finished some requests must save what it paid for."""
-    job_dir = tmp_path / "job"
-    job_dir.mkdir()
-    paths = {
-        "job_dir": str(job_dir),
-        "chunks_file": str(job_dir / "chunks.json"),
-        "translations_file": str(job_dir / "translations.json"),
-        "state_file": str(job_dir / "job_state.json"),
-    }
-    (job_dir / "chunks.json").write_text(
-        json.dumps({"chunks": [["chunk-0", "Hello"], ["chunk-1", "World"]],
-                    "chapter_map": {}}),
-        encoding="utf-8",
-    )
-    state_path = job_dir / "batch_status_x.json"
-    state_path.write_text(json.dumps({"paths": paths}), encoding="utf-8")
-
-    output_path = job_dir / "batch_x_output.jsonl"
-    output_path.write_text(
-        "\n".join([
-            _batch_line("chunk-0", "سلام"),
-            _batch_line("chunk-1", "جهان"),
-            json.dumps({"custom_id": "chunk-2", "response": {"error": "rate limited"}}),
-        ]) + "\n",
-        encoding="utf-8",
-    )
-
-    # `status` is the provider SDK's Batch object and is read via attributes.
-    status = SimpleNamespace(
-        status="expired",
-        output_file_id="file-abc123",
-        request_counts=SimpleNamespace(completed=2, total=3),
-    )
-
-    class FakeFiles:
-        def content(self, file_id):
-            assert file_id == "file-abc123"
-            return io.BytesIO(output_path.read_bytes())
-
-    result = save_partial_batch_results(
-        client=SimpleNamespace(files=FakeFiles()),
-        temp_dir=job_dir,
-        batch_id="x",
-        state_file_path=str(state_path),
-        status=status,
-    )
-
-    assert result, "save_partial_batch_results returned nothing; translations were lost"
-    assert set(result) == {"chunk-0", "chunk-1"}
-
-    translations_file = Path(paths["translations_file"])
-    assert translations_file.is_file(), "translations.json was never written"
-    saved = json.loads(translations_file.read_text(encoding="utf-8"))
-    assert set(saved) == {"chunk-0", "chunk-1"}
-
-
-def test_batch_module_imports_save_translations():
-    """Guard the import itself.
-
-    The original bug was a missing import whose NameError was swallowed. The
-    behaviour test above would also pass if some other code path hid it, so
-    assert the symbol is actually bound in the module.
-    """
-    from app.translation import batch
-
-    assert hasattr(batch, "save_translations"), (
-        "batch.py must import save_translations; otherwise saving partial "
-        "batch results raises NameError and the work is discarded"
-    )
-
-
-# --------------------------------------------------------------------------
-# 4. Concurrency and the adaptive rate limiter
+# 3. Concurrency and the adaptive rate limiter
 # --------------------------------------------------------------------------
 
 def test_translation_runs_chunks_concurrently(monkeypatch, tmp_path):

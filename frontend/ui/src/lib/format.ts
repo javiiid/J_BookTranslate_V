@@ -1,5 +1,6 @@
 import { createElement, type ReactNode } from 'react'
 import type { JobStatus } from './api'
+import { getLocale, localeTag } from './locale.ts'
 
 /** Persian labels, matching the wording used by the current Python pages so the
  *  port does not silently change the language of the product. */
@@ -14,11 +15,34 @@ export const STATUS_FA: Record<JobStatus, string> = {
   cancelled: 'لغوشده',
 }
 
+export const STATUS_EN: Record<JobStatus, string> = {
+  queued: 'Queued',
+  running: 'Translating',
+  stopping: 'Stopping',
+  paused: 'Paused',
+  stopped: 'Stopped',
+  completed: 'Completed',
+  failed: 'Failed',
+  cancelled: 'Cancelled',
+}
+
 export const HEALTH_FA = {
   green: 'سالم',
   yellow: 'نیازمند توجه',
   red: 'دارای مشکل',
 } as const
+
+export const HEALTH_EN = {
+  green: 'Healthy',
+  yellow: 'Needs attention',
+  red: 'Has issues',
+} as const
+
+/** A health state in the active language, falling back to a dash. */
+export function healthLabel(health: string): string {
+  const table = (getLocale() === 'fa' ? HEALTH_FA : HEALTH_EN) as Record<string, string>
+  return table[health] ?? '—'
+}
 
 export const MODE_FA: Record<string, string> = {
   fast: 'سریع',
@@ -28,11 +52,38 @@ export const MODE_FA: Record<string, string> = {
   pdfbilingual: 'PDF دوزبانه',
 }
 
+export const MODE_EN: Record<string, string> = {
+  fast: 'Fast',
+  batch: 'Batch',
+  batchcheck: 'Batch + review',
+  resumebatch: 'Batch resume',
+  pdfbilingual: 'Bilingual PDF',
+}
+
+/** A processing mode in the active language, falling back to the raw value. */
+export function modeLabel(mode: string): string {
+  const table = getLocale() === 'fa' ? MODE_FA : MODE_EN
+  return table[mode] ?? mode
+}
+
 export const STYLE_FA: Record<string, string> = {
   literary: 'ادبی',
   technical: 'فنی',
   conversational: 'محادثه‌ای',
   formal: 'رسمی',
+}
+
+export const STYLE_EN: Record<string, string> = {
+  literary: 'Literary',
+  technical: 'Technical',
+  conversational: 'Conversational',
+  formal: 'Formal',
+}
+
+/** A style preset in the active language, falling back to the raw value. */
+export function styleLabel(style: string): string {
+  const table = getLocale() === 'fa' ? STYLE_FA : STYLE_EN
+  return table[style] ?? style
 }
 
 export const ASSET_FA: Record<string, string> = {
@@ -47,6 +98,26 @@ export const ASSET_FA: Record<string, string> = {
   srt: 'زیرنویس (SRT)',
   quality_report: 'گزارش کیفیت',
   qa_report: 'گزارش کیفیت',
+}
+
+export const ASSET_EN: Record<string, string> = {
+  main: 'Main file',
+  json_segments: 'Translation memory (JSON)',
+  txt_bilingual: 'Bilingual text',
+  markdown: 'Markdown',
+  docx: 'Word (DOCX)',
+  translated_pdf: 'Translated PDF',
+  bilingual_pdf: 'Bilingual PDF',
+  translated_epub: 'Translated EPUB',
+  srt: 'Subtitles (SRT)',
+  quality_report: 'Quality report',
+  qa_report: 'Quality report',
+}
+
+/** An output asset name in the active language, falling back to the raw key. */
+export function assetLabel(name: string): string {
+  const table = getLocale() === 'fa' ? ASSET_FA : ASSET_EN
+  return table[name] ?? name
 }
 
 /**
@@ -82,9 +153,46 @@ export const BADGE_TONE: Record<JobStatus, BadgeTone> = {
   cancelled: 'neutral',
 }
 
-/** A job's status in Persian, falling back to the raw value from the API. */
+/** A job's status in the active language, falling back to the raw value from the API. */
 export function statusLabel(status: string): string {
-  return (STATUS_FA as Record<string, string>)[status] ?? status
+  const table = (getLocale() === 'fa' ? STATUS_FA : STATUS_EN) as Record<string, string>
+  return table[status] ?? status
+}
+
+/**
+ * Server error text in the active language.
+ *
+ * Failure reasons are produced by `_friendly_error` in `app/web.py`, which
+ * writes Persian. The strings below are quoted character-for-character from
+ * there: an exact match renders English, anything else (dynamic text, a new
+ * backend message, English already) passes through untouched rather than
+ * being guessed at. When the backend gains a message, it appears in Persian
+ * until its mirror is added here -- visible, never blank.
+ */
+const SERVER_ERROR_EN: Record<string, string> = {
+  'کلید یا Base URL سرویس ترجمه تنظیم نشده است. از پنل کاربری ← تنظیمات سرویس ترجمه آن را وارد کنید.':
+    'Translation service key or Base URL is not set. Enter it under Account → Translation service settings.',
+  'کلید Provider پذیرفته نشد (401). این کلید با API Keyهای حساب کاربری تفاوت دارد.':
+    'The provider rejected the key (401). This key is different from the account API keys.',
+  'سرویس دسترسی را رد کرد (403). اعتبار حساب، مجوز مدل یا Firewall را بررسی کنید.':
+    'The service denied access (403). Check account credit, model permission, or firewall.',
+  'Base URL یا مدل پیدا نشد (404). آدرس سازگار معمولاً باید به /v1 ختم شود.':
+    'Base URL or model not found (404). A compatible address usually ends with /v1.',
+  'سقف درخواست‌های API پر شده است؛ کمی بعد دوباره ادامه دهید.':
+    'The API request limit is reached; resume again shortly.',
+  'ویندوز دسترسی شبکهٔ برنامه را مسدود کرده است (WinError 10013). برنامه را در Firewall مجاز کنید.':
+    'Windows blocked the app’s network access (WinError 10013). Allow the app in Firewall.',
+  'پاسخ Provider بیش از حد طول کشید؛ اینترنت یا وضعیت سرویس را بررسی کنید.':
+    'The provider response took too long; check the internet connection or service status.',
+  'ارتباط با Provider برقرار نشد. اینترنت، Firewall و Base URL را بررسی کنید.':
+    'Could not reach the provider. Check the internet connection, firewall, and Base URL.',
+  'ترجمه متوقف شد. جزئیات فنی در لاگ در دسترس است.':
+    'Translation stopped. Technical details are in the log.',
+}
+
+export function serverError(text: string): string {
+  if (getLocale() !== 'en') return text
+  return SERVER_ERROR_EN[text] ?? text
 }
 
 /** Kept as a function of the tone so callers never concatenate class names.
@@ -94,8 +202,12 @@ export function statusLabel(status: string): string {
 export const badgeClass = (status: string): string => TONE_CLASS[BADGE_TONE[status as JobStatus] ?? 'neutral']
 
 const faNumber = new Intl.NumberFormat('fa-IR')
+const enNumber = new Intl.NumberFormat('en-US')
 
-export const fa = (value: number | null | undefined): string => faNumber.format(value ?? 0)
+/** A count in the active language's digits. Defaults to Persian, which is
+ *  what every existing caller and test expects until the toggle is used. */
+export const fa = (value: number | null | undefined): string =>
+  (getLocale() === 'fa' ? faNumber : enNumber).format(value ?? 0)
 
 /**
  * A money amount, in dollars.
@@ -187,6 +299,11 @@ export const faBytes = (bytes: number | null | undefined): string => {
 export const faDuration = (seconds: number | null | undefined): string => {
   if (!seconds) return '—'
   const minutes = Math.ceil(seconds / 60)
+  if (getLocale() !== 'fa') {
+    return minutes < 60
+      ? `${fa(minutes)} min`
+      : `${fa(Math.floor(minutes / 60))} hr ${fa(minutes % 60)} min`
+  }
   return minutes < 60
     ? `${fa(minutes)} دقیقه`
     : `${fa(Math.floor(minutes / 60))} ساعت و ${fa(minutes % 60)} دقیقه`
@@ -196,7 +313,7 @@ export const faDate = (value: string | null | undefined): string => {
   if (!value) return '—'
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return '—'
-  return new Intl.DateTimeFormat('fa-IR', {
+  return new Intl.DateTimeFormat(localeTag(), {
     year: 'numeric',
     month: 'short',
     day: 'numeric',
@@ -221,6 +338,16 @@ export const faAgo = (value: string | null | undefined, now: number = Date.now()
   const then = new Date(value).getTime()
   if (Number.isNaN(then)) return '—'
   const seconds = Math.max(0, Math.floor((now - then) / 1000))
+  if (getLocale() !== 'fa') {
+    if (seconds < 60) return 'just now'
+    const minutes = Math.floor(seconds / 60)
+    if (minutes < 60) return `${fa(minutes)} min ago`
+    const hours = Math.floor(minutes / 60)
+    if (hours < 24) return `${fa(hours)} hr ago`
+    const days = Math.floor(hours / 24)
+    if (days < 30) return `${fa(days)} days ago`
+    return faDate(value)
+  }
   if (seconds < 60) return 'لحظاتی پیش'
   const minutes = Math.floor(seconds / 60)
   if (minutes < 60) return `${fa(minutes)} دقیقه پیش`

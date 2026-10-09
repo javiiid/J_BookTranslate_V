@@ -1,0 +1,457 @@
+/* Help center. Token-driven like every other page: no hex here, no
+   Tailwind colour classes in the components. The hero reuses the
+   library band tokens so the two list pages read as one product. */
+
+.help-hero {
+  padding: var(--spacing-6) var(--spacing-5);
+  border-radius: var(--radius-card);
+  background: linear-gradient(135deg, var(--color-hero-from), var(--color-hero-to));
+  color: var(--color-hero-ink);
+  box-shadow: var(--shadow-card);
+}
+
+.help-hero-title {
+  margin: 0;
+  font-size: var(--text-h1);
+  line-height: var(--text-h1--line-height);
+  font-weight: 800;
+  color: var(--color-hero-ink);
+}
+
+.help-hero-sub {
+  margin: var(--spacing-2) 0 0;
+  max-width: 44rem;
+  font-size: var(--text-small);
+  line-height: 1.9;
+  color: var(--color-hero-ink-muted);
+}
+
+.help-search-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-2);
+  margin-top: var(--spacing-4);
+}
+
+.help-search-row .field {
+  flex: 1 1 14rem;
+  min-width: 0;
+  background: var(--color-surface);
+}
+
+/* The shortcut hint: a keycap, not a button. */
+.help-kbd {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  padding: 2px var(--spacing-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-elevated);
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--text-caption);
+  white-space: nowrap;
+}
+
+.help-hero .help-kbd {
+  border-color: transparent;
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--color-hero-ink-muted);
+}
+
+.help-section-title {
+  margin: 0 0 var(--spacing-3);
+  font-size: var(--text-h3);
+  line-height: var(--text-h3--line-height);
+  font-weight: 800;
+}
+
+.help-quick {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--spacing-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.help-quick-card {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-3);
+  min-width: 0;
+  padding: var(--spacing-3) var(--spacing-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+  background: var(--color-surface);
+  color: inherit;
+  text-decoration: none;
+  box-shadow: var(--shadow-card);
+  transition: border-color 0.15s var(--ease-out);
+}
+
+.help-quick-card:hover {
+  border-color: var(--color-primary);
+}
+
+.help-quick-title {
+  display: block;
+  font-size: var(--text-small);
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.help-quick-sub {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+  line-height: 1.7;
+}
+
+/* Category tabs wrap instead of scrolling: a horizontal scroll on a
+   phone hides destinations behind a gesture, and seven tabs never fit
+   360px in one row. */
+.help-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-2);
+  margin-bottom: var(--spacing-4);
+}
+
+.help-tab {
+  min-height: 36px;
+  padding: var(--spacing-1) var(--spacing-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-badge);
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  font-size: var(--text-small);
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background-color 0.15s var(--ease-out),
+    border-color 0.15s var(--ease-out),
+    color 0.15s var(--ease-out);
+}
+
+.help-tab:hover {
+  border-color: var(--color-primary);
+  color: var(--color-text-primary);
+}
+
+.help-tab[aria-selected='true'] {
+  background: var(--color-primary-subtle);
+  border-color: var(--color-primary);
+  color: var(--color-text-brand);
+}
+
+.help-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: var(--spacing-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.help-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-2);
+  min-width: 0;
+  height: 100%;
+  padding: var(--spacing-4);
+}
+
+.help-card-title {
+  margin: 0;
+  font-size: var(--text-body);
+  font-weight: 700;
+  line-height: 1.8;
+  color: var(--color-text-primary);
+}
+
+.help-card-summary {
+  margin: 0;
+  font-size: var(--text-small);
+  line-height: 1.9;
+  color: var(--color-text-secondary);
+}
+
+.help-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-2);
+  margin-top: auto;
+  padding-top: var(--spacing-2);
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+}
+
+/* FAQ accordion: a native button per question, so keyboard and screen
+   readers get expand/collapse free; the `.collapsible` grid animation
+   carries the motion (and honours prefers-reduced-motion globally). */
+.help-faq-list {
+  display: grid;
+  gap: var(--spacing-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.help-faq-item {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+  background: var(--color-surface);
+}
+
+.help-faq-item[data-open='true'] {
+  border-color: var(--color-primary);
+}
+
+.help-faq-q {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-3);
+  width: 100%;
+  min-height: 48px;
+  padding: var(--spacing-3) var(--spacing-4);
+  border: 0;
+  background: none;
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: var(--text-small);
+  font-weight: 700;
+  text-align: start;
+  cursor: pointer;
+}
+
+.help-faq-chev {
+  flex: none;
+  color: var(--color-text-muted);
+  transition: transform 0.15s var(--ease-out);
+}
+
+.help-faq-item[data-open='true'] .help-faq-chev {
+  transform: rotate(180deg);
+}
+
+.help-faq-a {
+  padding: 0 var(--spacing-4) var(--spacing-4);
+  font-size: var(--text-small);
+  line-height: 1.9;
+  color: var(--color-text-secondary);
+}
+
+.help-faq-a p {
+  margin: 0 0 var(--spacing-2);
+}
+
+.help-faq-a p:last-child {
+  margin-bottom: 0;
+}
+
+.help-video-empty {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-3);
+  padding: var(--spacing-4);
+}
+
+/* Article page */
+.help-crumb {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-2);
+  margin-bottom: var(--spacing-4);
+  font-size: var(--text-small);
+  color: var(--color-text-muted);
+}
+
+.help-crumb a {
+  color: var(--color-link);
+  text-decoration: none;
+}
+
+.help-crumb a:hover {
+  text-decoration: underline;
+}
+
+.help-article-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-2);
+  margin-top: var(--spacing-3);
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+}
+
+.help-toc {
+  margin: 0 0 var(--spacing-5);
+  padding: var(--spacing-3) var(--spacing-4);
+}
+
+.help-toc-title {
+  margin: 0 0 var(--spacing-2);
+  font-size: var(--text-small);
+  font-weight: 800;
+}
+
+.help-toc ul {
+  display: grid;
+  gap: var(--spacing-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.help-toc a {
+  color: var(--color-link);
+  font-size: var(--text-small);
+  text-decoration: none;
+}
+
+.help-toc a:hover {
+  text-decoration: underline;
+}
+
+.help-section {
+  margin-bottom: var(--spacing-6);
+  scroll-margin-top: var(--spacing-6);
+}
+
+.help-section h2 {
+  margin: 0 0 var(--spacing-3);
+  font-size: var(--text-h3);
+  font-weight: 800;
+}
+
+.help-prose p {
+  margin: 0 0 var(--spacing-3);
+  font-size: var(--text-body);
+  line-height: 1.9;
+  color: var(--color-text-primary);
+  overflow-wrap: break-word;
+}
+
+.help-steps {
+  display: grid;
+  gap: var(--spacing-2);
+  margin: 0 0 var(--spacing-3);
+  padding: 0;
+  list-style: none;
+  counter-reset: help-step;
+}
+
+.help-steps li {
+  display: flex;
+  gap: var(--spacing-3);
+  counter-increment: help-step;
+  font-size: var(--text-body);
+  line-height: 1.9;
+  color: var(--color-text-primary);
+}
+
+.help-steps li::before {
+  content: counter(help-step);
+  flex: none;
+  width: 1.75rem;
+  height: 1.75rem;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--color-primary-subtle);
+  color: var(--color-text-brand);
+  font-size: var(--text-caption);
+  font-weight: 800;
+}
+
+/* Notes and warnings reuse the alert pair, so the colour is a
+   reinforcement and the label beside it is the signal. Code stays LTR
+   like log lines: a path or a key in an RTL paragraph reorders. */
+.help-code {
+  display: block;
+  direction: ltr;
+  text-align: left;
+  margin: 0 0 var(--spacing-3);
+  padding: var(--spacing-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  background: var(--color-surface-sunken);
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--text-caption);
+  line-height: 1.9;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.help-code-label {
+  display: block;
+  margin-bottom: var(--spacing-1);
+  color: var(--color-text-muted);
+}
+
+/* Search highlight: a wash, never raw HTML. `<mark>` inherits the text
+   colour so contrast is whatever the page already audited. */
+.help-result mark,
+.help-card mark,
+.help-faq-q mark {
+  background: var(--color-secondary-subtle);
+  color: inherit;
+  border-radius: 2px;
+  padding-inline: 1px;
+}
+
+/* Command dialog rows */
+.help-result-list {
+  display: grid;
+  gap: var(--spacing-1);
+  margin: var(--spacing-3) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.help-result {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--spacing-3);
+  width: 100%;
+  padding: var(--spacing-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.help-result[data-active='true'] {
+  border-color: var(--color-primary);
+  background: var(--color-primary-subtle);
+}
+
+.help-result-title {
+  display: block;
+  font-size: var(--text-small);
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.help-result-summary {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--text-caption);
+  line-height: 1.7;
+  color: var(--color-text-muted);
+  overflow-wrap: break-word;
+}

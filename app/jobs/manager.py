@@ -1,16 +1,11 @@
-﻿import sys
-
-from app.jobs.state import find_resumable_jobs
+﻿from app.jobs.state import find_resumable_jobs
 
 def select_resumable_job(input_epub_path, from_lang, to_lang, model, mode):
-    """Helper function to select a resumable job, used by both resume and resumebatch modes"""
+    """Helper function to select a resumable job, used by resume mode"""
     print("\nLooking for resumable translation jobs... [select_resumable_job]")
     resumable_jobs = find_resumable_jobs(input_epub_path, from_lang, to_lang, model)
     if not resumable_jobs:
         print("\nNo resumable jobs found. [select_resumable_job]")
-        if mode == 'resumebatch':
-            print("Please run with --mode batch first to create a new batch job. [select_resumable_job]")
-            sys.exit(1)
         choice = input("Start new translation job? (y/N): [select_resumable_job]")
         if choice.lower() != 'y':
             print("Aborting. [select_resumable_job]")

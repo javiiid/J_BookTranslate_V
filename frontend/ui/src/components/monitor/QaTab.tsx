@@ -1,6 +1,7 @@
 import type { Job } from '@/lib/api'
 import type { ChunkRow } from '@/lib/chunks'
 import { fa } from '@/lib/format'
+import { useLanguage } from '@/i18n/useLanguage.ts'
 import { FlaggedList } from './VirtualChunkTable'
 
 /**
@@ -21,11 +22,12 @@ export function QaTab({
   isPending: boolean
 }) {
   const quality = job.quality
+  const { t } = useLanguage()
   const scores: [string, number][] =
     quality && typeof quality === 'object'
       ? Object.entries(quality).filter((entry): entry is [string, number] => typeof entry[1] === 'number')
       : typeof quality === 'number'
-        ? [['امتیاز کلی', quality]]
+        ? [[t('monitor.qa.overall'), quality]]
         : []
 
   const flagged = rows.filter((row) => row.flagged)
@@ -35,7 +37,7 @@ export function QaTab({
       {scores.length > 0 ? (
         <section className="surface-card p-[var(--spacing-5)]" aria-labelledby="qa-scores-heading">
           <h2 id="qa-scores-heading" className="mb-[var(--spacing-3)] text-[length:var(--text-h3)] font-extrabold">
-            امتیازها
+            {t('monitor.qa.scores')}
           </h2>
           <div className="qa-grid">
             {scores.map(([label, value]) => (
@@ -50,14 +52,14 @@ export function QaTab({
 
       <section className="surface-card p-[var(--spacing-5)]" aria-labelledby="qa-report-heading">
         <h2 id="qa-report-heading" className="mb-[var(--spacing-3)] text-[length:var(--text-h3)] font-extrabold">
-          بخش‌های نیازمند بازبینی
+          {t('monitor.qa.reviewTitle')}
         </h2>
         <p className="mb-[var(--spacing-3)] text-[length:var(--text-small)]" style={{ color: 'var(--color-text-muted)' }}>
           {isPending
-            ? 'در حال خواندن بخش‌ها…'
+            ? t('monitor.qa.reading')
             : flagged.length > 0
-              ? `${fa(flagged.length)} بخش پرچم‌دار نیاز به بازبینی دارد.`
-              : 'هیچ بخش پرچم‌داری وجود ندارد.'}
+              ? t('monitor.qa.flaggedSome', { n: fa(flagged.length) })
+              : t('monitor.qa.flaggedNone')}
         </p>
 
         {job.qa_report ? (
@@ -65,7 +67,7 @@ export function QaTab({
           // embeds model output and file paths.
           <pre className="log-box">{job.qa_report}</pre>
         ) : (
-          <p className="empty">گزارش کیفیت هنوز تولید نشده است.</p>
+          <p className="empty">{t('monitor.qa.noReport')}</p>
         )}
 
         <FlaggedList rows={rows} />

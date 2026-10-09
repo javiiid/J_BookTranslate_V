@@ -13,7 +13,7 @@ Job metadata captures the glossary before the worker starts. The pipeline
 copies it atomically to `glossary.json` in its job directory. Resume uses that
 base plus this job's learned terms, not later library edits. Older jobs without
 an automatic-extraction flag retain their previous behavior. New library
-translations use fast mode; the batch request builder reads the fixed snapshot.
+translations use fast mode; translation requests read the fixed snapshot.
 
 Only terms found at word boundaries in the chunk's visible text are included
 in the translation request. Sequential translation logs missing equivalents
@@ -27,8 +27,7 @@ and the Library translation panel. Uncheck it to avoid the extra requests.
 Sequential EPUB/PDF translations extract up to 20 names or specialized terms
 after saving each translated chunk, with a maximum of 2,000 terms per glossary.
 This adds an API request per chunk and therefore adds latency and provider cost.
-Batch extraction is disabled: independently submitted chunks cannot use terms
-learned from an earlier chunk's response. Existing jobs are not opted in.
+Existing jobs are not opted in.
 
 The extractor receives the source/translation pair. Candidates must occur in
 both texts, and must not conflict with an existing normalized source term.

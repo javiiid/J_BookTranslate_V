@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate } from 'react-router-dom'
 import { calibrationApi, stateLabel } from '@/lib/calibration'
 import { EstimateModal } from '@/components/estimate/EstimateModal'
+import { useLanguage } from '@/i18n/useLanguage.ts'
 import {
   RescueConflictError,
   api,
@@ -38,11 +39,12 @@ import { fa, faDate } from '@/lib/format'
  * lines that matter.
  */
 function ConflictDifferences({ detail }: { detail: RescueConflict }) {
+  const { t } = useLanguage()
   const LABELS: Record<string, string> = {
-    model: 'مدل',
-    from_lang: 'زبان مبدأ',
-    to_lang: 'زبان مقصد',
-    mode: 'حالت',
+    model: t('workspace.conflictModel'),
+    from_lang: t('workspace.conflictFrom'),
+    to_lang: t('workspace.conflictTo'),
+    mode: t('workspace.conflictMode'),
   }
   const changed = Object.entries(detail.differences).filter(
     ([, pair]) => pair.rescue !== pair.server,
@@ -50,7 +52,7 @@ function ConflictDifferences({ detail }: { detail: RescueConflict }) {
   if (changed.length === 0) {
     return (
       <p className="mt-1 text-[length:var(--text-caption)]">
-        تنظیمات یکسان‌اند. اگر نسخهٔ نجاتی تازه‌تر است، جایگزین کنید.
+        {t('workspace.conflictSame')}
       </p>
     )
   }
@@ -71,6 +73,7 @@ function ConflictDifferences({ detail }: { detail: RescueConflict }) {
 }
 
 export function WorkspacePage() {
+  const { t, dir } = useLanguage()
   const client = useQueryClient()
   const navigate = useNavigate()
   const fileInput = useRef<HTMLInputElement | null>(null)
@@ -121,7 +124,7 @@ export function WorkspacePage() {
     },
     onError: (error) => {
       setNotice({
-        text: error instanceof Error ? error.message : 'آماده‌سازی کارگاه ترجمه ناموفق بود.',
+        text: error instanceof Error ? error.message : t('workspace.workshopFailed'),
         tone: 'error',
       })
     },
@@ -157,9 +160,10 @@ export function WorkspacePage() {
       // The dialog is opened on the restored path, not on the archive: the
       // estimate endpoint reads a book off disk, and the archive is not one.
       setNotice({
-        text: `نسخهٔ نجاتی وارد شد: ${fa(result.chunks_already_done)} بخش از ${fa(
-          result.chunk_count_total,
-        )} پیش‌تر ترجمه شده است.`,
+        text: t('workspace.rescued', {
+          done: fa(result.chunks_already_done),
+          total: fa(result.chunk_count_total),
+        }),
         tone: 'ok',
       })
       void input
@@ -170,7 +174,7 @@ export function WorkspacePage() {
         return
       }
       setNotice({
-        text: error instanceof Error ? error.message : 'وارد کردن نسخهٔ نجاتی ناموفق بود.',
+        text: error instanceof Error ? error.message : t('workspace.rescueFailed'),
         tone: 'error',
       })
     },
@@ -192,7 +196,7 @@ export function WorkspacePage() {
 
     if (!/\.(epub|pdf|txt)$/i.test(file.name)) {
       setNotice({
-        text: 'فقط فایل EPUB، PDF، TXT یا نسخهٔ نجاتی (ZIP) پذیرفته می‌شود.',
+        text: t('workspace.badFile'),
         tone: 'error',
       })
       return
@@ -231,29 +235,29 @@ export function WorkspacePage() {
    * until the run is done. Offering them here would be offering a 422.
    */
   const OUTPUTS = [
-    ['json_segments', 'حافظهٔ ترجمه'],
-    ['txt_bilingual', 'متن دوزبانه'],
-    ['markdown', 'مارک‌داون'],
-    ['docx', 'ورد'],
-    ['translated_pdf', 'PDF'],
-    ['bilingual_pdf', 'PDF دوزبانه'],
+    ['json_segments', t('workspace.outMemory')],
+    ['txt_bilingual', t('workspace.outBilingual')],
+    ['markdown', t('workspace.outMarkdown')],
+    ['docx', t('workspace.outDocx')],
+    ['translated_pdf', t('workspace.outPdf')],
+    ['bilingual_pdf', t('workspace.outBilingualPdf')],
   ] as const
 
   // Inline, never a full-page replacement: an upload failure must not unmount
   // the form, the settings and the glossary panel the reader just filled in.
   const uploadError = upload.isError
-    ? upload.error instanceof Error ? upload.error.message : 'آپلود ناموفق بود.'
+    ? upload.error instanceof Error ? upload.error.message : t('workspace.uploadFailed')
     : null
 
   return (
-    <main className="page" dir="rtl">
+    <main className="page" dir={dir}>
       <header className="mb-6">
-        <h1 className="text-[length:var(--text-h1)] font-extrabold tracking-tight">افزودن کتاب</h1>
+        <h1 className="text-[length:var(--text-h1)] font-extrabold tracking-tight">{t('workspace.title')}</h1>
         <p
           className="mt-1 text-[length:var(--text-small)]"
           style={{ color: 'var(--color-text-muted)' }}
         >
-          کتاب را وارد کنید، نمونه‌ها و واژه‌نامه را بررسی کنید و سپس ترجمهٔ کامل را شروع کنید. بارگذاری هزینهٔ مدل ندارد.
+          {t('workspace.subtitle')}
         </p>
       </header>
 
@@ -276,7 +280,7 @@ export function WorkspacePage() {
               native control inside a fake one. */}
           <div
             role="group"
-            aria-label="انتخاب فایل کتاب"
+            aria-label={t('workspace.dropLabel')}
             className="grid place-items-center rounded-[var(--radius-panel)] border-2 border-dashed p-10 text-center"
             style={{
               borderColor: dragging ? 'var(--color-primary)' : 'var(--color-border-strong)',
@@ -296,15 +300,15 @@ export function WorkspacePage() {
             <span className="mb-2 text-2xl" aria-hidden="true">
               ⬓
             </span>
-            <strong className="text-[length:var(--text-body)]">فایل را اینجا رها کنید</strong>
+            <strong className="text-[length:var(--text-body)]">{t('workspace.drop')}</strong>
             <span
               className="mt-1 text-[length:var(--text-caption)]"
               style={{ color: 'var(--color-text-muted)' }}
             >
-              کتاب EPUB، PDF یا TXT؛ یا نسخهٔ نجاتی ZIP برای ادامهٔ ترجمه
+              {t('workspace.dropHint')}
             </span>
             <label className="btn btn-secondary mt-2">
-              انتخاب از دستگاه
+              {t('workspace.choose')}
               <input
                 ref={fileInput}
                 type="file"
@@ -331,15 +335,17 @@ export function WorkspacePage() {
               produce a glossary nobody chose -- so the reader is asked, and is
               shown what differs rather than a bare "already exists". */}
           {conflict ? (
-            <div className="alert alert-warning" role="alertdialog" aria-label="این کتاب از قبل روی سرور هست">
+            <div className="alert alert-warning" role="alertdialog" aria-label={t('workspace.conflictTitle')}>
               <p className="font-bold">
-                <span aria-hidden="true">⚠</span> این کتاب از قبل روی سرور هست
+                <span aria-hidden="true">⚠</span> {t('workspace.conflictTitle')}
               </p>
               <p className="mt-1">
-                روی سرور {fa(conflict.detail.progress.completed)} بخش از{' '}
-                {fa(conflict.detail.progress.total)} ترجمه شده؛ نسخهٔ نجاتی{' '}
-                {fa(conflict.detail.rescued.chunks_already_done)} بخش از{' '}
-                {fa(conflict.detail.rescued.chunk_count_total)}.
+                {t('workspace.conflictBody', {
+                  done: fa(conflict.detail.progress.completed),
+                  total: fa(conflict.detail.progress.total),
+                  rdone: fa(conflict.detail.rescued.chunks_already_done),
+                  rtotal: fa(conflict.detail.rescued.chunk_count_total),
+                })}
               </p>
               <ConflictDifferences detail={conflict.detail} />
               <div className="mt-3 flex flex-wrap gap-2">
@@ -350,14 +356,14 @@ export function WorkspacePage() {
                     if (conflict.file) rescue.mutate({ file: conflict.file, force: true })
                   }}
                 >
-                  از نسخهٔ نجاتی استفاده کن
+                  {t('workspace.useRescue')}
                 </button>
                 <button
                   type="button"
                   className="btn btn-secondary"
                   onClick={() => setConflict(null)}
                 >
-                  کار فعلی را نگه دار
+                  {t('workspace.keepCurrent')}
                 </button>
               </div>
             </div>
@@ -374,19 +380,19 @@ export function WorkspacePage() {
 
           {upload.isPending ? (
             <p role="status" className="alert alert-info">
-              در حال آماده‌سازی کارگاه ترجمه…
+              {t('workspace.preparing')}
             </p>
           ) : null}
 
           {/* ---- settings ---- */}
           <section className="surface-card p-5" aria-labelledby="settings-heading">
             <h2 id="settings-heading" className="mb-4 text-[length:var(--text-h3)] font-extrabold">
-              تنظیمات ترجمه
+              {t('workspace.settings')}
             </h2>
 
             <div className="grid gap-4 sm:grid-cols-2">
               <label className="grid gap-1">
-                <span className="label">زبان مبدأ</span>
+                <span className="label">{t('workspace.from')}</span>
                 <select className="field" value={from} onChange={(event) => setFrom(event.target.value)}>
                   {(languages.data?.items ?? []).map((language) => (
                     <option key={language.code} value={language.code}>
@@ -397,7 +403,7 @@ export function WorkspacePage() {
               </label>
 
               <label className="grid gap-1">
-                <span className="label">زبان مقصد</span>
+                <span className="label">{t('workspace.to')}</span>
                 <select className="field" value={to} onChange={(event) => setTo(event.target.value)}>
                   {(languages.data?.items ?? []).map((language) => (
                     <option key={language.code} value={language.code}>
@@ -408,12 +414,12 @@ export function WorkspacePage() {
               </label>
 
               <label className="grid gap-1">
-                <span className="label">مدل پیش‌نویس و ترجمه</span>
+                <span className="label">{t('workspace.model')}</span>
                 <select className="field" value={model} onChange={(event) => setModel(event.target.value)}>
                   {/* Empty means "the configured default", so the form does not
                       hardcode a model the way the Python form did. */}
                   <option value="">
-                    پیش‌فرض {config.data?.default_model ?? '—'}
+                    {t('workspace.modelDefault', { model: config.data?.default_model ?? '—' })}
                   </option>
                   {(models.data?.items ?? []).map((item) => (
                     <option key={item.id} value={item.id}>
@@ -428,12 +434,11 @@ export function WorkspacePage() {
               className="mt-4 text-[length:var(--text-caption)]"
               style={{ color: 'var(--color-text-muted)' }}
             >
-              لحن، مدل نهایی، واژه‌نامه و سقف هزینه در کارگاه انتخاب می‌شوند؛ آنجا
-              روی نمونهٔ واقعی کتاب تصمیم می‌گیرید، نه پیش از دیدن متن.
+              {t('workspace.settingsNote')}
             </p>
 
             <fieldset className="mt-5">
-              <legend className="label mb-2">خروجی‌های اضافه</legend>
+              <legend className="label mb-2">{t('workspace.extraOutputs')}</legend>
               <div className="flex flex-wrap gap-x-5 gap-y-2">
                 {OUTPUTS.map(([value, label]) => (
                   <label key={value} className="flex items-center gap-2 text-[length:var(--text-label)]">
@@ -455,17 +460,17 @@ export function WorkspacePage() {
               second session and lose the approvals already paid for. */}
           <section className="surface-card p-5" aria-labelledby="drafts-heading">
             <h2 id="drafts-heading" className="text-[length:var(--text-h3)] font-extrabold">
-              کارگاه‌های باز
+              {t('workspace.openShops')}
             </h2>
             {drafts.isPending ? (
               <div className="skeleton mt-3" style={{ height: 64 }} />
             ) : drafts.isError ? (
               <p role="alert" className="alert alert-error mt-3">
-                فهرست کارگاه‌ها خوانده نشد.
+                {t('workspace.shopsFailed')}
               </p>
             ) : (drafts.data?.items.length ?? 0) === 0 ? (
               <p className="mt-2 text-[length:var(--text-caption)]" style={{ color: 'var(--color-text-muted)' }}>
-                هنوز کارگاهی باز نیست. یک کتاب انتخاب کنید.
+                {t('workspace.noShops')}
               </p>
             ) : (
               /* `min-w-0` on the row as well as the text block: `truncate` needs a
@@ -521,13 +526,13 @@ export function WorkspacePage() {
 
         {/* ---- what happens next ---- */}
         <aside className="surface-card h-fit min-w-0 p-5">
-          <h2 className="text-[length:var(--text-h3)] font-extrabold">بعد از بارگذاری</h2>
+          <h2 className="text-[length:var(--text-h3)] font-extrabold">{t('workspace.afterUpload')}</h2>
           <ol className="mt-3 grid gap-3">
             {[
-              ['نمونه‌های واقعی', 'کتاب به چند بخش نماینده برش می‌خورد و همین‌جا نشان داده می‌شود.'],
-              ['صدا و واژه‌نامه', 'لحن را می‌خوانید و اصطلاح‌ها را خودتان تأیید یا اصلاح می‌کنید.'],
-              ['قفل پروفایل', 'پس از تأیید، لحن و واژه‌نامه قفل می‌شوند و بخش‌های تأییدشده دوباره هزینه نمی‌شوند.'],
-              ['ترجمهٔ کامل', 'کتاب با همان پروفایل قفل‌شده وارد صف می‌شود.'],
+              [t('workspace.after1t'), t('workspace.after1b')],
+              [t('workspace.after2t'), t('workspace.after2b')],
+              [t('workspace.after3t'), t('workspace.after3b')],
+              [t('workspace.after4t'), t('workspace.after4b')],
             ].map(([title, body], index) => (
               <li key={title} className="flex gap-[var(--spacing-3)]">
                 <span
@@ -553,8 +558,7 @@ export function WorkspacePage() {
             className="mt-4 text-[length:var(--text-caption)]"
             style={{ color: 'var(--color-text-muted)' }}
           >
-            بارگذاری هیچ هزینه‌ای ندارد. اولین تماس با مدل، وقتی است که خودتان دکمهٔ
-            ترجمهٔ یک نمونه را می‌زنید.
+            {t('workspace.freeNote')}
           </p>
         </aside>
       </div>
@@ -576,9 +580,10 @@ export function WorkspacePage() {
         request={{
           /* A rescue's own settings, not the form's. The estimate has to price
              the run the resume will actually make, and that is the rescued job's
-             model and language pair. */
+             model and language pair. Mode is always fast now: batch modes were
+             removed, and the server normalizes anything else to fast anyway. */
           model: rescued?.model || effectiveModel,
-          mode: rescued?.mode === 'batch' ? 'batch' : 'fast',
+          mode: 'fast',
           concurrency: config.data?.max_concurrency,
           glossary_auto: false,
           from_lang: rescued?.from_lang || from,

@@ -34,9 +34,9 @@ body = inspect.getsource(process_translations)
 whitelist = re.search(r"supported_modes\s*=\s*\{(.*?)\}", body, re.S)
 modes = re.findall(r'"([^"]+)"', whitelist.group(1)) if whitelist else []
 print(f"  modes it will accept : {modes}")
-print(f"  modes the CLI offers : ['batch', 'resume', 'test', 'batchcheck', 'resumebatch', 'pdfbilingual']")
+print(f"  modes the CLI offers : ['resume', 'test', 'pdfbilingual']")
 
-missing = [m for m in ["batch", "resume", "test", "batchcheck", "resumebatch", "pdfbilingual"]
+missing = [m for m in ["resume", "test", "pdfbilingual"]
            if m not in modes]
 print(f"  offered but rejected : {missing}")
 

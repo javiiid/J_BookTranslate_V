@@ -1,0 +1,603 @@
+/* --------------------------------------------------------------------------
+   The dashboard page.
+
+   Split out of `tokens.css` the way `library.css` is: the file next to the
+   page that owns it, imported by that page. These are the only rules here
+   that no other page uses.
+
+   Everything is a token or a spacing step. No hex, no Tailwind colour class.
+   -------------------------------------------------------------------------- */
+
+/* --------------------------------------------------------------------------
+   The hero band
+
+   One dark strip carrying the page's greeting, so the heading stops competing
+   with the tiles and the sections below. Same gradient axis and inks as the
+   library band (`to bottom`, never mirrored: an RTL page does not flip a
+   vertical gradient).
+   -------------------------------------------------------------------------- */
+.dash-hero {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-4);
+  margin-bottom: var(--spacing-4);
+  padding: var(--spacing-5);
+  border-radius: var(--radius-card);
+  background: linear-gradient(
+    to bottom,
+    var(--color-hero-from),
+    var(--color-hero-to)
+  );
+  color: var(--color-hero-ink);
+}
+
+.dash-hero-eyebrow {
+  font-size: var(--text-caption);
+  line-height: var(--text-caption--line-height);
+  color: var(--color-hero-ink-muted);
+}
+
+.dash-hero-title {
+  margin-top: var(--spacing-1);
+  font-size: var(--text-h1);
+  font-weight: 800;
+  line-height: var(--text-h1--line-height);
+  color: var(--color-hero-ink);
+}
+
+.dash-hero-status {
+  margin-top: var(--spacing-1);
+  font-size: var(--text-small);
+  line-height: var(--text-small--line-height);
+  color: var(--color-hero-ink-muted);
+}
+
+.dash-hero-actions {
+  display: flex;
+  /* No `flex: none` here. As one grouped item beside the greeting it must be
+     allowed to shrink and to drop to its own line on a phone: `flex: none`
+     pinned it at its 398px max-content and pushed the page 44px past a 390px
+     viewport. `min-width: 0` releases it; the inner wrap stacks the pill. */
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-2);
+}
+
+/* A solid action on the band. `btn-primary` is tuned for the page surface and
+   fails AA on this ground, so the primary here is the band's own ink. */
+.dash-hero-primary {
+  background: var(--color-hero-ink);
+  border-color: var(--color-hero-ink);
+  color: var(--color-hero-to);
+}
+.dash-hero-primary:hover:not(:disabled) {
+  opacity: 0.88;
+}
+
+/* A quiet action on the band: outline in the band's ink, transparent fill. */
+.dash-hero .btn-secondary {
+  background: transparent;
+  border-color: var(--color-hero-ink);
+  color: var(--color-hero-ink);
+}
+.dash-hero .btn-secondary:hover:not(:disabled) {
+  background: var(--color-hero-ink);
+  color: var(--color-hero-to);
+}
+.dash-hero .btn-secondary:disabled {
+  opacity: 0.6;
+}
+
+/* The background-fetch note beside the actions. `aria-hidden`: it mirrors
+   polling state on every refetch and must never become a live announcement. */
+.dash-updating {
+  font-size: var(--text-caption);
+  line-height: var(--text-caption--line-height);
+  color: var(--color-hero-ink-muted);
+  white-space: nowrap;
+}
+
+/* --------------------------------------------------------------------------
+   The two-column body
+
+   Main column plus a 20rem rail on desktop; one reading-order column below
+   `lg`. Both tracks start at the top and neither may grow the page sideways,
+   so both carry `min-width: 0`.
+   -------------------------------------------------------------------------- */
+.dash-layout {
+  display: grid;
+  gap: var(--spacing-4);
+  align-items: start;
+}
+
+@media (min-width: 64rem) {
+  .dash-layout {
+    grid-template-columns: minmax(0, 1fr) 20rem;
+  }
+}
+
+.dash-main,
+.dash-side {
+  display: grid;
+  gap: var(--spacing-4);
+  min-width: 0;
+  align-content: start;
+}
+
+/* --------------------------------------------------------------------------
+   Overview tiles
+
+   Four figures in one row on desktop, two on a phone. A tile is a figure, not
+   a document, so `--radius-control` rather than `--radius-card`. The tone is
+   a 3px edge marker: the number itself stays at full text contrast.
+   -------------------------------------------------------------------------- */
+.dash-tiles {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--spacing-3);
+}
+
+@media (min-width: 64rem) {
+  .dash-tiles {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.dash-tile {
+  position: relative;
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  padding: var(--spacing-4);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  box-shadow: var(--shadow-card);
+  text-decoration: none;
+  transition: border-color 0.15s var(--ease-out);
+}
+
+a.dash-tile:hover {
+  border-color: var(--color-primary);
+}
+
+.dash-tile-edge {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  width: 3px;
+}
+
+.dash-tile-label {
+  display: block;
+  padding-inline-start: var(--spacing-2);
+  font-size: var(--text-caption);
+  font-weight: 600;
+  line-height: var(--text-caption--line-height);
+  color: var(--color-text-muted);
+}
+
+.dash-tile-value {
+  display: block;
+  margin-top: var(--spacing-1);
+  padding-inline-start: var(--spacing-2);
+  font-size: var(--text-h2);
+  font-weight: 800;
+  line-height: var(--text-h2--line-height);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-primary);
+}
+
+.dash-tile-hint {
+  display: block;
+  margin-top: var(--spacing-1);
+  padding-inline-start: var(--spacing-2);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption--line-height);
+  color: var(--color-text-muted);
+}
+
+/* --------------------------------------------------------------------------
+   Sections
+
+   One card per question (stuck, running, pulse, recent), so the page reads as
+   a stack of answers rather than a pile of tiles. The head is a baseline row:
+   title plus a note that never wraps under it on a phone.
+   -------------------------------------------------------------------------- */
+.dash-section {
+  min-width: 0;
+  padding: var(--spacing-4);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+}
+
+@media (min-width: 40rem) {
+  .dash-section {
+    padding: var(--spacing-5);
+  }
+}
+
+.dash-section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--spacing-2) var(--spacing-3);
+  margin-bottom: var(--spacing-3);
+}
+
+.dash-section-title {
+  font-size: var(--text-h3);
+  font-weight: 800;
+  line-height: var(--text-h3--line-height);
+  color: var(--color-text-primary);
+}
+
+.dash-section-note {
+  font-size: var(--text-caption);
+  line-height: var(--text-caption--line-height);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-muted);
+}
+
+.dash-list {
+  display: grid;
+  gap: var(--spacing-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* --------------------------------------------------------------------------
+   Truncated names
+
+   Long, mixed-script filenames must never resize their row. The truncating
+   element carries `dir="ltr"` in the markup (a `<bdi>` isolate does not move
+   the ellipsis) and `title` with the full name; the alignment below keeps the
+   surviving head against the badge on an RTL page.
+   -------------------------------------------------------------------------- */
+.dash-trunc {
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+[dir='rtl'] .dash-trunc {
+  text-align: right;
+}
+
+/* --------------------------------------------------------------------------
+   Active job cards
+
+   The stack in the "in progress" section. Title row on top, one progress line
+   beneath it, actions pinned to the reading-end side on desktop.
+   -------------------------------------------------------------------------- */
+.dash-active {
+  min-width: 0;
+  padding: var(--spacing-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+}
+
+.dash-active-top {
+  display: grid;
+  gap: var(--spacing-2);
+}
+
+@media (min-width: 64rem) {
+  .dash-active-top {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: var(--spacing-3);
+  }
+}
+
+.dash-active-title-row {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  min-width: 0;
+}
+
+.dash-active-title {
+  display: block;
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-body);
+  font-weight: 700;
+  line-height: var(--text-body--line-height);
+  color: var(--color-text-primary);
+  text-decoration: none;
+}
+.dash-active-title:hover {
+  text-decoration: underline;
+}
+
+.dash-active-meta {
+  display: block;
+  margin-top: var(--spacing-1);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption--line-height);
+  color: var(--color-text-muted);
+  overflow-wrap: break-word;
+}
+
+.dash-active-side {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-2);
+}
+
+.dash-active-eta {
+  font-size: var(--text-caption);
+  line-height: var(--text-caption--line-height);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.dash-active-progress {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  margin-top: var(--spacing-3);
+}
+
+.dash-active-progress .progress-track {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.dash-active-count {
+  flex: none;
+  font-size: var(--text-caption);
+  line-height: var(--text-caption--line-height);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+/* --------------------------------------------------------------------------
+   Attention rows
+
+   Failed and resumable-paused jobs. Structure mirrors the active cards; the
+   error wash and the `role="alert"` on a failed resume are the signals, never
+   colour alone.
+   -------------------------------------------------------------------------- */
+.dash-attention {
+  min-width: 0;
+  padding: var(--spacing-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+}
+
+.dash-attention-top {
+  display: grid;
+  gap: var(--spacing-3);
+}
+
+@media (min-width: 64rem) {
+  .dash-attention-top {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+  }
+}
+
+.dash-attention-actions {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-2);
+}
+
+/* --------------------------------------------------------------------------
+   Quick actions and system (the rail)
+
+   Vertical stack of one-answer cards plus a definition list of system figures.
+   Icon chips and badges are `flex: none`: a long book title truncates instead
+   of squeezing them.
+   -------------------------------------------------------------------------- */
+.dash-quick {
+  display: grid;
+  /* A lone implicit track sizes to its widest item, so one 895px filename
+     set the whole rail to 981px on a 390px phone. Naming the track bounds
+     it; `min-width: 0` on the rows lets each card shrink into it. */
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--spacing-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dash-quick > li {
+  min-width: 0;
+}
+
+.dash-quick-card {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-3);
+  min-width: 0;
+  height: 100%;
+  padding: var(--spacing-3) var(--spacing-4);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  box-shadow: var(--shadow-card);
+  text-decoration: none;
+  transition: border-color 0.15s var(--ease-out);
+}
+.dash-quick-card:hover {
+  border-color: var(--color-primary);
+}
+
+.dash-quick-icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 50%;
+  background: var(--color-primary-subtle);
+  color: var(--color-text-brand);
+}
+
+.dash-quick-title {
+  display: block;
+  font-size: var(--text-body);
+  font-weight: 700;
+  line-height: var(--text-body--line-height);
+  color: var(--color-text-primary);
+}
+
+.dash-quick-sub {
+  display: block;
+  overflow: hidden;
+  margin-top: var(--spacing-1);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption--line-height);
+  color: var(--color-text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dash-sys {
+  display: grid;
+  gap: var(--spacing-2);
+  margin: var(--spacing-3) 0 0;
+}
+
+.dash-sys-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--spacing-3);
+  min-width: 0;
+  padding-top: var(--spacing-2);
+  border-top: 1px solid var(--color-border-subtle);
+}
+.dash-sys-row:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.dash-sys-label {
+  min-width: 0;
+  font-size: var(--text-caption);
+  line-height: var(--text-caption--line-height);
+  color: var(--color-text-muted);
+}
+
+.dash-sys-value {
+  flex: none;
+  font-size: var(--text-small);
+  font-weight: 700;
+  line-height: var(--text-small--line-height);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-primary);
+}
+
+/* --------------------------------------------------------------------------
+   Recent rows
+
+   The row's *grid* stays inline Tailwind on the `<Link>`: `responsive.test.ts`
+   asserts the row is a grid by reading the markup, and a guarantee that lives
+   in a stylesheet is one that test cannot see. This file holds the hover and
+   the search row only.
+   -------------------------------------------------------------------------- */
+.dash-row:hover {
+  border-color: var(--color-primary);
+  background: var(--color-surface-elevated);
+}
+
+.dash-search {
+  display: grid;
+  gap: var(--spacing-2);
+  margin-bottom: var(--spacing-3);
+}
+
+.dash-search-scope {
+  font-size: var(--text-caption);
+  line-height: var(--text-caption--line-height);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-muted);
+}
+
+/* --------------------------------------------------------------------------
+   Pulse figures (the week's own cohort, not a global ratio)
+   -------------------------------------------------------------------------- */
+.dash-pulse {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--spacing-3);
+  margin-bottom: var(--spacing-4);
+  padding-bottom: var(--spacing-4);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.dash-pulse-value {
+  display: block;
+  font-size: var(--text-h1);
+  font-weight: 800;
+  line-height: var(--text-h1--line-height);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-primary);
+}
+
+.dash-pulse-label {
+  display: block;
+  margin-top: var(--spacing-1);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption--line-height);
+  color: var(--color-text-muted);
+}
+
+/* --------------------------------------------------------------------------
+   Alerts, empty states and the initial skeleton
+   -------------------------------------------------------------------------- */
+.dash-alert {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-2) var(--spacing-3);
+}
+
+.dash-alert-text {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
+.dash-empty {
+  padding-block: var(--spacing-5);
+  text-align: center;
+  font-size: var(--text-small);
+  line-height: var(--text-small--line-height);
+  color: var(--color-text-muted);
+}
+
+.dash-skel {
+  display: grid;
+  gap: var(--spacing-4);
+}
+
+.dash-skel-tiles {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--spacing-3);
+}
+
+@media (min-width: 64rem) {
+  .dash-skel-tiles {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api, type EstimateRequest, type TranslationEstimate } from '@/lib/api'
-import { Ltr, fa, usd } from '@/lib/format'
+import { Ltr, MODE_FA, fa, usd } from '@/lib/format'
 
 /**
  * The pre-translation estimate.
@@ -363,7 +363,7 @@ export function EstimateModal({
 
             <Card label="خلاصهٔ فرایند">
               <Row label="مدل" value={<Ltr>{data.model}</Ltr>} />
-              <Row label="حالت" value={data.mode === 'batch' ? 'دسته‌ای' : 'سریع'} />
+              <Row label="حالت" value={MODE_FA[data.mode] ?? 'سریع'} />
               <Row label="زبان مبدأ" value={<Ltr>{data.source_lang}</Ltr>} />
               <Row label="زبان مقصد" value={<Ltr>{data.target_lang}</Ltr>} />
             </Card>

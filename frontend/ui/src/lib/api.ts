@@ -5,6 +5,7 @@
  * `docs/inventory/` (Phase 0), not guessed. When the backend contract changes,
  * `npm run check:api` re-captures and the diff shows the drift.
  */
+import type { AuthMeResponse, AuthResponse } from './auth.ts'
 
 export type JobStatus =
   | 'queued'
@@ -546,7 +547,7 @@ export interface EstimateRequest {
    * default it invented. */
   model?: string | undefined
   concurrency?: number | undefined
-  mode?: 'fast' | 'batch' | undefined
+  mode?: 'fast' | undefined
   glossary_auto?: boolean | undefined
   from_lang?: string | undefined
   to_lang?: string | undefined
@@ -644,7 +645,10 @@ export const api = {
     page: number,
     limit: number,
     query = '',
-    status: LibraryStatusFilter = '',
+    // `''` is "no filter", which is what the endpoint already understands by
+    // omission -- so it is a value here rather than an optional parameter, and a
+    // caller cannot pass `undefined` where the union would not take it.
+    status: LibraryStatusFilter | '' = '',
   ) => {
     const params = new URLSearchParams({ page: String(page), limit: String(limit) })
     if (query.trim()) params.set('q', query.trim())
@@ -704,6 +708,32 @@ export const api = {
   accountPortal: () => request<AccountPortal>('/api/account/portal'),
   analytics: () => request<AnalyticsOverview>('/api/analytics/overview'),
   logs: () => request<{ items: JobEvent[] }>('/api/logs'),
+
+  /**
+   * Local password auth (`app/auth/` owns the truth). The session rides an
+   * HttpOnly SameSite=Lax cookie the browser sends itself on same-origin
+   * calls -- no token ever touches JS, so there is nothing to store, leak,
+   * or attach to a header here.
+   */
+  authMe: () => request<AuthMeResponse>('/api/auth/me'),
+  authSignup: (body: { email: string; password: string; display_name: string }) =>
+    request<AuthResponse>('/api/auth/signup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  authLogin: (body: { email: string; password: string }) =>
+    request<AuthResponse>('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  authLogout: () =>
+    request<{ ok: boolean }>('/api/auth/logout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    }),
 
   /**
    * Ask the provider whether it is reachable, and whether the chosen model is in

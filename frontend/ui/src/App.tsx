@@ -1,4 +1,4 @@
-import { Route, Routes, Link } from 'react-router-dom'
+import { Route, Routes, Link, useLocation } from 'react-router-dom'
 import { AppShell } from '@/components/AppShell'
 import { DashboardPage } from '@/pages/DashboardPage'
 import { JobDetailPage } from '@/pages/JobDetailPage'
@@ -14,10 +14,14 @@ import { LibraryPage } from '@/pages/LibraryPage'
 import { ReaderPage } from '@/pages/ReaderPage'
 void ReaderPage
 import { AccountPage } from '@/pages/AccountPage'
+import { AuthPage } from '@/pages/AuthPage'
 import { LandingPage } from '@/pages/LandingPage'
 import { NotFoundPage } from '@/pages/PendingPage'
 import { ConversionPage } from '@/pages/ConversionPage'
 import { CalibrationPage } from '@/pages/CalibrationPage'
+import { HelpPage } from '@/pages/HelpPage'
+import { HelpArticlePage } from '@/pages/HelpArticlePage'
+import { HelpSearchDialog } from '@/components/help/HelpSearchDialog'
 import { ConversionProvider } from '@/components/conversion/ConversionProvider'
 
 /**
@@ -62,9 +66,25 @@ function ReaderHandedOver() {
 }
 
 export function App() {
+  const { pathname } = useLocation()
+  const bare = pathname.replace(/\/+$/, '')
+  if (bare === '/landing' || bare === '/login' || bare === '/signup') {
+    // Standalone surfaces, not product surface: no rail, no bottom bar.
+    // A login form inside the app chrome would read as already being in.
+    return (
+      <ConversionProvider>
+        <Routes>
+          <Route path="/landing" element={<LandingPage />} />
+          <Route path="/login" element={<AuthPage />} />
+          <Route path="/signup" element={<AuthPage />} />
+        </Routes>
+      </ConversionProvider>
+    )
+  }
   return (
     <ConversionProvider>
     <AppShell>
+      <HelpSearchDialog />
       <Routes>
         <Route path="/" element={<DashboardPage />} />
 
@@ -80,6 +100,12 @@ export function App() {
         <Route path="/calibrations/:id" element={<CalibrationPage />} />
         <Route path="/convert" element={<ConversionPage />} />
         <Route path="/library" element={<LibraryPage />} />
+
+        {/* Phase 5b: the help center. `/help` is the hub (query string
+            carries `q`, `cat` and `faq`); every article is a stable
+            `/help/articles/:slug` so links survive refresh and sharing. */}
+        <Route path="/help" element={<HelpPage />} />
+        <Route path="/help/articles/:slug" element={<HelpArticlePage />} />
 
         {/* Phase 4: the bilingual reader.
 
@@ -101,6 +127,8 @@ export function App() {
             ahead of the SPA fallback. The proxy is now `/api` and `/downloads`
             only, so the path belongs to React and the page exists. */}
         <Route path="/account" element={<AccountPage />} />
+        <Route path="/login" element={<AuthPage />} />
+        <Route path="/signup" element={<AuthPage />} />
         <Route path="/landing" element={<LandingPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Routes>

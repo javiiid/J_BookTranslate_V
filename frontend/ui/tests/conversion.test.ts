@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict'
 import { describe, it, mock } from 'node:test'
 import {
-  CONVERSION_MAX_BYTES, conversionFileError, conversionForm, convertFile, parseConversionResult,
+  CONVERSION_MAX_BYTES, conversionFileError, conversionFormatDescription, conversionFormatLabel, conversionForm, convertFile, parseConversionResult,
 } from '../src/lib/conversion.ts'
+import { setLocale } from '../src/lib/locale.ts'
 
 const response = {
   id: 'abc123',
@@ -48,6 +49,23 @@ describe('conversion results', () => {
     for (const download of ['javascript:alert(1)', 'https://example.com/file', '/downloads/convert/other/docx']) {
       assert.throws(() => parseConversionResult({ ...response, versions: [{ ...response.versions[0], download }] }))
     }
+  })
+})
+
+describe('conversion locale', () => {
+  it('labels and errors answer in English after the toggle', () => {
+    setLocale('en')
+    try {
+      assert.equal(conversionFormatLabel('txt_bilingual'), 'Text')
+      assert.ok(conversionFormatDescription('docx').includes('Word'))
+      assert.ok(conversionFileError({ name: 'book.docx', size: 20 })?.includes('Unsupported'))
+    } finally {
+      setLocale('fa')
+    }
+  })
+
+  it('defaults to Persian without any setup', () => {
+    assert.equal(conversionFormatLabel('txt_bilingual'), 'متن')
   })
 })
 

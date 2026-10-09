@@ -9,6 +9,7 @@ const DESTINATIONS: { path: string; label: string; note: string }[] = [
   { path: '/convert', label: 'تبدیل فایل', note: 'ابزار سند' },
   { path: '/jobs', label: 'پایش ترجمه', note: 'کارها' },
   { path: '/library', label: 'کتابخانه', note: 'کتاب‌ها' },
+  { path: '/help', label: 'مرکز راهنما', note: 'راهنماها' },
   { path: '/account', label: 'پنل کاربری', note: 'حساب' },
 ]
 

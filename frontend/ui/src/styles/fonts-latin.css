@@ -1,0 +1,13 @@
+/* The Latin companion to `fonts.generated.css` (which must stay generated --
+   do not add faces there; `docs/build_fonts.py` would wipe them).
+   Manrope variable, wght 200-800, latin subset, served from this origin like
+   Vazirmatn so the app renders with the network unplugged. One 25KB file
+   covers every weight the UI uses. */
+
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 200 800;
+  font-display: swap;
+  src: url('/fonts/Manrope-Variable.woff2') format('woff2');
+}

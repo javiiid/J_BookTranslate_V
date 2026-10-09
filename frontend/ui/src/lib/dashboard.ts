@@ -22,6 +22,8 @@
  * exists.
  */
 
+import type { Language } from '../i18n/lang.ts'
+
 /** The subset of a job this module reads. Structural, so a wider payload fits. */
 export interface DatedJob {
   created_at: string
@@ -29,8 +31,12 @@ export interface DatedJob {
   can_resume?: boolean
 }
 
-/** Persian day initials, Sunday first, matching the week a reader starts. */
-const DAY_INITIALS = ['ی', 'د', 'س', 'چ', 'پ', 'ج', 'ش'] as const
+/** Day initials, Sunday first. Persian joins, so one character is enough;
+ *  English gets the same single-letter width for the same 50px columns. */
+const DAY_INITIALS: Record<Language, readonly string[]> = {
+  fa: ['ی', 'د', 'س', 'چ', 'پ', 'ج', 'ش'],
+  en: ['S', 'M', 'T', 'W', 'T', 'F', 'S'],
+}
 
 /**
  * A day bucket in the chart.
@@ -62,7 +68,7 @@ export interface DayBucket {
  * anyway -- so the honest thing is the reader's own clock and a label that
  * does not claim more precision than that.
  */
-export function bucketByDay(jobs: readonly DatedJob[], days = 7, now = new Date()): DayBucket[] {
+export function bucketByDay(jobs: readonly DatedJob[], days = 7, now = new Date(), lang: Language = 'fa'): DayBucket[] {
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
   const buckets: DayBucket[] = []
   for (let offset = days - 1; offset >= 0; offset--) {
@@ -73,7 +79,7 @@ export function bucketByDay(jobs: readonly DatedJob[], days = 7, now = new Date(
         day.getDate(),
       ).padStart(2, '0')}`,
       // getDay() is Sunday-first, which is also the index order of DAY_INITIALS.
-      label: DAY_INITIALS[day.getDay()] ?? '',
+      label: DAY_INITIALS[lang][day.getDay()] ?? '',
       started: 0,
       unfinished: 0,
     })
@@ -133,17 +139,23 @@ export function missingFromChart(total: number, shown: number): number {
  * the late afternoon, evening until night. Tested at the edges because an
  * off-by-one here greets the reader wrong every single day at that hour.
  */
-export function greeting(hour: number): string {
+export function greeting(hour: number, lang: Language = 'fa'): string {
+  if (lang !== 'fa') {
+    if (hour >= 5 && hour < 12) return 'Good morning'
+    if (hour >= 12 && hour < 17) return 'Good midday'
+    if (hour >= 17 && hour < 20) return 'Good evening'
+    return 'Good night'
+  }
   if (hour >= 5 && hour < 12) return 'صبح بخیر'
   if (hour >= 12 && hour < 17) return 'ظهر بخیر'
   if (hour >= 17 && hour < 20) return 'عصر بخیر'
   return 'شب بخیر'
 }
 
-/** Today in words, e.g. «پنجشنبه ۹ مهر ۱۴۰۵». The page shows it; the test
- *  only pins the shape, because the value changes every day. */
-export function todayFa(now: Date = new Date()): string {
-  return new Intl.DateTimeFormat('fa-IR', { dateStyle: 'full' }).format(now)
+/** Today in words. Persian gets the jalali calendar via `fa-IR`;
+ *  English gets the Gregorian via `en-US`. */
+export function todayFa(now: Date = new Date(), lang: Language = 'fa'): string {
+  return new Intl.DateTimeFormat(lang === 'fa' ? 'fa-IR' : 'en-US', { dateStyle: 'full' }).format(now)
 }
 
 /**
@@ -154,22 +166,29 @@ export function todayFa(now: Date = new Date()): string {
  * something: with no jobs at all the line points at the first step instead
  * of reporting zeros.
  */
-export function heroStatus({
-  running,
-  stuck,
-  total,
-}: {
-  running: number
-  stuck: number
-  total: number
-}): string {
-  const digits = new Intl.NumberFormat('fa-IR')
-  if (total === 0) return 'هنوز کاری ثبت نشده — از افزودن کتاب شروع کنید.'
+export function heroStatus(
+  {
+    running,
+    stuck,
+    total,
+  }: {
+    running: number
+    stuck: number
+    total: number
+  },
+  lang: Language = 'fa',
+): string {
+  const digits = new Intl.NumberFormat(lang === 'fa' ? 'fa-IR' : 'en-US')
+  if (total === 0) return lang === 'fa' ? 'هنوز کاری ثبت نشده — از افزودن کتاب شروع کنید.' : 'No jobs yet — start by adding a book.'
   if (stuck > 0 && running > 0)
-    return `${digits.format(stuck)} کار نیازمند توجه و ${digits.format(running)} کار در حال ترجمه است.`
-  if (stuck > 0) return `${digits.format(stuck)} کار نیازمند توجه است.`
-  if (running > 0) return `${digits.format(running)} کار در حال ترجمه است.`
-  return 'کاری در جریان نیست — همه‌چیز سروسامان گرفته است.'
+    return lang === 'fa'
+      ? `${digits.format(stuck)} کار نیازمند توجه و ${digits.format(running)} کار در حال ترجمه است.`
+      : `${digits.format(stuck)} need attention and ${digits.format(running)} are translating.`
+  if (stuck > 0)
+    return lang === 'fa' ? `${digits.format(stuck)} کار نیازمند توجه است.` : `${digits.format(stuck)} need attention.`
+  if (running > 0)
+    return lang === 'fa' ? `${digits.format(running)} کار در حال ترجمه است.` : `${digits.format(running)} are translating.`
+  return lang === 'fa' ? 'کاری در جریان نیست — همه‌چیز سروسامان گرفته است.' : 'Nothing running — all tidy.'
 }
 
 export interface WeekStats {

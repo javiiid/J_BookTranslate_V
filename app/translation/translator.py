@@ -11,15 +11,11 @@ Responsibilities:
     - Retry temporary API failures
     - Save progress immediately
     - Resume interrupted translations
-    - Manage batch translation workflows
     - Support test translations
 
 Supported modes:
     - fast
     - resume
-    - batch
-    - batchcheck
-    - resumebatch
     - test
 """
 
@@ -34,12 +30,6 @@ from typing import Any
 from app.translation.prompts import get_translation_prompt
 from app.glossary.service import load_snapshot, glossary_prompt, check_translation
 from app.glossary.automatic import learn_chunk
-
-from app.translation.batch import (
-    batch_translate_chunks,
-    load_batch_state,
-    parse_batch_response,
-)
 
 from app.jobs.state import save_translations
 from app.jobs.state import deduplicate_chunks
@@ -825,390 +815,6 @@ def _get_untranslated_chunks(
 
 
 # ============================================================
-# BATCH CHECK
-# ============================================================
-
-def _process_batch_check(
-    client: Any,
-    paths: Any,
-) -> tuple[dict[str, Any], Any, Any]:
-    """
-    Check the current batch status.
-
-    If the batch is completed, retrieve and merge its output.
-    """
-
-    temp_dir = ensure_dir(
-        "temp"
-    )
-
-    state, state_file = load_batch_state(
-        temp_dir
-    )
-
-    if not state:
-
-        print(
-            "No batch state found. "
-            "Run with --mode batch first. "
-            "[_process_batch_check]"
-        )
-
-        return {}, None, None
-
-    batch_id = state.get(
-        "batch_id"
-    )
-
-    if not batch_id:
-
-        raise RuntimeError(
-            "Batch state exists but batch_id is missing."
-        )
-
-    print(
-        f"Checking status for batch "
-        f"{batch_id} "
-        "[_process_batch_check]"
-    )
-
-    try:
-
-        status = client.batches.retrieve(
-            batch_id
-        )
-
-    except KeyboardInterrupt:
-
-        print(
-            "\nBatch status check interrupted."
-        )
-
-        raise
-
-    except Exception as error:
-
-        print(
-            f"Failed to retrieve batch status: "
-            f"{error}"
-        )
-
-        raise
-
-    # ========================================================
-    # BATCH NOT COMPLETED
-    # ========================================================
-
-    if status.status != "completed":
-
-        print(
-            f"Batch status: {status.status} "
-            "[_process_batch_check]"
-        )
-
-        request_counts = getattr(
-            status,
-            "request_counts",
-            None,
-        )
-
-        if request_counts:
-
-            completed = getattr(
-                request_counts,
-                "completed",
-                0,
-            )
-
-            total = getattr(
-                request_counts,
-                "total",
-                0,
-            )
-
-            print(
-                f"Progress: "
-                f"{completed}/{total} "
-                "[_process_batch_check]"
-            )
-
-        return (
-            {},
-            state.get("input_file_id"),
-            status,
-        )
-
-    # ========================================================
-    # BATCH COMPLETED
-    # ========================================================
-
-    print(
-        "Batch completed! "
-        "Retrieving results... "
-        "[_process_batch_check]"
-    )
-
-    state_paths = state.get(
-        "paths",
-        {}
-    )
-
-    if not state_paths:
-
-        raise RuntimeError(
-            "Batch state does not contain paths."
-        )
-
-    batch_paths = {
-        key: Path(value)
-        for key, value in state_paths.items()
-    }
-
-    translations_file = batch_paths.get(
-        "translations_file"
-    )
-
-    if translations_file is None:
-
-        raise RuntimeError(
-            "Batch state does not contain "
-            "'translations_file'."
-        )
-
-    translations: dict[str, Any] = {}
-
-    # ========================================================
-    # LOAD EXISTING TRANSLATIONS
-    # ========================================================
-
-    if translations_file.exists():
-
-        print(
-            "Loading existing translations..."
-        )
-
-        try:
-
-            with translations_file.open(
-                "r",
-                encoding="utf-8",
-            ) as file:
-
-                loaded = json.load(
-                    file
-                )
-
-        except (
-            OSError,
-            json.JSONDecodeError,
-        ) as error:
-
-            raise RuntimeError(
-                f"Failed to load translations file: "
-                f"{error}"
-            ) from error
-
-        if isinstance(loaded, dict):
-
-            translations = (
-                _normalize_translations(
-                    loaded
-                )
-            )
-
-        else:
-
-            raise RuntimeError(
-                "Translations file does not contain "
-                "a JSON object."
-            )
-
-        print(
-            f"Loaded {len(translations)} "
-            "existing translations."
-        )
-
-    # ========================================================
-    # OUTPUT FILE
-    # ========================================================
-
-    output_file_id = getattr(
-        status,
-        "output_file_id",
-        None,
-    )
-
-    if not output_file_id:
-
-        raise RuntimeError(
-            "Batch completed but no "
-            "output_file_id was returned."
-        )
-
-    # ========================================================
-    # DOWNLOAD BATCH OUTPUT
-    # ========================================================
-
-    print(
-        f"Downloading batch output "
-        f"{output_file_id}..."
-    )
-
-    response = client.files.content(
-        output_file_id
-    )
-
-    raw_content = response.read()
-
-    if isinstance(raw_content, bytes):
-
-        response_text = raw_content.decode(
-            "utf-8"
-        )
-
-    else:
-
-        response_text = str(
-            raw_content
-        )
-
-    if not response_text.strip():
-
-        raise RuntimeError(
-            "Batch output file is empty."
-        )
-
-    # ========================================================
-    # PARSE RESULTS
-    # ========================================================
-
-    new_translations = parse_batch_response(
-        response_text
-    )
-
-    new_translations = (
-        _normalize_translations(
-            new_translations
-        )
-    )
-
-    print(
-        f"Got {len(new_translations)} "
-        "new translations from batch."
-    )
-
-    # ========================================================
-    # MERGE
-    # ========================================================
-
-    translations.update(
-        new_translations
-    )
-
-    # ========================================================
-    # SAVE
-    # ========================================================
-
-    save_translations(
-        batch_paths,
-        translations,
-    )
-
-    print(
-        f"Total translations after merge: "
-        f"{len(translations)}"
-    )
-
-    return (
-        translations,
-        state.get("input_file_id"),
-        status,
-    )
-
-
-# ============================================================
-# BATCH TRANSLATION
-# ============================================================
-
-def _run_batch_translation(
-    client: Any,
-    chunks: list[tuple[Any, str]],
-    translations: dict[str, Any],
-    from_lang: str,
-    to_lang: str,
-    mode: str,
-    model: str,
-    test_translations: dict[str, Any] | None,
-    debug: bool,
-    paths: Any,
-    chapter_map: Any,
-    filetype: str,
-) -> tuple[dict[str, Any], Any, Any]:
-    """
-    Start or resume a batch translation.
-
-    Only untranslated chunks are sent to the batch layer.
-    """
-
-    if not chunks:
-
-        print(
-            "No untranslated chunks found."
-        )
-
-        return (
-            translations,
-            None,
-            None,
-        )
-
-    print(
-        f"Translating {len(chunks)} chunks "
-        f"in '{mode}' mode "
-        "[_run_batch_translation]"
-    )
-
-    (
-        new_translations,
-        input_file_id,
-        status,
-    ) = batch_translate_chunks(
-        client,
-        chunks,
-        from_lang,
-        to_lang,
-        mode=mode,
-        model=model,
-        test_translations=test_translations,
-        keep_temp=debug,
-        paths=paths,
-        chapter_map=chapter_map,
-        filetype=filetype,
-    )
-
-    new_translations = (
-        _normalize_translations(
-            new_translations
-        )
-    )
-
-    translations.update(
-        new_translations
-    )
-
-    save_translations(
-        paths,
-        translations,
-    )
-
-    return (
-        translations,
-        input_file_id,
-        status,
-    )
-
-
-# ============================================================
 # FAST / RESUME
 # ============================================================
 
@@ -1927,29 +1533,16 @@ def process_translations(
 
         fast
         resume
-        batch
-        batchcheck
-        resumebatch
         test
 
     Behavior:
 
         fast:
-            Translate missing chunks sequentially.
+            Translate missing chunks concurrently.
 
         resume:
             Same behavior as fast, but intended for
             continuing a previously interrupted job.
-
-        batch:
-            Send missing chunks to batch API.
-
-        resumebatch:
-            Continue using batch workflow.
-
-        batchcheck:
-            Check current batch status and retrieve
-            results if completed.
 
         test:
             Use local test translations without API calls.
@@ -1972,9 +1565,6 @@ def process_translations(
     supported_modes = {
         "fast",
         "resume",
-        "batch",
-        "batchcheck",
-        "resumebatch",
         "test",
     }
 
@@ -1983,7 +1573,8 @@ def process_translations(
         raise ValueError(
             f"Unknown translation mode: {mode}. "
             f"Supported modes: "
-            f"{', '.join(sorted(supported_modes))}"
+            f"{', '.join(sorted(supported_modes))}. "
+            f"Batch modes were removed; use fast or resume instead."
         )
 
     # ========================================================
@@ -2005,17 +1596,6 @@ def process_translations(
     # A malformed source or repeated reconstruction entry must not cause the
     # same chunk ID to be sent to the provider more than once.
     all_chunks = deduplicate_chunks(all_chunks)
-
-    # ========================================================
-    # BATCH CHECK
-    # ========================================================
-
-    if mode == "batchcheck":
-
-        return _process_batch_check(
-            client=client,
-            paths=paths,
-        )
 
     # ========================================================
     # FIND UNTRANSLATED CHUNKS
@@ -2052,30 +1632,6 @@ def process_translations(
             stop_event=stop_event,
             style_preset=style_preset,
             chunk_contexts=chunk_contexts,
-        )
-
-    # ========================================================
-    # BATCH / RESUME BATCH
-    # ========================================================
-
-    if mode in {
-        "batch",
-        "resumebatch",
-    }:
-
-        return _run_batch_translation(
-            client=client,
-            chunks=untranslated_chunks,
-            translations=translations,
-            from_lang=from_lang,
-            to_lang=to_lang,
-            mode="batch",
-            model=model,
-            test_translations=test_translations,
-            debug=debug,
-            paths=paths,
-            chapter_map=chapter_map,
-            filetype=filetype,
         )
 
     # ========================================================

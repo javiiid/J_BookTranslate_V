@@ -1,0 +1,71 @@
+/* --------------------------------------------------------------------------
+   The auth page (local login / signup).
+
+   Split out of `tokens.css` the way `landing.css` is: the file next to the
+   page that owns it, imported by that page. Layout only -- every colour,
+   type step, spacing step, radius and control comes from tokens.css, so
+   nothing here introduces a hue or a hex.
+   -------------------------------------------------------------------------- */
+
+.auth-shell {
+  width: min(28rem, 100%);
+  margin-inline: auto;
+  min-width: 0;
+  padding-block: var(--spacing-8);
+}
+
+/* Two-option segmented control. Real buttons with `aria-pressed`, the same
+   contract as the library filter tabs: the selected one announces itself. */
+.auth-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--spacing-1);
+  padding: var(--spacing-1);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  background: var(--color-surface-elevated);
+}
+
+.auth-tab {
+  min-height: 40px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--text-label);
+  font-weight: 700;
+  line-height: var(--text-label--line-height);
+  cursor: pointer;
+  transition:
+    background-color 0.15s var(--ease-out),
+    color 0.15s var(--ease-out);
+}
+
+.auth-tab:hover {
+  color: var(--color-text-primary);
+}
+
+.auth-tab[aria-pressed='true'] {
+  background: var(--color-surface);
+  color: var(--color-text-brand);
+  box-shadow: var(--shadow-card);
+}
+
+.auth-form {
+  display: grid;
+  gap: var(--spacing-3);
+  margin-top: var(--spacing-4);
+}
+
+.auth-field {
+  display: grid;
+  gap: var(--spacing-1);
+  min-width: 0;
+}
+
+.auth-password-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--spacing-2);
+  align-items: end;
+}

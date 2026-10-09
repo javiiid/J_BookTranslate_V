@@ -230,6 +230,25 @@
   --color-nav-primary: #1f3972;
   --color-nav-primary-ink: #ffffff;
 
+  /* The library's header band: a dark strip that carries the page's one
+     heading, so the heading stops competing with a rail, a status pill and four
+     stat tiles all at the same level.
+
+     A gradient rather than a flat fill because a flat band and the card surface
+     below it differ by a border alone, and the page then reads as one long
+     undifferentiated column. Two stops of one hue is the whole of it -- a third
+     would be decoration, and the brief asks this page to stay flat.
+
+     Both inks are measured against the *lighter* of the two stops, which is the
+     unfavourable end for a dark band: 13.3:1 and 7.6:1 here, 9.2:1 and 5.9:1 in
+     the dark theme. `--color-hero-ink-muted` is deliberately the same value in
+     both themes -- one step of this ramp clears AA on both bands, and a second
+     step would have been a token that differed only to look deliberate. */
+  --color-hero-from: #16333f;
+  --color-hero-to: #0d2531;
+  --color-hero-ink: #ffffff;
+  --color-hero-ink-muted: #a9c9d6;
+
   /* Elevation. Soft and low-opacity; the day palette carries hierarchy through
      the tinted neutrals more than through shadow. */
   --shadow-card: 0 1px 2px rgba(22, 51, 63, 0.05);
@@ -355,6 +374,16 @@
   --color-nav-primary: #fdb838;
   --color-nav-primary-ink: #0e1630;
 
+  /* The library's header band, dark side. It has to be *lighter* than the page
+     to read as a band at all: the ground here is #071426, so a band built from
+     the day theme's #16333f would be a slightly different darkness rather than
+     a surface. Both stops are steps of the dark brand ramp, and both inks are
+     the pair the day side already measured. */
+  --color-hero-from: #17455c;
+  --color-hero-to: #103243;
+  --color-hero-ink: #e4f5f6;
+  --color-hero-ink-muted: #a9c9d6;
+
   /* Dark mode gets almost no shadow: on a near-black ground, shadow is
      invisible, so elevation is carried by surface lightness instead. */
   --shadow-card: none;
@@ -402,6 +431,20 @@
     font-size: var(--text-body);
     line-height: var(--text-body--line-height);
     -webkit-font-smoothing: antialiased;
+  }
+
+  /* English UI dressing: Manrope instead of Vazirmatn's Latin.
+   *
+   * Vazirmatn draws Persian beautifully and Latin acceptably; in the English
+   * UI every word is Latin, so "acceptable" becomes the whole page. Manrope
+   * takes the Latin range and Vazirmatn stays second in the stack, which is
+   * what keeps Persian proper nouns inside English sentences rendering in
+   * Vazirmatn: a missing glyph falls through per character, not per element.
+   *
+   * Scoped to `html[lang='en']` (set by the language provider before first
+   * paint), so the Persian UI never sees it and no component needs a prop. */
+  html[lang='en'] body {
+    font-family: 'Manrope', 'Vazirmatn', system-ui, sans-serif;
   }
 
   h1,
@@ -635,7 +678,9 @@
     transform: translateY(1px);
   }
 
-  /* A small square button for icon-only controls. */
+  /* A round tool button for icon-only controls (theme, language, close).
+     Circular rather than square: these sit apart from the rectangular action
+     buttons, so the shape itself says "chrome, not action". */
   .btn-icon {
     display: inline-grid;
     place-items: center;
@@ -643,15 +688,82 @@
     min-height: 40px;
     padding: 0;
     border: 1px solid var(--color-border);
-    border-radius: var(--radius-control);
+    border-radius: 50%;
     background: var(--color-surface);
     color: var(--color-text-secondary);
     cursor: pointer;
-    transition: background-color 0.15s var(--ease-out), color 0.15s var(--ease-out);
+    transition:
+      background-color 0.15s var(--ease-out),
+      color 0.15s var(--ease-out),
+      border-color 0.15s var(--ease-out),
+      transform 0.12s var(--ease-out);
   }
   .btn-icon:hover {
     background: var(--color-surface-elevated);
+    border-color: var(--color-border-strong);
     color: var(--color-text-primary);
+  }
+  .btn-icon:active:not(:disabled) {
+    transform: scale(0.9);
+  }
+  .btn-icon svg {
+    transition: transform 0.2s var(--ease-out);
+  }
+  .btn-icon:hover svg {
+    transform: scale(1.1);
+  }
+  .btn-icon:active:not(:disabled) svg {
+    transform: scale(0.92);
+  }
+
+  /* A language pill: globe plus the other language's name. Wider than the
+     round tool buttons, so it keeps its own radius instead of the circle. */
+  .btn-lang {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-1);
+    width: auto;
+    padding-inline: var(--spacing-3);
+    border-radius: var(--radius-badge);
+    font-size: 13px;
+    font-weight: 800;
+    line-height: 1;
+  }
+
+  /* One pill holding the view preferences (theme + language) instead of two
+     loose squares. The divider is a hairline, not a second border. */
+  .tool-cluster {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-1);
+    padding: 3px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-badge);
+    background: var(--color-surface);
+    box-shadow: var(--shadow-card);
+  }
+  .tool-divider {
+    width: 1px;
+    align-self: stretch;
+    margin-block: 7px;
+    background: var(--color-border);
+  }
+
+  /* The theme glyph swaps sun/moon on toggle; the key on the wrapper
+     remounts it so the turn plays once per press, not on every render. */
+  .tool-swap {
+    display: inline-flex;
+    animation: tool-in 0.3s var(--ease-out);
+  }
+  @keyframes tool-in {
+    from {
+      opacity: 0;
+      transform: rotate(-70deg) scale(0.7);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
   }
 
   /* ------------------------------------------------------------------

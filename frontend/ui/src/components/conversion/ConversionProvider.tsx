@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { conversionFileError, convertFile, type ConversionFormat } from '@/lib/conversion'
+import { conversionCountError, conversionFailedError, conversionFileError, conversionSelectionError, convertFile, type ConversionFormat } from '@/lib/conversion'
 import { ConversionContext, type ConversionEntry } from '@/hooks/useConversion'
 
 export function ConversionProvider({ children }: { children: ReactNode }) {
@@ -24,7 +24,7 @@ export function ConversionProvider({ children }: { children: ReactNode }) {
   function selectFiles(files: File[]) {
     if (running.current || !files.length) return
     if (files.length !== 1) {
-      setError('در هر عملیات یک فایل انتخاب کنید. می‌توانید چند فرمت خروجی بگیرید.')
+      setError(conversionCountError())
       return
     }
     const selected = files[0]!
@@ -47,7 +47,7 @@ export function ConversionProvider({ children }: { children: ReactNode }) {
   async function start() {
     if (running.current) return
     if (!file || !outputs.length) {
-      setError('یک فایل و حداقل یک فرمت خروجی انتخاب کنید.')
+      setError(conversionSelectionError())
       return
     }
     running.current = true
@@ -62,7 +62,7 @@ export function ConversionProvider({ children }: { children: ReactNode }) {
       const result = await convertFile(file, outputs)
       setEntries((current) => current.map((item) => item.key === key ? { ...item, result } : item))
     } catch (failure) {
-      const message = failure instanceof Error ? failure.message : 'تبدیل فایل ناموفق بود.'
+      const message = failure instanceof Error ? failure.message : conversionFailedError()
       setError(message)
       setEntries((current) => current.map((item) => item.key === key ? { ...item, error: message } : item))
     } finally {

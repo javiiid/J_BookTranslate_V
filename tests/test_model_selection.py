@@ -45,7 +45,6 @@ def _signature_defaults(module_name, function_name):
     ("app.pipeline.pipeline", "translate"),
     ("app.translation.translator", "translate_chunk"),
     ("app.translation.translator", "process_translations"),
-    ("app.translation.batch", "batch_translate_chunks"),
     ("app.pipeline.pdf_handler", "PDFHandler"),
 ])
 def test_no_module_hardcodes_terra_as_a_default(module_name, function_name):

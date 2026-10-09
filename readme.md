@@ -286,9 +286,8 @@ app/
 │   ├── formats.py       فهرست و registry
 │   └── docx.py  pdf.py  markdown.py  srt.py  و…
 │
-├── translation/     موتور ترجمه          ( ۴ فایل،  ۲٬۷۶۶ خط)
+├── translation/     موتور ترجمه          ( ۲ فایل)
 │   ├── translator.py    حلقهٔ ترجمه و هم‌روندی
-│   ├── batch.py         حالت batch
 │   └── prompts.py       promptها
 │
 ├── jobs/            Jobها و state       ( ۷ فایل،  ۱٬۳۴۱ خط)
@@ -416,7 +415,7 @@ python -m app.main --input PATH [options]
   --from-lang CODE       زبان مبدأ  (EN, FA, DE, FR)
   --to-lang CODE         زبان مقصد
   --model NAME           مدل ترجمه
-  --mode MODE            batch | resume | test | batchcheck | resumebatch
+  --mode MODE            resume | test (پیش‌فرض: سریع)
   --style STYLE          literary | technical | conversational | formal
   --outputs LIST         فرمت‌های اضافه، جداشده با ویرگول، یا all
   --prompt TEXT          prompt سفارشی
@@ -590,8 +589,7 @@ python -m pytest -q -p no:cacheprovider --basetemp .test-tmp\full
 
 | مورد | وضعیت |
 | --- | --- |
-| `--mode pdfbilingual` | در `parser.py` و فرم وب ارائه می‌شود، ولی در `translator.py:1899` نیست و `ValueError` می‌دهد. باید تصمیم گرفته شود که می‌خواهیم یا نه — نه فقط اضافه کردن یک رشته به یک set. |
-| آلودگی state بین کتاب‌ها | `load_batch_state` جدیدترین `batch_status_*.json` را بر اساس mtime انتخاب می‌کند و فیلتر کتاب ندارد. |
+| `--mode pdfbilingual` | در `parser.py` و فرم وب ارائه می‌شود، ولی در `translator.py` جزو حالت‌های مجاز نیست و `ValueError` می‌دهد. باید تصمیم گرفته شود که می‌خواهیم یا نه — نه فقط اضافه کردن یک رشته به یک set. |
 | SRT | خروجی تولید می‌شود ولی محتوایش به فایل وصل نشده. |
 | فصل‌های EPUB با charset غیر UTF-8 | بی‌صدا رد می‌شوند. |
 | prompt بینایی PDF | در `pdf_handler.py` به‌صورت آلمانی←انگلیسی hardcode شده. |
