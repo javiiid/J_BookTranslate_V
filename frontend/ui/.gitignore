@@ -39,3 +39,7 @@ scripts/preview/
 *.njsproj
 *.sln
 *.sw?
+
+# Dev-server console captures (vite dev output redirected to a file).
+# Logs, not source; one was accidentally committed once.
+*.out
