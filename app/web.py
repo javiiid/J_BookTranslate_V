@@ -1284,6 +1284,32 @@ class Handler(BaseHTTPRequestHandler):
                 items = auth_list_sessions(db, self._session_token())
             except LookupError as exc: self._json({"error": str(exc)}, 401); return
             self._json({"items": items}); return
+        if parsed.path == "/api/auth/oauth/google/start":
+            try:
+                from app.auth import oauth as auth_oauth
+                self._json(auth_oauth.google_start(db)); return
+            except (ValueError, TypeError) as exc: self._json({"error": str(exc)}, 422); return
+        if parsed.path == "/api/auth/oauth/apple/start":
+            try:
+                from app.auth import oauth as auth_oauth
+                self._json(auth_oauth.apple_start(db)); return
+            except (ValueError, TypeError) as exc: self._json({"error": str(exc)}, 422); return
+        if parsed.path in {"/api/auth/oauth/google/callback", "/api/auth/oauth/apple/callback"}:
+            from urllib.parse import quote as _quote
+            query = parse_qs(parsed.query)
+            provider = "google" if "google" in parsed.path else "apple"
+            try:
+                from app.auth import oauth as auth_oauth
+                finish = auth_oauth.google_callback if provider == "google" else auth_oauth.apple_callback
+                _, token = finish(db, (query.get("code") or [""])[0], (query.get("state") or [""])[0])
+            except Exception as exc:
+                self.send_response(302)
+                self.send_header("Location", "/account?auth_error=" + _quote(str(exc)[:200]))
+                self.end_headers(); return
+            self.send_response(302)
+            self.send_header("Location", "/library")
+            for name, value in self._set_session_cookie(token).items(): self.send_header(name, value)
+            self.end_headers(); return
         if parsed.path == "/api/account/portal":
             self._json({"overview": account_overview(), "plans": plans_catalog(), "packages": credit_packages(), "api_keys": account_api_keys(), "marketplace": account_marketplace(), "orders": account_orders(), "publisher": publisher_overview()}); return
         if parsed.path == "/api/account/marketplace":

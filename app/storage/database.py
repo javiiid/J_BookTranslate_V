@@ -139,6 +139,21 @@ class Database:
         existing_users = {row[1] for row in connection.execute("PRAGMA table_info(users)").fetchall()}
         if "email_verified" not in existing_users:
             connection.execute("ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 0")
+        for column in ("google_sub", "apple_sub"):
+            if column not in existing_users:
+                connection.execute(f"ALTER TABLE users ADD COLUMN {column} TEXT")
+                existing_users.add(column)
+        connection.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_sub ON users(google_sub) WHERE google_sub IS NOT NULL"
+        )
+        connection.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_apple_sub ON users(apple_sub) WHERE apple_sub IS NOT NULL"
+        )
+        connection.execute("""CREATE TABLE IF NOT EXISTS oauth_states (
+            state_hash TEXT PRIMARY KEY,
+            provider TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )""")
         connection.execute("""CREATE TABLE IF NOT EXISTS auth_otps (
             email TEXT PRIMARY KEY,
             code_hash TEXT NOT NULL,
