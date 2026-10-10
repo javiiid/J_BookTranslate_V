@@ -63,6 +63,16 @@ def parse_args():
     help="Model used for translation."
     )
 
+    parser.add_argument(
+    "--fallback-model",
+    default=None,
+    help=(
+        "Cheaper model used only after the primary model exhausts "
+        "all retries on a chunk. Must be a supported model cheaper "
+        "than --model (e.g. gemini-3.1-flash-lite). Omit for no fallback."
+    )
+    )
+
     # ========================================================
     # PROCESSING MODE
     # ========================================================

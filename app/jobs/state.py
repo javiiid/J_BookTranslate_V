@@ -162,6 +162,60 @@ def save_translations(paths, translations):
         _atomic_json(paths["translations_file"], {str(k): v for k, v in translations.items()})
 
 
+def fallback_usage_path(paths):
+    job_dir = paths.get("job_dir") or Path(paths["translations_file"]).parent
+    return Path(job_dir) / "fallback.json"
+
+
+def load_fallback_usage(paths):
+    """
+    Chunk ids served by the fallback model in earlier runs.
+
+    Loaded at run start so a resumed job keeps the full record.
+    Returns a list (possibly empty), never raises on a missing file.
+    """
+
+    path = fallback_usage_path(paths)
+
+    if not path.exists():
+        return []
+
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+
+    chunks = (record or {}).get("chunks") if isinstance(record, dict) else None
+
+    if not isinstance(chunks, list):
+        return []
+
+    return [str(chunk_id) for chunk_id in chunks]
+
+
+def save_fallback_usage(paths, model, fallback_model, chunks):
+    """
+    Persist which chunks the fallback model served.
+
+    Merges with any earlier record so resume appends instead of overwriting.
+    """
+
+    with state_lock(paths):
+        seen = load_fallback_usage(paths)
+        for chunk_id in chunks or []:
+            chunk_id = str(chunk_id)
+            if chunk_id not in seen:
+                seen.append(chunk_id)
+        _atomic_json(
+            fallback_usage_path(paths),
+            {
+                "model": model,
+                "fallback_model": fallback_model,
+                "chunks": sorted(seen),
+            },
+        )
+
+
 def find_resumable_jobs(input_epub_path, from_lang, to_lang, model):
     temp_dir = ensure_dir("temp")
     prefix = f"{Path(input_epub_path).stem}_{from_lang}_{to_lang}_{model}_"

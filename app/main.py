@@ -546,6 +546,7 @@ def main():
 
             output_formats=output_formats,
             style_preset=args.style,
+            fallback_model=args.fallback_model,
         )
 
         # ====================================================

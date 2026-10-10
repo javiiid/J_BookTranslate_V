@@ -439,6 +439,7 @@ def _run_job(job: Job, *, resume: bool = False) -> None:
                     model=job.options["model"], resume_job_id=job.pipeline_job_id if resume else None, debug=True, filetype=job.filetype,
                     output_formats=job.options.get("outputs"), translation_prompt=prompt, stop_event=job.stop_event,
                     style_preset=job.style,
+                    fallback_model=job.options.get("fallback_model"),
                     on_job_started=lambda pipeline_id, paths: _on_pipeline_started(job, pipeline_id, paths))
             _update_progress(job)
             job.status = "cancelled" if job.cancel_requested else ("paused" if job.stop_event.is_set() else ("completed" if job.output_path.exists() else "failed"))

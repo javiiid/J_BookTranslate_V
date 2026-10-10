@@ -321,6 +321,8 @@ does the full book run.
     · tone preset (literary, academic, modern, …)
     · glossary terms reviewed and approved
     · model for samples + model for the full run
+    · optional fallback model: a cheaper model that serves a chunk only
+      after the primary exhausts all retries (must be supported and cheaper)
     · budget guard: sealed spending limit
         ↓
  3. Seal the profile → full book runs with the locked profile
@@ -337,6 +339,9 @@ Rules worth knowing:
 - Reopening the same book with the same configuration keeps drafts, approvals
   and spending — calibration state survives restarts, and an interrupted run is
   marked honestly instead of silently retried.
+- Fallback chunks are always marked: the job log and `fallback.json` in the job
+  directory record which chunks the fallback model served. Without a configured
+  fallback, exhaustion fails exactly as before.
 
 API: `/api/calibrations`, `/api/calibration-operations/*`.
 

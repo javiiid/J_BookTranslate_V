@@ -34,6 +34,7 @@ def start_job(service, session):
         path = Path(session["document"]["prepared_path"])
         options = {"from_lang": p["from_lang"], "to_lang": p["to_lang"], "model": p["final_model"], "mode": "fast", "prompt": "",
                    "style_preset": p["tone"], "calibration_id": session["id"], "calibration_hash": session["approved"]["hash"],
+                   "fallback_model": p.get("fallback_model"),
                    "glossary_snapshot": json.dumps({"terms": [t for t in p["glossary"] if t["approved"]], "auto_extract": False}, ensure_ascii=False)}
         job = web.Job(identifier, Path(session["filename"]).stem + ".epub", path, "epub", path.stat().st_size,
                       options, p["from_lang"], p["to_lang"], p["final_model"], "fast", style=p["tone"])

@@ -33,6 +33,28 @@ def provider_identity():
     return digest({"url": cfg["base_url"], "credential": hashlib.sha256(cfg["api_key"].encode()).hexdigest()})
 
 
+def validate_fallback_model(fallback_model, final_model):
+    """Validate an optional cheaper fallback model against the final model.
+
+    Returns the cleaned model name or None when no fallback was given.
+    """
+    if fallback_model is None or (isinstance(fallback_model, str) and not fallback_model.strip()):
+        return None
+    if not isinstance(fallback_model, str) or not is_supported_model(fallback_model.strip()):
+        raise ValueError("مدل جایگزین پشتیبانی نمی‌شود.")
+    fallback_model = fallback_model.strip()
+    if fallback_model == final_model:
+        raise ValueError("مدل جایگزین باید با مدل نهایی متفاوت باشد.")
+    from app.jobs.estimate import PRICING
+    fallback_price = PRICING.get(fallback_model)
+    final_price = PRICING.get(final_model)
+    if fallback_price is None or final_price is None:
+        raise ValueError("قیمت مدل‌ها برای مقایسه مشخص نیست؛ مدل جایگزین پذیرفته نشد.")
+    if fallback_price[0] >= final_price[0]:
+        raise ValueError("مدل جایگزین باید ارزان‌تر از مدل نهایی باشد.")
+    return fallback_model
+
+
 class CalibrationService:
     def __init__(self, database, root, client_factory=None):
         self.store = Store(database)
@@ -66,6 +88,7 @@ class CalibrationService:
         final_model = body.get("final_model") or model
         if not is_supported_model(model) or not is_supported_model(final_model):
             raise ValueError("مدل انتخاب‌شده پشتیبانی نمی‌شود.")
+        fallback_model = validate_fallback_model(body.get("fallback_model"), final_model)
         tone = body.get("tone", "literary")
         if tone not in TONES:
             raise ValueError("لحن نامعتبر است.")
@@ -73,12 +96,12 @@ class CalibrationService:
         if set(outputs) & {"srt", "quality_report"}:
             raise ValueError("زیرنویس و ارزیابی مدل جداگانه در جریان نمونه پشتیبانی نمی‌شود؛ قالب خروجی دیگری انتخاب کنید.")
         profile = {"tone": tone, "from_lang": language(body.get("from_lang", "EN")), "to_lang": language(body.get("to_lang", "FA")),
-                   "model": model, "final_model": final_model, "glossary": [], "instructions": "", "provider": provider_identity(), "version": VERSION}
+                   "model": model, "final_model": final_model, "fallback_model": fallback_model, "glossary": [], "instructions": "", "provider": provider_identity(), "version": VERSION}
         source_hash = hashlib.sha256(source.read_bytes()).hexdigest()
         # Reopening the same book/configuration keeps drafts, approvals and spending.
         for existing in self.store.list():
             if (existing["document"]["source_hash"] == source_hash and existing["outputs"] == outputs
-                and all(existing["profile"][k] == profile[k] for k in ("from_lang", "to_lang", "model", "final_model", "provider"))):
+                and all(existing["profile"].get(k) == profile[k] for k in ("from_lang", "to_lang", "model", "final_model", "fallback_model", "provider"))):
                 return self.payload(existing)
         identifier = uuid.uuid4().hex
         document = prepare(source, self.root / identifier, profile["from_lang"])
@@ -176,6 +199,12 @@ class CalibrationService:
                     if not is_supported_model(body[field]):
                         raise ValueError("مدل نامعتبر است.")
                     p[field] = body[field]
+            if "fallback_model" in body:
+                p["fallback_model"] = validate_fallback_model(body["fallback_model"], p["final_model"])
+            elif p.get("fallback_model"):
+                # final_model may have changed above; the old fallback must
+                # still be cheaper than the new final model.
+                p["fallback_model"] = validate_fallback_model(p["fallback_model"], p["final_model"])
             if "instructions" in body:
                 if not isinstance(body["instructions"], str) or len(body["instructions"]) > 2000:
                     raise ValueError("راهنمای لحن حداکثر ۲۰۰۰ نویسه است.")

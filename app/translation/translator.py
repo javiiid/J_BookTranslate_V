@@ -523,6 +523,8 @@ def translate_chunk(
     style_preset: str | None = None,
     rate_limiter: Any = None,
     context_before: str | None = None,
+    fallback_model: str | None = None,
+    fallback_record: list | None = None,
 ) -> str:
     """
     Translate one chunk.
@@ -537,6 +539,12 @@ def translate_chunk(
     translating the context and the caller storing a translation that does not
     correspond to the chunk it asked for.
 
+    ``fallback_model`` names a cheaper model used only after the primary model
+    exhausts all retries (RetryError). Successful fallback translations append
+    the chunk id to ``fallback_record`` (when given) so the run can report
+    which chunks did not come from the primary model. No fallback configured
+    means today's behavior: exhaustion raises.
+
     Retry behavior is controlled by retry_operation().
     """
 
@@ -545,6 +553,17 @@ def translate_chunk(
     if model is None:
         from app.core.models import resolve_default_model
         model = resolve_default_model()
+
+    if fallback_model is not None:
+        from app.core.models import is_supported_model
+        if not is_supported_model(fallback_model):
+            raise ValueError(
+                f"Unsupported fallback model: {fallback_model}."
+            )
+        if fallback_model == model:
+            raise ValueError(
+                "Fallback model must differ from the primary model."
+            )
 
     # ========================================================
     # VALIDATE INPUT
@@ -615,14 +634,14 @@ def translate_chunk(
     # API OPERATION
     # ========================================================
 
-    def api_operation() -> str:
+    def api_operation(active_model: str) -> str:
         """
-        Execute exactly one API request.
+        Execute exactly one API request on the given model.
         """
 
         print(
             f"API request for chunk {chunk_id} "
-            "[translate_chunk]"
+            f"({active_model}) [translate_chunk]"
         )
 
         from app.presets.manager import get_preset_params
@@ -652,7 +671,7 @@ def translate_chunk(
 
         try:
             response = client.chat.completions.create(
-                model=model,
+                model=active_model,
                 messages=messages,
                 temperature=preset_params.get("temperature", 0.2),
                 top_p=preset_params.get("top_p", 1.0),
@@ -679,13 +698,16 @@ def translate_chunk(
         )
 
     # ========================================================
-    # RETRY
+    # RETRY (primary, then optional fallback)
     # ========================================================
 
-    try:
+    def attempt(active_model: str) -> str:
+        """
+        Run the full retry policy once on a single model.
+        """
 
-        translated_text = retry_operation(
-            operation=api_operation,
+        translated = retry_operation(
+            operation=lambda: api_operation(active_model),
             max_attempts=MAX_RETRIES,
             base_delay=RETRY_BASE_SECONDS,
             max_delay=RETRY_MAX_SECONDS,
@@ -694,11 +716,11 @@ def translate_chunk(
             ),
         )
 
-        translated_text = _clean_translation(
-            translated_text, text
+        translated = _clean_translation(
+            translated, text
         )
 
-        if not translated_text:
+        if not translated:
 
             raise RuntimeError(
                 f"Empty translation returned "
@@ -706,10 +728,42 @@ def translate_chunk(
             )
 
         print(
-            f"✓ Chunk {chunk_id} translated successfully."
+            f"✓ Chunk {chunk_id} translated successfully "
+            f"({active_model})."
         )
 
-        return translated_text
+        return translated
+
+    try:
+
+        try:
+
+            return attempt(model)
+
+        except RetryError as primary_error:
+
+            if fallback_model is None:
+
+                raise
+
+            print(
+                f"FALLBACK chunk {chunk_id}: {model} "
+                f"exhausted after {MAX_RETRIES} attempts "
+                f"-> {fallback_model} [translate_chunk]"
+            )
+
+            translated_text = attempt(fallback_model)
+
+            if fallback_record is not None:
+
+                fallback_record.append(str(chunk_id))
+
+            print(
+                f"✓ Chunk {chunk_id} translated by fallback "
+                f"model {fallback_model}."
+            )
+
+            return translated_text
 
     except KeyboardInterrupt:
 
@@ -833,6 +887,8 @@ def _process_fast_resume_sequential(
     stop_event: Any = None,
     style_preset: str | None = None,
     chunk_contexts: dict[str, str] | None = None,
+    fallback_model: str | None = None,
+    fallback_record: list | None = None,
 ) -> tuple[dict[str, Any], None, None]:
     """
     Sequential path. Taken when concurrency is 1, when resuming, or for tests.
@@ -985,6 +1041,8 @@ def _process_fast_resume_sequential(
                 glossary_snapshot=glossary_snapshot,
                 style_preset=style_preset,
                 context_before=(chunk_contexts or {}).get(str(chunk_id)),
+                fallback_model=fallback_model,
+                fallback_record=fallback_record,
             )
 
             # ------------------------------------------------
@@ -1266,6 +1324,8 @@ def _process_fast_resume(
     stop_event: Any = None,
     style_preset: str | None = None,
     chunk_contexts: dict[str, str] | None = None,
+    fallback_model: str | None = None,
+    fallback_record: list | None = None,
 ) -> tuple[dict[str, Any], None, None]:
     """Translate chunks concurrently while persisting each completed result."""
     max_workers = _translation_concurrency()
@@ -1286,6 +1346,7 @@ def _process_fast_resume(
             client, all_chunks, translations, mode, from_lang, to_lang,
             paths, model, test_translations, filetype, system_prompt_text,
             stop_event, style_preset, chunk_contexts,
+            fallback_model, fallback_record,
         )
 
     total_chunks = len(all_chunks)
@@ -1315,6 +1376,8 @@ def _process_fast_resume(
             system_prompt_text=system_prompt_text,
             glossary_snapshot=snapshot,
             context_before=(chunk_contexts or {}).get(str(chunk_id)),
+            fallback_model=fallback_model,
+            fallback_record=fallback_record,
         )
         translated_text = _clean_translation(translated_text, chunk_text)
         if not translated_text:
@@ -1525,6 +1588,7 @@ def process_translations(
     stop_event: Any = None,
     style_preset: str | None = None,
     chunk_contexts: dict[str, str] | None = None,
+    fallback_model: str | None = None,
 ) -> tuple[dict[str, Any], Any, Any]:
     """
     Main translation workflow dispatcher.
@@ -1551,12 +1615,27 @@ def process_translations(
     The semantic chunker produces it; it is passed straight through to the model
     and never stored as a translation. Empty or None means every chunk is
     translated blind, which is the historical behaviour.
+
+    ``fallback_model`` names a cheaper model used only after the primary model
+    exhausts all retries on a chunk. Chunks served by the fallback are recorded
+    in the job directory (``fallback.json``) and reported at the end of the run.
     """
 
     # Signature used to default to "gpt-5.6-terra"; resolve from config instead.
     if model is None:
         from app.core.models import resolve_default_model
         model = resolve_default_model()
+
+    if fallback_model is not None:
+        from app.core.models import is_supported_model
+        if not is_supported_model(fallback_model):
+            raise ValueError(
+                f"Unsupported fallback model: {fallback_model}."
+            )
+        if fallback_model == model:
+            raise ValueError(
+                "Fallback model must differ from the primary model."
+            )
 
     # ========================================================
     # VALIDATE MODE
@@ -1617,7 +1696,16 @@ def process_translations(
         "resume",
     }:
 
-        return _process_fast_resume(
+        from app.jobs.state import (
+            load_fallback_usage,
+            save_fallback_usage,
+        )
+
+        fallback_record = (
+            load_fallback_usage(paths) if fallback_model else []
+        )
+
+        result = _process_fast_resume(
             client=client,
             all_chunks=all_chunks,
             translations=translations,
@@ -1632,7 +1720,26 @@ def process_translations(
             stop_event=stop_event,
             style_preset=style_preset,
             chunk_contexts=chunk_contexts,
+            fallback_model=fallback_model,
+            fallback_record=fallback_record,
         )
+
+        if fallback_model:
+
+            save_fallback_usage(
+                paths,
+                model,
+                fallback_model,
+                fallback_record,
+            )
+
+            print(
+                f"Fallback model {fallback_model} served "
+                f"{len(fallback_record)} chunk(s) "
+                f"[process_translations]"
+            )
+
+        return result
 
     # ========================================================
     # TEST

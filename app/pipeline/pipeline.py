@@ -205,6 +205,7 @@ def _translate_epub(
     stop_event=None,
     on_job_started=None,
     style_preset=None,
+    fallback_model=None,
 ):
     """
     Execute the complete EPUB translation pipeline.
@@ -513,6 +514,7 @@ def _translate_epub(
                 stop_event=stop_event,
                 style_preset=style_preset,
                 chunk_contexts=chunk_contexts,
+                fallback_model=fallback_model,
             )
         )
 
@@ -747,6 +749,7 @@ def _translate_pdf(
     stop_event=None,
     on_job_started=None,
     style_preset=None,
+    fallback_model=None,
 ):
     """
     Execute the PDF processing pipeline.
@@ -882,6 +885,7 @@ def _translate_pdf(
                 translation_prompt=translation_prompt,
                 stop_event=stop_event,
                 style_preset=style_preset,
+                fallback_model=fallback_model,
             )
         )
 
@@ -1090,6 +1094,7 @@ def translate(
     stop_event=None,
     on_job_started=None,
     style_preset=None,
+    fallback_model=None,
 ):
     """
     Main translation dispatcher.
@@ -1291,6 +1296,7 @@ def translate(
             stop_event=stop_event,
             on_job_started=on_job_started,
         style_preset=style_preset,
+            fallback_model=fallback_model,
         )
 
     # ========================================================
@@ -1313,6 +1319,7 @@ def translate(
             stop_event=stop_event,
             on_job_started=on_job_started,
         style_preset=style_preset,
+            fallback_model=fallback_model,
         )
 
     # ========================================================
