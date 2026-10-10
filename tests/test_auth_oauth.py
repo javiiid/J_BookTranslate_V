@@ -62,13 +62,15 @@ def stub_http(claims):
 # GOOGLE
 # ============================================================
 
-def test_google_start_needs_config(database):
+def test_google_start_needs_config(database, monkeypatch):
+    monkeypatch.setattr(oauth, "oauth_config", lambda provider: {})
     with pytest.raises(ValueError) as exc:
         oauth.google_start(database)
     assert "oauth.google" in str(exc.value)
 
 
 def test_provider_status_reflects_config(database, monkeypatch):
+    monkeypatch.setattr(oauth, "oauth_config", lambda provider: {})
     assert oauth.provider_status() == {"google": False, "apple": False}
     monkeypatch.setattr(
         oauth, "oauth_config",

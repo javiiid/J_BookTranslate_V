@@ -22,7 +22,7 @@
  * (no motion here at all), zero new dependencies.
  */
 import { useEffect, useState } from 'react'
-import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { KalimaMark } from '@/components/AppShell'
 import { api, ApiError } from '@/lib/api.ts'
 import { validDisplayName, validEmail, validOtpCode, validPassword } from '@/lib/auth.ts'
@@ -81,6 +81,7 @@ export function AuthPage(): React.JSX.Element {
   const { t, dir } = useLanguage()
   const { pathname } = useLocation()
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [mode, setMode] = useState<Mode>(pathname.startsWith('/signup') ? 'signup' : 'login')
   const [method, setMethod] = useState<Method>('password')
   const [email, setEmail] = useState<string>('')
@@ -100,6 +101,16 @@ export function AuthPage(): React.JSX.Element {
   const [newPassword, setNewPassword] = useState<string>('')
   /* undefined = still checking; null = no session; a user = logged in. */
   const [session, setSession] = useState<AuthUser | null | undefined>(undefined)
+
+  /* An OAuth failure lands back here as ?auth_error=: the backend owns the
+     truth, so its message is shown once and cleared from the URL. */
+  useEffect(() => {
+    const failure = searchParams.get('auth_error')
+    if (failure) {
+      setError(failure)
+      setSearchParams({}, { replace: true })
+    }
+  }, [searchParams, setSearchParams])
 
   /* An active session turns this page into a session panel instead of a form:
      a login form behind a login is how "am I in or out?" confusion starts. */

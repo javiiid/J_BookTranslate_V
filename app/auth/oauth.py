@@ -55,6 +55,22 @@ def oauth_config(provider: str) -> dict:
         return {}
 
 
+def frontend_origin() -> str:
+    """Where the React SPA lives (dev: http://127.0.0.1:5173, prod: same origin).
+
+    OAuth callbacks are top-level navigations on the BACKEND host, so the
+    session cookie is set for the backend host. Redirecting back to the SPA
+    origin keeps login/logout in one UI. Empty means same-origin (production
+    single-origin deploy); set ``oauth.frontend_origin`` for dev.
+    """
+    try:
+        from app.core.config import read_config_safe
+
+        return str((read_config_safe().get("oauth") or {}).get("frontend_origin") or "").rstrip("/")
+    except (OSError, AttributeError, TypeError, ValueError):
+        return ""
+
+
 def _require_config(provider: str, *keys: str) -> dict:
     settings = oauth_config(provider)
     missing = [key for key in keys if not str(settings.get(key) or "").strip()]

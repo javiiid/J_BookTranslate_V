@@ -1306,11 +1306,14 @@ class Handler(BaseHTTPRequestHandler):
                 finish = auth_oauth.google_callback if provider == "google" else auth_oauth.apple_callback
                 _, token = finish(db, (query.get("code") or [""])[0], (query.get("state") or [""])[0])
             except Exception as exc:
+                origin = auth_oauth.frontend_origin()
                 self.send_response(302)
-                self.send_header("Location", "/account?auth_error=" + _quote(str(exc)[:200]))
+                self.send_header("Location", (origin + "/login?auth_error=" + _quote(str(exc)[:200])) if origin else ("/login?auth_error=" + _quote(str(exc)[:200])))
                 self.end_headers(); return
+            from app.auth import oauth as auth_oauth
+            origin = auth_oauth.frontend_origin()
             self.send_response(302)
-            self.send_header("Location", "/library")
+            self.send_header("Location", (origin + "/library") if origin else "/library")
             for name, value in self._set_session_cookie(token).items(): self.send_header(name, value)
             self.end_headers(); return
         if parsed.path == "/api/account/portal":
