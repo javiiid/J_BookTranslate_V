@@ -10,7 +10,10 @@ Subtitle translation with guaranteed timecode fidelity.
     serialize_srt()        blocks -> SRT text
     break_long_lines()     enforce the 42-char broadcasting limit
     validate_srt()         structural + timecode QA validator
-    translate_srt()        full standalone translation flow
+    translate_srt()        full standalone translation flow (.srt input,
+                           original timecodes preserved)
+    segments_to_srt_blocks()  book segments (epub/pdf) -> blocks with
+                           ESTIMATED timing (books have no timecodes)
 
 The validator is deliberately a separate concern: it verifies the
 final output (indices sequential, timecode syntax, chronological
@@ -22,7 +25,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from app.core.models import DEFAULT_MODEL
+from app.core.models import resolve_default_model
 from app.core.paths import create_job_id, ensure_temp_structure
 from app.jobs.cleanup import cleanup_files
 from app.output.markers import strip_markers
@@ -32,6 +35,11 @@ from app.translation.translator import (
 )
 
 MAX_LINE_LENGTH = 42
+
+# Reading-speed model for estimated book timings: ~17 chars/sec is the
+# standard subtitle rate. Timings derived from it are estimates — book
+# sources carry no timecodes — and callers must label them as such.
+ESTIMATED_CHARS_PER_SECOND = 17
 
 TIMECODE_RE = (
     r"^\s*(\d{1,2}):(\d{2}):(\d{2}),(\d{3})"
@@ -218,19 +226,38 @@ def merge_translations(
 
     ``translations`` is keyed by ``chunk-{position}`` (pipeline
     style, matching how ``translate_srt`` numbered the chunks) with
-    a fallback to the plain subtitle index. Missing entries fall
-    back to the original text so subtitles are never lost.
+    a fallback to the plain subtitle index.
+
+    Returns:
+        tuple: (merged blocks, missing indices). ``missing`` lists the
+        subtitle indices that had NO translation entry and fell back to
+        the original text, so untranslated content is always visible to
+        the caller and never silently passed off as translated.
     """
 
     merged = []
 
+    missing = []
+
     for position, block in enumerate(blocks):
 
-        translated = (
-            translations.get(f"chunk-{position}")
-            or translations.get(str(block.index))
-            or block.text
-        )
+        key = f"chunk-{position}"
+
+        index_key = str(block.index)
+
+        if key in (translations or {}):
+
+            translated = translations[key]
+
+        elif index_key in (translations or {}):
+
+            translated = translations[index_key]
+
+        else:
+
+            missing.append(block.index)
+
+            translated = block.text
 
         clean = strip_markers(translated).strip() or block.text
 
@@ -245,7 +272,128 @@ def merge_translations(
             )
         )
 
-    return merged
+    return merged, missing
+
+
+def _ms_to_timecode(total_ms):
+    """
+    Milliseconds since 00:00:00,000 -> ``HH:MM:SS,mmm``.
+    """
+
+    total_ms = max(0, int(total_ms))
+
+    hours, remainder = divmod(total_ms, 3600000)
+
+    minutes, remainder = divmod(remainder, 60000)
+
+    seconds, millis = divmod(remainder, 1000)
+
+    return _format_timecode(hours, minutes, seconds, millis)
+
+
+def segments_to_srt_blocks(
+    segments,
+    chars_per_second=ESTIMATED_CHARS_PER_SECOND,
+):
+    """
+    Book segments (EPUB/PDF) -> subtitle blocks with ESTIMATED timing.
+
+    Book sources carry no timecodes, so each block's duration is estimated
+    from its translated character count at ``chars_per_second`` and blocks
+    run back-to-back from 00:00:00,000. Callers must label the result as
+    estimated timing (see the ``srt`` output label).
+
+    Only segments with non-empty translated (``target``) text produce blocks;
+    untranslated content is skipped, never emitted as source text.
+
+    Returns:
+        list[SrtBlock]: sequential blocks starting at index 1.
+    """
+
+    if chars_per_second is None or chars_per_second <= 0:
+
+        raise ValueError(
+            "chars_per_second must be a positive number."
+        )
+
+    blocks = []
+
+    cursor_ms = 0
+
+    for segment in segments or []:
+
+        text = str((segment or {}).get("target") or "").strip()
+
+        if not text:
+
+            continue
+
+        for line in break_long_lines(text):
+
+            lines = [line]
+
+            chars = max(len(line), 1)
+
+            duration_ms = int(chars / chars_per_second * 1000)
+
+            start = _ms_to_timecode(cursor_ms)
+
+            cursor_ms += duration_ms
+
+            end = _ms_to_timecode(cursor_ms)
+
+            blocks.append(
+                SrtBlock(
+                    index=len(blocks) + 1,
+                    start=start,
+                    end=end,
+                    text="\n".join(lines),
+                )
+            )
+
+    # Re-pack pairs of single lines into two-line blocks so the file reads
+    # like real subtitles instead of one line per cue. Timing stays cumulative.
+    packed = []
+
+    index = 0
+
+    while index < len(blocks):
+
+        first = blocks[index]
+
+        second = (
+            blocks[index + 1]
+            if index + 1 < len(blocks)
+            else None
+        )
+
+        if second is not None:
+
+            packed.append(
+                SrtBlock(
+                    index=len(packed) + 1,
+                    start=first.start,
+                    end=second.end,
+                    text=f"{first.text}\n{second.text}",
+                )
+            )
+
+            index += 2
+
+        else:
+
+            packed.append(
+                SrtBlock(
+                    index=len(packed) + 1,
+                    start=first.start,
+                    end=first.end,
+                    text=first.text,
+                )
+            )
+
+            index += 1
+
+    return packed
 
 
 def _timecode_ms(timecode):
@@ -396,7 +544,7 @@ def translate_srt(
     output_path,
     from_lang="EN",
     to_lang="FA",
-    model=DEFAULT_MODEL,
+    model=None,
     mode="fast",
     translation_prompt=None,
     debug=False,
@@ -412,6 +560,10 @@ def translate_srt(
     input_path = Path(input_path)
 
     output_path = Path(output_path)
+
+    if not model:
+
+        model = resolve_default_model()
 
     blocks = parse_srt(_read_text(input_path))
 
@@ -501,7 +653,7 @@ def translate_srt(
 
         return None
 
-    merged = merge_translations(
+    merged, missing = merge_translations(
         blocks,
         translations,
     )
@@ -519,6 +671,14 @@ def translate_srt(
     )
 
     issues = validate_srt(rendered)
+
+    if missing:
+
+        issues = issues + [
+            f"Block {index} has no translation and "
+            f"keeps the original text."
+            for index in missing
+        ]
 
     if issues:
 

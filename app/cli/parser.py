@@ -118,7 +118,8 @@ def parse_args():
             "comma-separated (e.g. json_segments,txt_bilingual,docx) "
             "or 'all'. Supported: json_segments, txt_bilingual, "
             "markdown, docx, translated_pdf, bilingual_pdf, "
-            "translated_epub, srt, quality_report."
+            "translated_epub, srt (book sources: estimated timing), "
+            "quality_report."
         )
     )
 

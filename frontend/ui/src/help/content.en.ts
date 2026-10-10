@@ -588,7 +588,7 @@ export const helpFaqsEn: HelpFaq[] = [
   {
     id: 'srt-output',
     question: 'What exactly is the SRT output?',
-    answer: 'A subtitle format preserving timing is produced, but wiring its full content is still in progress; count on EPUB or Word for the book text.',
+    answer: 'Translated subtitles. For .srt uploads the original timing is preserved; for books the timing is estimated from the translated text at reading speed, in 42-char lines.',
     category: 'convert-export',
     articleSlug: 'convert-export',
   },

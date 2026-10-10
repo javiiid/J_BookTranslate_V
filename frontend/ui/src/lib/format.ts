@@ -95,7 +95,7 @@ export const ASSET_FA: Record<string, string> = {
   translated_pdf: 'PDF ترجمه‌شده',
   bilingual_pdf: 'PDF دوزبانه',
   translated_epub: 'EPUB ترجمه‌شده',
-  srt: 'زیرنویس (SRT)',
+  srt: 'زیرنویس (SRT، زمان‌بندی تخمینی)',
   quality_report: 'گزارش کیفیت',
   qa_report: 'گزارش کیفیت',
 }
@@ -109,7 +109,7 @@ export const ASSET_EN: Record<string, string> = {
   translated_pdf: 'Translated PDF',
   bilingual_pdf: 'Bilingual PDF',
   translated_epub: 'Translated EPUB',
-  srt: 'Subtitles (SRT)',
+  srt: 'Subtitles (SRT, estimated timing)',
   quality_report: 'Quality report',
   qa_report: 'Quality report',
 }

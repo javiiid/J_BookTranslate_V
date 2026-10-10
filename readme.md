@@ -2,114 +2,129 @@
 
 # 📖 KALIMA
 
-**ترجمهٔ کتاب‌های EPUB و PDF روی سیستم خودتان — بدون آپلود به جایی، بدون build step.**
+**Translate EPUB and PDF books on your own machine — no uploads anywhere, no build step.**
 
-یک ابزار محلی و تک‌فایلی برای ترجمهٔ کتاب با هر API سازگار با OpenAI.
-ترجمه به بخش‌های کوچک تقسیم می‌شود، پیشرفت روی دیسک می‌ماند، و ترجمه
-بعد از توقف یا خاموش‌شدن کامپیوتر از همان‌جا ادامه پیدا می‌کند.
+A local, single-command book translator for any OpenAI-compatible API.
+Translation is split into small chunks, progress persists on disk, and work
+resumes exactly where it stopped — even after a reboot.
+
+**[فارسی](README_FA.md)** · Persian readers: the full original documentation lives in `README_FA.md`.
 
 <p>
-  <img src="app/brand/kalima-mark-light.svg" width="88" alt="نشان KALIMA">
+  <img src="app/brand/kalima-mark-light.svg" width="88" alt="KALIMA mark">
 </p>
 
 <br>
 
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-291%20passing-brightgreen.svg)]()
-[![Dependencies](https://img.shields.io/badge/dependencies-3-lightgrey.svg)]()
+[![Tests](https://img.shields.io/badge/tests-635%20passing-brightgreen.svg)]()
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Local](https://img.shields.io/badge/server-127.0.0.1%3A8765-informational.svg)]()
 
 <br>
 
-**۱۱ برابر سریع‌تر** · **۱۲ chunk هم‌زمان** · **واژه‌نامه پیش از ترجمه** · **۱۷٬۱۱۵ خط پایتون**
+**11× faster** · **12 concurrent chunks** · **pre-translation glossary** · **calibration workshop** · **~17K lines of Python**
 
 </div>
 
 ---
 
-## 📑 فهرست
+## 📑 Contents
 
-- [چرا این پروژه فرق دارد](#-چرا-این-پروژه-فرق-دارد)
-- [امکانات](#-امکانات)
-- [شروع سریع](#-شروع-سریع)
-- [جریان واژه‌نامه](#-جریان-واژهنامه)
-- [کارایی و هم‌روندی](#-کارایی-و-همروندی)
-- [معماری پروژه](#-معماری-پروژه)
-- [پیکربندی](#-پیکربندی)
-- [رابط وب](#-رابط-وب)
-- [خط فرمان](#-خط-فرمان)
-- [قالب‌های خروجی](#-قالبهای-خروجی)
-- [انتخاب مدل](#-انتخاب-مدل)
-- [امنیت](#-امنیت)
-- [تست](#-تست)
-- [توسعه](#-توسعه)
-- [موارد باز](#-موارد-باز)
+- [Why this project is different](#-why-this-project-is-different)
+- [Features](#-features)
+- [Quick start](#-quick-start)
+- [Glossary flow](#-glossary-flow)
+- [Calibration workshop](#-calibration-workshop)
+- [Estimate & rescue](#-estimate--rescue)
+- [Performance & concurrency](#-performance--concurrency)
+- [Project architecture](#-project-architecture)
+- [Configuration](#-configuration)
+- [Web interface](#-web-interface)
+- [Command line](#-command-line)
+- [Output formats](#-output-formats)
+- [Model selection](#-model-selection)
+- [Security](#-security)
+- [Testing](#-testing)
+- [Development](#-development)
+- [Open issues](#-open-issues)
 
 ---
 
-## 💡 چرا این پروژه فرق دارد
+## 💡 Why this project is different
 
-بیشتر ابزارهای ترجمهٔ کتاب یا کتاب را روی سروری دیگر می‌گذارند، یا کل کتاب را
-یک‌جا می‌فرستند، یا اگر کاری نیمه‌تمام بماند از دست می‌رود. این سه مشکل، هستهٔ
-تصمیم‌های این پروژه‌اند:
+Most book-translation tools either upload your book to someone else's server,
+send the whole book in one request, or lose everything when work stops halfway.
+These three problems drive every decision in this project:
 
-### ۱. کتاب شما جایی نمی‌رود
+### 1. Your book goes nowhere
 
-سرور فقط روی `127.0.0.1` گوش می‌دهد و کلید API در فایلی است که در Git نیست.
-هیچ آپلودی به جایی انجام نمی‌شود جز فایلی که خودتان انتخاب می‌کنید.
+The server listens only on `127.0.0.1`, and the API key lives in a file that is
+not in Git. Nothing is uploaded anywhere except the file you choose yourself.
 
-### ۲. چند chunk هم‌زمان بالا می‌روند
+### 2. Many chunks go up at once
 
-گلوگاه، I/O شبکه بود نه CPU. پس ترجمه **thread-based** است، نه `async`:
+The bottleneck was network I/O, not CPU. So translation is **thread-based**, not `async`:
 
-| تعداد worker | زمان ۱۲ chunk | شتاب |
+| Workers | Time for 12 chunks | Speedup |
 | --- | --- | --- |
-| ترتیبی | ۷۲.۲ ثانیه | ۱.۰× |
-| ۳ | ۲۴.۲ ثانیه | ۲.۹۹× |
-| ۶ | ۱۲.۳ ثانیه | ۵.۸۶× |
-| **۱۲** | **۶.۶ ثانیه** | **۱۰.۹۰×** |
+| Sequential | 72.2 s | 1.0× |
+| 3 | 24.2 s | 2.99× |
+| 6 | 12.3 s | 5.86× |
+| **12** | **6.6 s** | **10.90×** |
 
-تعداد درخواست‌های API در همهٔ حالت‌ها **ثابت** روی ۲۴ ماند — فقط زمان کم شد.
+API request count stayed **flat at 24** in every mode — only time shrank.
 
-بازنویسی با `asyncio` عمداً انجام نشد: چون چیزی برای کاربر اضافه نمی‌کرد و
-«ترتیب commit» و «توقف/ادامه» را از دست می‌داد.
+An `asyncio` rewrite was deliberately rejected: it added nothing for the user
+and would have lost commit ordering and stop/resume.
 
-### ۳. کاری که نیمه‌تمام بماند گم نمی‌شود
+### 3. Half-finished work is never lost
 
-هر chunk نتیجه‌اش را روی دیسک می‌نویسد. `Ctrl+C`، خاموش‌شدن لپ‌تاپ، یا کرش
-یعنی «ادامه از آخرین جای سالم»، نه «شروع از صفر».
+Every chunk writes its result to disk. `Ctrl+C`, a dead laptop battery, or a
+crash means "resume from the last healthy spot", not "start from zero".
 
 ---
 
-## ✨ امکانات
+## ✨ Features
 
-| | امکان | توضیح |
+| | Feature | Notes |
 | --- | --- | --- |
-| 📚 | **EPUB و PDF** | هر دو قالب، با Reader داخلی |
-| ⚡ | **۱۲ chunk هم‌زمان** | با rate limit تطبیقی |
-| 🔁 | **توقف و ادامه** | حتی بعد از خاموش‌شدن کامپیوتر |
-| 🧠 | **واژه‌نامهٔ پیشنهادی** | مدل پیشنهاد می‌دهد، **شما** تأیید می‌کنید |
-| 🛡️ | **بدون یادگیری خودکار** | حین ترجمه چیزی به واژه‌نامه اضافه نمی‌شود |
-| 📊 | **مانیتور ترجمه** | پنج تب: خلاصه، chunkها، QA، لاگ، فایل‌ها |
-| 🖼️ | **تصویر در Reader** | با جداسازی کامل asset از متن |
-| 🗂️ | **کتابخانهٔ محلی** | با جستجو و آرشیو |
-| 🌙 | **حالت مطالعهٔ شب** | تم OLED و خوانایی بلندمدت |
-| 🇮🇷 | **رابط فارسی RTL** | فونت محلی، بدون وابستگی به CDN |
-| 📤 | **۹ قالب خروجی** | از DOCX تا SRT و گزارش QA |
-| 🔒 | **محافظ CSRF** | جلوگیری از درخواست از صفحات دیگر |
+| 📚 | **EPUB and PDF** | Both formats, with a built-in reader |
+| 🧪 | **Calibration workshop** | Settle voice, glossary, model and budget on 1–3 real samples before the full run |
+| 💰 | **Honest cost estimate** | Real chunk counts, script-aware token estimates, concurrency-aware timing |
+| 🛟 | **Rescue & re-import** | Export a rescue archive, re-import it later without re-paying for done chunks |
+| ⚡ | **12 concurrent chunks** | With adaptive rate limiting |
+| 🔁 | **Stop and resume** | Even after the computer shuts down |
+| 🧠 | **Proposed glossary** | The model proposes, **you** approve |
+| 🛡️ | **No auto-learning** | Nothing is added to the glossary mid-translation |
+| 🧩 | **Semantic chunker** | Lossless, tag-aware, token-budgeted splits with context window |
+| 📊 | **Translation monitor** | Five tabs: summary, chunks, QA, log, files |
+| ✅ | **Quality scorer** | Six-dimension chunk QA, opt-in via `quality_report` |
+| 🖼️ | **Images in the reader** | Full asset/text separation |
+| 🗂️ | **Local library** | With search, covers, and archive |
+| 🔑 | **Local auth** | Password login with sessions, stdlib only |
+| ❓ | **Help center** | Searchable articles and FAQ in Persian and English |
+| 🖥️ | **React frontend** | Strict-TypeScript UI served locally on :5173 |
+| 🌙 | **Night reading mode** | OLED theme for long sessions |
+| 🇮🇷 | **Persian RTL interface** | Local fonts, no CDN dependency |
+| 📤 | **9 output formats** | From DOCX to SRT and QA reports, with embedded Vazirmatn + RTL |
+| 🔒 | **CSRF protection** | Rejects requests from foreign pages |
 
 ---
 
-## 🚀 شروع سریع
+## 🚀 Quick start
 
-### پیش‌نیاز
+The project runs as **two processes**: the Python backend first, then the
+React frontend. Keep both running and use the app locally in your browser.
 
-فقط **سه** کتابخانه. Python 3.11 یا جدیدتر (روی 3.14 تست شده).
+### Prerequisites
 
-<br>
+- Python 3.11 or newer (tested on 3.14)
+- Node.js 18+ (for the frontend only)
 
-### گام ۱ — نصب
+### Step 1 — Install the backend
+
+From the repo root:
 
 ```powershell
 python -m venv .venv
@@ -117,11 +132,15 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
+This installs `openai`, `PyYAML`, `PyMuPDF`, `pypandoc_binary`, `fonttools`
+and `playwright`.
+
 <br>
 
-### گام ۲ — پیکربندی
+### Step 2 — Create `config/config.yaml`
 
-فایل `config/config.yaml` را بسازید:
+Create the file **`config/config.yaml`** (repo root → `config` folder → file
+`config.yaml`). There is no example file to copy — write it manually:
 
 ```yaml
 openai:
@@ -134,36 +153,82 @@ translation:
   default_to_lang: "FA"
 ```
 
-> 🔐 این فایل در `.gitignore` است و **هرگز** commit نمی‌شود.
+- `openai.api_key` / `openai.base_url` point at any OpenAI-compatible API.
+- `translation.*` holds the defaults (model, languages, concurrency, glossary
+  mode…). The full key table is under [Configuration](#-configuration).
+- The `/account` page can rewrite this file later (`yaml.safe_dump`).
+
+> 🔐 `config/config.yaml` is gitignored (named rule) and **never** committed.
 
 <br>
 
-### گام ۳ — اجرا
+### Step 3 — Start the backend
 
 ```powershell
 python -m app.web
 ```
 
-سپس در مرورگر باز کنید: **http://127.0.0.1:8765**
+It listens loopback-only at **http://127.0.0.1:8765**. Leave this terminal
+running — the frontend needs it.
 
-همین. فایل EPUB یا PDF را بکشید و رها کنید.
+<br>
+
+### Step 4 — Start the frontend
+
+In a **second** terminal:
+
+```powershell
+cd frontend/ui
+npm install
+npm run dev
+```
+
+This serves the React UI at **http://localhost:5173**. `npm run dev` first runs
+two guards (`ensure-fonts`, `check-brand`) that fail with the fixing command if
+fonts or brand assets are missing.
+
+Vite proxies `/api`, `/downloads`, `/covers` and `/reader` to the backend, so
+the browser sees a single origin — no CORS anywhere. If your backend is not on
+port 8765, point the UI at it with the `KALIMA_API` environment variable
+(legacy name `JBT_API` still works):
+
+```powershell
+$env:KALIMA_API = "http://127.0.0.1:8765"
+npm run dev
+```
+
+<br>
+
+### Step 5 — Open it locally
+
+| What | Address |
+| --- | --- |
+| Full app (React UI) | **http://localhost:5173** |
+| Backend alone (Python pages + API) | **http://127.0.0.1:8765** |
+
+Open the React UI, drop an EPUB or PDF file on `/workspace`, and calibrate on
+1–3 samples before the full run. That's the whole flow.
+
+> Python is the single source of truth: the React app in `frontend/ui` is a
+> port, not a second implementation. `/reader` is still proxied to the Python
+> reader until the React port is complete.
 
 <br>
 
 <details>
-<summary><b>ترجمه بدون رابط وب (خط فرمان)</b></summary>
+<summary><b>Translate without the web UI (command line)</b></summary>
 
 ```powershell
-# ترجمهٔ معمولی
+# Regular translation
 python -m app.main --input ".\books\source.epub" --from-lang EN --to-lang FA
 
-# ادامهٔ یک ترجمهٔ نیمه‌تمام
+# Resume a half-finished translation
 python -m app.main --input ".\books\source.epub" --from-lang EN --to-lang FA --mode resume
 
-# چند خروجی هم‌زمان
+# Several outputs at once
 python -m app.main --input ".\books\source.epub" --outputs markdown,docx,quality_report
 
-# سبک ترجمهٔ دلخواه
+# Custom translation style
 python -m app.main --input ".\books\source.epub" --style technical
 ```
 
@@ -171,189 +236,259 @@ python -m app.main --input ".\books\source.epub" --style technical
 
 ---
 
-## 🧠 جریان واژه‌نامه
+## 🧠 Glossary flow
 
-پیشنهاد، بازبینی، تأیید — به همین ترتیب.
+Propose, review, approve — in that order.
 
-این مهم‌ترین تغییر معماری پروژه است.
+This is the project's most important architectural change.
 
-### چرا یادگیری خودکار را حذف کردیم
+### Why auto-learning was removed
 
-روش قبلی این بود: بعد از ترجمهٔ هر chunk، از مدل بپرس «اصطلاح جدیدی دیدی؟» و
-جواب را به واژه‌نامه اضافه کن. مشکلش این بود که **با سرعت در تضاد بود**.
+The old approach: after translating each chunk, ask the model "did you see any
+new terms?" and add the answer to the glossary. The problem was that it
+**conflicted with speed**.
 
-وقتی prompt یک chunk آماده می‌شود، اصطلاحی که از chunkِ هنوز در حال ترجمه
-یاد گرفته شده دیگر دیر است — آن chunk قبلاً ارسال شده. برای رفع این مشکل باید
-ترجمه را ترتیبی می‌کرد، و آن‌وقت کل شتاب ۱۰.۹۰× از بین می‌رفت.
+By the time one chunk's prompt is ready, a term learned from a still-translating
+chunk is already too late — that chunk was sent earlier. Fixing this would have
+required sequential translation, killing the entire 10.90× speedup.
 
-### راه‌حل: یاد بگیر، ولی **قبل** از ترجمه
+### The fix: learn, but **before** translating
 
 ```text
- ۱. کتاب را آپلود می‌کنید
- ۲. «پیشنهاد واژه‌نامه» را می‌زنید
+ 1. You upload the book
+ 2. You press "Propose glossary"
         ↓
-    ۱۲ chunk از سراسر کتاب → ۱ درخواست LLM
+    12 chunks sampled across the book → 1 LLM request
         ↓
- ۳. جدول بازبینی: تیک بزنید، متن را اصلاح کنید، یا رد کنید
+ 3. Review table: tick, edit, or reject
         ↓
- ۴. «تأیید انتخاب‌شده‌ها» → فقط همان‌ها وارد واژه‌نامه می‌شوند
+ 4. "Approve selected" → only those enter the glossary
         ↓
- ۵. ترجمه با ۱۲ worker
+ 5. Translation with 12 workers
         ↓
- ۶. پایان. هیچ‌چیز خودکار اضافه نشد.
+ 6. Done. Nothing was added automatically.
 ```
 
-**نتیجهٔ کلیدی:** چون واژه‌نامه در شروع Job snapshot می‌شود، **همهٔ chunkها —
-از جمله chunk اول — با یک واژه‌نامه ترجمه می‌شوند.** قبلاً این درست نبود.
+**Key result:** because the glossary is snapshotted at job start, **every chunk —
+including chunk 1 — translates with the same glossary.** That was not true before.
 
-### چقدر می‌کاهد؟
+### What does it save?
 
-| | تماس API برای واژه‌نامه | پوشش chunkها |
+| | Glossary API calls | Chunk coverage |
 | --- | --- | --- |
-| قبل | **۳۰۰** تماس برای کتاب ۳۰۰chunk | ۰٪ |
-| الان | **۱** تماس | **۱۰۰٪** |
+| Before | **300** calls for a 300-chunk book | 0% |
+| Now | **1** call | **100%** |
 
-### محافظ ضدتوهم
+### Anti-hallucination guard
 
-هر اصطلاحی که مدل پیشنهاد می‌دهد باید **واقعاً در متنی که به مدل نشان داده
-شده وجود داشته باشد**. اگر مدل نامی را از خودش بسازد، دور ریخته می‌شود.
+Every term the model proposes must **literally occur in the text it was shown**.
+If the model invents a name, it is discarded.
 
-این محافظ سمت سرور و بدون توجه به حرف مدل اعمال می‌شود، چون یک واژه‌نامهٔ
-توهمی هر ترجمهٔ بعدی آن کتاب را آلوده می‌کند.
+This guard is server-side and applies regardless of what the model says, because
+a hallucinated glossary would poison every later translation of that book.
 
-### اگر پیشنهاد نساختید؟
+### What if you skip the proposal?
 
-هشدار می‌بینید و **می‌توانید ادامه دهید** — بدون واژه‌نامه، فقط با اصطلاحات
-یکدست‌نشده.
+You see a warning and **can continue** — without a glossary, just with
+non-unified terminology.
 
-### تنظیم رفتار
+### Behavior setting
 
-`glossary_mode` در `config/config.yaml`:
+`glossary_mode` in `config/config.yaml`:
 
-| مقدار | رفتار |
+| Value | Behavior |
 | --- | --- |
-| `off` *(پیش‌فرض)* | هیچ یادگیری‌ای. فقط واژه‌نامهٔ تأییدشده. |
-| `deferred` | یادگیری خودکار بعد از تمام‌شدن chunkها. |
-| `inline` | یادگیری بین chunkها. ترجمه را ترتیبی می‌کند. |
+| `off` *(default)* | No learning. Only the approved glossary. |
+| `deferred` | Automatic learning after all chunks finish. |
+| `inline` | Learning between chunks. Forces sequential translation. |
 
-> `deferred` و `inline` هر کدام **یک درخواست LLM به‌ازای هر chunk** اضافه
-> می‌کنند. به همین دلیل `off` پیش‌فرض است.
+> `deferred` and `inline` each add **one LLM request per chunk**.
+> That is why `off` is the default.
 
 ---
 
-## ⚡ کارایی و هم‌روندی
+## 🧪 Calibration workshop
 
-### چرا thread و نه asyncio
+Translation runs through a calibration workshop. `/workspace` is intake only:
+it stores the upload and opens a calibration session. The reader settles voice,
+glossary, model and budget on 1–3 real samples, seals the profile, and only then
+does the full book run.
 
-گلوگاه، انتظار برای شبکه بود. کتابخانهٔ `openai` هم synchronous است. بازنویسی
-با `asyncio` هزینه داشت (پیچیدگی، از دست رفتن ترتیب commit و توقف/ادامه) و
-چیزی اضافه نمی‌کرد.
+```text
+ 1. Upload the book (costs nothing — intake only)
+        ↓
+ 2. Calibration session on 1–3 real samples
+    · tone preset (literary, academic, modern, …)
+    · glossary terms reviewed and approved
+    · model for samples + model for the full run
+    · budget guard: sealed spending limit
+        ↓
+ 3. Seal the profile → full book runs with the locked profile
+```
+
+Rules worth knowing:
+
+- Picking a file costs nothing; the workshop owns tone/style choices, so the
+  intake page has no queue and no tone picker.
+- The estimate dialog on `/workspace` is the **rescue** path only (already-priced
+  remainder work) — see below.
+- `srt` and `quality_report` are rejected inside a calibration session and must
+  be requested as separate outputs.
+- Reopening the same book with the same configuration keeps drafts, approvals
+  and spending — calibration state survives restarts, and an interrupted run is
+  marked honestly instead of silently retried.
+
+API: `/api/calibrations`, `/api/calibration-operations/*`.
+
+---
+
+## 💰 Estimate & rescue
+
+### Honest estimates
+
+The old estimate divided file size by 12,000, ignored concurrency, and reported
+cost as a hardcoded `0.0` — next to a "start translating" button, a zero reads
+as "free", not "unknown".
+
+`app/jobs/estimate.py` computes the real numbers instead:
+
+- **Real chunk counts** from the semantic chunker, not from file size.
+- **Script-aware token estimates** — Arabic script prices at roughly two
+  characters per token instead of one Latin average (deliberately biased high:
+  an undercount understates the bill).
+- **Concurrency-aware timing** at `max_concurrency = 12`.
+- **Per-model pricing** for the project's actual models.
+
+### Rescue archives
+
+`POST /api/jobs/{id}/rescue` produces a `*_rescue.zip` carrying the translated
+text, chunk list, glossary snapshot and settings. Unlike a dead backup, it can
+be **re-imported**: the job returns to a resumable state rebuilt from the
+archive, so already-translated chunks are not paid for twice. The estimate
+dialog is the rescue path for that already-priced remainder work.
+
+---
+
+## ⚡ Performance & concurrency
+
+### Why threads and not asyncio
+
+The bottleneck was waiting on the network. The `openai` library is synchronous.
+An `asyncio` rewrite had real costs (complexity, lost commit ordering and
+stop/resume) and added nothing.
 
 ### `AdaptiveRateLimiter`
 
-`app/core/rate_limit.py` — پنجرهٔ لغزان به‌علاوهٔ فاصلهٔ حداقلی بین درخواست‌ها:
+`app/core/rate_limit.py` — a sliding window plus a minimum gap between requests:
 
-- با هر پاسخ `429` سقف را **نصف** می‌کند
-- `Retry-After` را رعایت می‌کند
-- وقتی اوضاع بهتر شد آرام بالا می‌رود
-- با `stop_event` **قابل قطع** است، پس توقف فوری کار می‌کند
+- Halves the ceiling on every `429` response
+- Honors `Retry-After`
+- Climbs back up slowly when things improve
+- Stoppable via `stop_event`, so stopping is instant
 
-### فداکردی آگاهانه
+### A conscious tradeoff
 
-در concurrency ۱۲، فشردن `Ctrl+C` می‌تواند تا **۱۲ درخواست پولی** را هدر بدهد
-(درخواست تمام شده ولی نتیجه‌اش commit نشده).
+At concurrency 12, pressing `Ctrl+C` can waste up to **12 paid requests**
+(requests finished but results not committed).
 
-**چیزی به‌اشتباه «کامل» علامت نمی‌خورد** و ادامهٔ ترجمه همیشه درست کار می‌کند.
-این معاوضه آگاهانه است، نه یک باگ پنهان.
+**Nothing is ever wrongly marked "complete"**, and resuming always works
+correctly. This is a deliberate tradeoff, not a hidden bug.
 
 ---
 
-## 🏗 معماری پروژه
+## 🏗 Project architecture
 
-هر package مستقل است و یک مسئولیت دارد.
+Each package is independent with one responsibility.
 
 ```text
 app/
-├── main.py          نقطهٔ ورود خط فرمان        ۶۸۷ خط
-├── web.py           سرور HTTP و محافظ‌ها        ۱٬۴۶۱ خط
+├── main.py          CLI entry point
+├── web.py           HTTP server + guards (60+ /api/* routes)
 │
-├── pipeline/        پردازش EPUB و PDF    ( ۹ فایل،  ۴٬۴۶۵ خط)
-│   ├── pipeline.py      هماهنگ‌کنندهٔ اصلی
-│   ├── pdf_handler.py   رندر و استخراج PDF
-│   └── quality_scorer.py  سنجش کیفیت
+├── calibration/     sample workshop (service, engine, store, routes)
+│   ├── service.py       sessions, approvals, budget, guarded execution
+│   ├── engine.py        tone presets, token/cost math
+│   └── store.py         persistent session/operation state
 │
-├── output/          قالب‌های خروجی      (۱۱ فایل،  ۲٬۷۰۷ خط)
-│   ├── formats.py       فهرست و registry
-│   └── docx.py  pdf.py  markdown.py  srt.py  و…
+├── pipeline/        EPUB & PDF processing
+│   ├── pipeline.py      main coordinator
+│   ├── semantic_chunker.py  lossless, token-budgeted chunking
+│   ├── pdf_handler.py   PDF rendering & extraction
+│   └── quality_scorer.py    6-dimension chunk QA
 │
-├── translation/     موتور ترجمه          ( ۲ فایل)
-│   ├── translator.py    حلقهٔ ترجمه و هم‌روندی
-│   └── prompts.py       promptها
+├── output/          output formats (EPUB/DOCX/PDF/Markdown/SRT/…)
+│   ├── formats.py       list & registry
+│   ├── epub_convert.py  EPUB conversion pipeline
+│   ├── rtl_docx.py rtl_pdf.py  RTL output + embedded Vazirmatn
+│   └── docx.py  pdf.py  markdown.py  srt.py  …
 │
-├── jobs/            Jobها و state       ( ۷ فایل،  ۱٬۳۴۱ خط)
-│   ├── state.py         ذخیرهٔ پیشرفت روی دیسک
-│   ├── detail_page.py   مانیتور ترجمه
-│   └── dashboard.py     داشبورد
+├── translation/     translation engine
+│   ├── translator.py    translation loop & concurrency
+│   └── prompts.py       prompts
 │
-├── core/            زیرساخت مشترک       (۱۳ فایل،  ۱٬۳۰۳ خط)
-│   ├── config.py        خواندن/نوشتن config.yaml
-│   ├── models.py        مدل‌های پشتیبانی‌شده
-│   ├── rate_limit.py    محدودکنندهٔ تطبیقی
-│   └── web_i18n.py      لایهٔ چندزبانه
+├── jobs/            jobs & state
+│   ├── state.py         progress persisted on disk
+│   ├── estimate.py      honest cost/time estimation
+│   ├── rescue.py        rescue export & re-import
+│   ├── detail_page.py   translation monitor
+│   └── dashboard.py     dashboard
 │
-├── reader/          Reader دو‌زبانه     ( ۳ فایل،    ۸۷۱ خط)
-├── glossary/        واژه‌نامه            ( ۵ فایل،    ۷۷۶ خط)
-│   ├── service.py       ذخیره و snapshot
-│   ├── proposal.py      نمونه‌برداری و اعتبارسنجی
-│   ├── proposal_page.py پنل بازبینی
-│   └── automatic.py     یادگیری خودکار (پیش‌فرض خاموش)
+├── core/            shared infrastructure
+│   ├── config.py        config.yaml reading/writing
+│   ├── models.py        supported models
+│   ├── rate_limit.py    adaptive limiter
+│   └── web_i18n.py      multilingual layer
 │
-├── presets/         سبک‌های ترجمه       ( ۲ فایل،    ۱۴۱ خط)
-├── account/         پورتال حساب          ( ۳ فایل،    ۲۰۲ خط)
-├── storage/         دیتابیس SQLite       ( ۲ فایل،    ۱۴۰ خط)
-├── library/         کتابخانه            ( ۴ فایل،    ۱۰۵ خط)
-├── cli/             تجزیهٔ خط فرمان      ( ۲ فایل،    ۱۲۹ خط)
-└── welcome/         صفحهٔ فرود           ( ۲ فایل،     ۲۰ خط)
+├── reader/          bilingual reader
+├── glossary/        glossary (service, proposal, review panel)
+├── presets/         translation styles
+├── auth/            local password auth & sessions
+├── account/         account portal (keys, orders, marketplace)
+├── storage/         SQLite database
+├── library/         library (search, covers, archive)
+├── cli/             command-line parsing
+└── welcome/         landing page
 
-tests/               ۳۳ فایل،  ۸٬۵۳۶ خط، ۲۹۱ تست
+frontend/ui/         React port (Vite + strict TS, optional)
+tests/               51 files, 635 tests
 ```
 
-جمع کد اصلی: **۱۷٬۱۱۵ خط** — با تست‌ها **۲۵٬۶۵۱ خط**.
+Main code: **~17K lines** of Python.
 
-### داده کجا می‌رود
+### Where data goes
 
 ```text
-data/     دیتابیس و metadata کتابخانه
-temp/     state قابل‌بازیابی Jobها
-output/   کتاب‌های ترجمه‌شده
+data/     database & library metadata
+temp/     resumable job state
+output/   translated books
 ```
 
-هیچ‌کدام در Git نیستند. `output/` یک export PDF به‌تنهایی ۹۹ مگابایت شد، و
-git هر blob را برای همیشه نگه می‌دارد.
+None of them are in Git. One PDF export alone reached 99 MB, and Git keeps
+every blob forever.
 
 ---
 
-## ⚙ پیکربندی
+## ⚙ Configuration
 
-`config/config.yaml` تنها منبع پیکربندی است.
+`config/config.yaml` is the only configuration source.
 
-| کلید | پیش‌فرض | کار |
+| Key | Default | Purpose |
 | --- | --- | --- |
-| `openai.api_key` | — | کلید API شما |
-| `openai.base_url` | — | آدرس سرویس سازگار با OpenAI |
-| `translation.default_model` | `gpt-5.6-luna` | مدل پیش‌فرض |
-| `translation.default_from_lang` | `FA` | زبان مبدأ |
-| `translation.default_to_lang` | `EN` | زبان مقصد |
-| `translation.default_mode` | `fast` | حالت ترجمه |
-| `translation.max_concurrency` | `12` | سقف hard در `app/core/config.py` |
-| `translation.requests_per_minute` | `120` | سقف درخواست؛ `null` یعنی بدون محدودیت |
-| `translation.glossary_mode` | `off` | رفتار واژه‌نامه |
-| `translation.temperature` | `0.2` | خلاقیت خروجی |
-| `translation.max_retries` | `5` | تلاش مجدد |
-| `translation.retry_delay` | `5` | تأخیر اولیهٔ تلاش مجدد |
-| `translation.max_retry_delay` | `60` | سقف تأخیر تلاش مجدد |
+| `openai.api_key` | — | Your API key |
+| `openai.base_url` | — | OpenAI-compatible service URL |
+| `translation.default_model` | `gpt-5.6-luna` | Default model |
+| `translation.default_from_lang` | `FA` | Source language |
+| `translation.default_to_lang` | `EN` | Target language |
+| `translation.default_mode` | `fast` | Translation mode |
+| `translation.max_concurrency` | `12` | Hard cap in `app/core/config.py` |
+| `translation.requests_per_minute` | `120` | Request cap; `null` = unlimited |
+| `translation.glossary_mode` | `off` | Glossary behavior |
+| `translation.temperature` | `0.2` | Output creativity |
+| `translation.max_retries` | `5` | Retries |
+| `translation.retry_delay` | `5` | Initial retry delay |
+| `translation.max_retry_delay` | `60` | Max retry delay |
 
-### نمونهٔ کامل
+### Full example
 
 ```yaml
 openai:
@@ -376,154 +511,176 @@ translation:
   max_retry_delay: 60
 ```
 
-> ⚠️ ذخیرهٔ تنظیمات از صفحهٔ حساب، این فایل را با `yaml.safe_dump`
-> بازنویسی می‌کند و **کامنت‌ها را پاک می‌کند**. مقادیر می‌مانند، توضیحات نه.
+> ⚠️ Saving settings from the account page rewrites this file with
+> `yaml.safe_dump` and **strips comments**. Values survive, explanations don't.
 
 ---
 
-## 🖥 رابط وب
+## 🖥 Web interface
 
-سرور روی `http://127.0.0.1:8765` و فقط روی loopback گوش می‌دهد.
+The server runs at `http://127.0.0.1:8765`, loopback only.
 
-| مسیر | چیست |
+| Path | What it is |
 | --- | --- |
-| `/landing` | صفحهٔ فرود |
-| `/workspace` | فضای کار: آپلود و مانیتور |
-| `/workspace/job/{id}` | مانیتور یک ترجمه (۵ تب) |
-| `/library` | کتابخانهٔ محلی |
-| `/reader/{id}` | Reader دو‌زبانه |
-| `/account` | پورتال حساب |
+| `/landing` | Landing page |
+| `/workspace` | Workspace: upload & monitor (intake — calibration owns the rest) |
+| `/workspace/job/{id}` | Single-translation monitor (5 tabs) |
+| `/library` | Local library |
+| `/reader/{id}` | Bilingual reader |
+| `/account` | Account portal |
+| `/help` | Help center (React UI): search, articles, FAQ |
 
-بیش از ۴۰ مسیر API زیر `/api/` هست (jobs، library، reader، memory، providers،
-account، analytics، logs و …).
+60+ API routes live under `/api/` (jobs, calibrations, library, reader,
+glossary, providers, account, analytics, logs, auth, …).
 
-### مانیتور ترجمه
+### Translation monitor
 
-`app/jobs/detail_page.py` — پنج تب: **خلاصه**، **chunkها**، **QA**، **لاگ**،
-**فایل‌ها**. جدول chunkها پنجره‌ای است (windowed) تا در کتاب‌های بزرگ مرورگر
-قفل نشود.
+`app/jobs/detail_page.py` — five tabs: **summary**, **chunks**, **QA**,
+**log**, **files**. The chunk table is windowed so the browser doesn't lock up
+on large books.
+
+### Quality reports
+
+The quality scorer (`app/pipeline/quality_scorer.py`) grades every translated
+chunk on six dimensions — accuracy 30%, fluency 25%, terminology 15%, format
+preservation 15%, boundary integrity 10%, length ratio 5% — in `full`, `light`
+or `rules` (no-LLM) mode. It runs only when `quality_report` is requested, in
+parallel across chunks, and never breaks the job: failures fall back to
+rule-based scores with a flag reason.
 
 ---
 
-## 💻 خط فرمان
+## 💻 Command line
 
 ```text
 python -m app.main --input PATH [options]
 
-  --input PATH          فایل EPUB یا PDF
-  --output PATH         مسیر خروجی (اختیاری)
-  --from-lang CODE       زبان مبدأ  (EN, FA, DE, FR)
-  --to-lang CODE         زبان مقصد
-  --model NAME           مدل ترجمه
-  --mode MODE            resume | test (پیش‌فرض: سریع)
+  --input PATH          EPUB or PDF file
+  --output PATH         Output path (optional)
+  --from-lang CODE       Source language  (EN, FA, DE, FR)
+  --to-lang CODE         Target language
+  --model NAME           Translation model
+  --mode MODE            resume | test (default: fast)
   --style STYLE          literary | technical | conversational | formal
-  --outputs LIST         فرمت‌های اضافه، جداشده با ویرگول، یا all
-  --prompt TEXT          prompt سفارشی
-  --debug                نگه‌داشتن فایل‌های موقت
+  --outputs LIST         Extra formats, comma-separated, or all
+  --prompt TEXT          Custom prompt
+  --debug                Keep temporary files
 ```
 
-> 🚫 **`--mode pdfbilingual` در حال حاضر کار نمی‌کند.** در `parser.py` و فرم وب
-> ارائه می‌شود، ولی در `translator.py` جزو حالت‌های مجاز نیست و
-> `ValueError` می‌دهد. جزئیات در [موارد باز](#-موارد-باز).
+> 🚫 **`--mode pdfbilingual` currently does not work.** It is offered in
+> `parser.py` and the web form but is not among the allowed modes in
+> `translator.py` and raises `ValueError`. Details under
+> [open issues](#-open-issues).
 
 ---
 
-## 📤 قالب‌های خروجی
+## 📤 Output formats
 
-۹ قالب، با `--outputs` یا چک‌باکس در رابط وب:
+9 formats, via `--outputs` or web checkboxes:
 
-| قالب | توضیح |
+| Format | Notes |
 | --- | --- |
-| `translated_epub` | EPUB ترجمه‌شده |
-| `translated_pdf` | PDF ترجمه‌شده |
-| `bilingual_pdf` | PDF دوزبانه |
-| `docx` | Word |
+| `translated_epub` | Translated EPUB (conversion pipeline) |
+| `translated_pdf` | Translated PDF |
+| `bilingual_pdf` | Bilingual PDF |
+| `docx` | Word, with RTL support |
 | `markdown` | Markdown |
-| `txt_bilingual` | متن دوزبانه |
-| `json_segments` | قطعات به‌صورت JSON |
-| `srt` | زیرنویس |
-| `quality_report` | گزارش QA |
+| `txt_bilingual` | Bilingual text |
+| `json_segments` | Segments as JSON |
+| `srt` | Subtitles (books: translated text, estimated timing) |
+| `quality_report` | QA report (runs the quality scorer) |
 
-> 📝 SRT در حال حاضر خروجی **بدون** ترجمه است — محتوایش هنوز به فایل وصل
-> نشده. در [موارد باز](#-موارد-باز).
+Persian outputs embed **Vazirmatn** fonts and handle RTL in DOCX and PDF
+(`rtl_docx.py`, `rtl_pdf.py`).
+
+> 📝 SRT carries the **translated** text. For `.srt` uploads the original
+> timecodes are preserved; for books the timing is estimated from the
+> translated text at reading speed (~17 chars/sec) in 42-char lines.
 
 ---
 
-## 🧩 انتخاب مدل
+## 🧩 Model selection
 
-`config.yaml` تنها منبع حقیقت است. فرم رابط وب و موتور pipeline هر دو از همان
-می‌خوانند.
+`config.yaml` is the single source of truth. The web form and the pipeline
+engine both read from it.
 
-| مدل | توضیح |
+| Model | Notes |
 | --- | --- |
-| `gpt-5.6-luna` | مدل اصلی ترجمه *(پیش‌فرض)* |
-| `gpt-5.6-terra` | کیفیت بالاتر |
-| `gemini-3.1-flash-lite` | سریع‌تر و ارزان‌تر |
+| `gpt-5.6-luna` | Main translation model *(default)* |
+| `gpt-5.6-terra` | Higher quality |
+| `gemini-3.1-flash-lite` | Faster and cheaper |
 
-برای تغییر، فقط یک خط در `config/config.yaml` را عوض کنید. هر دو فرم و
-pipeline با هم جلو می‌روند.
+To switch, change one line in `config/config.yaml`. Form and pipeline move together.
 
 <details>
-<summary><b>چرا این بخش وجود دارد؟</b></summary>
+<summary><b>Why does this section exist?</b></summary>
 
-قبلاً **شش** امضای تابع مقدار پیش‌فرض `model="gpt-5.6-terra"` داشتند. هر
-call site که `model` را نمی‌داد، بی‌صدا terra می‌فرستاد.
+Six function signatures used to default to `model="gpt-5.6-terra"`. Every call
+site that omitted `model` silently sent terra.
 
-بدترین مورد `transcribe_pdf` بود که **اصلاً پارامتر مدل نداشت** — یعنی هر
-PDF بدون استثنا با terra صورت‌حساب می‌شد، حتی وقتی شما luna را انتخاب کرده
-بودید.
+The worst case was `transcribe_pdf`, which had **no model parameter at all** —
+so every PDF was billed at terra rates even when you had selected luna.
 
-همچنین dropdown رابط وب یک لیست دوتایی دست‌نویس داشت که `selected` آن هنگام
-نوشتن فایل bake شده بود، پس `config.yaml` هیچ اثری روی آن نداشت و terra اصلاً
-در فهرست نبود.
+The web dropdown also had a hand-written two-item list whose `selected` option
+was baked at write time, so `config.yaml` had no effect on it, and terra was
+not in the list at all.
 
-حالا `resolve_default_model()` از config می‌خواند و اگر مدل ناشناخته باشد
-**اصلاً آن را به provider نمی‌فرستد**. آپلود با مدل ناشناخته `400` می‌گیرد،
-نه اینکه روی اولین chunk پولی شکست بخورد.
+Now `resolve_default_model()` reads from config, and an unknown model is
+**never sent to the provider**. Uploading with an unknown model gets a `400`,
+instead of failing on the first paid chunk.
 
 </details>
 
 ---
 
-## 🔒 امنیت
+## 🔒 Security
 
-### محافظ CSRF و DNS rebinding
+### CSRF & DNS-rebinding guards
 
-یک سرور محلی با API باز و بدون بررسی مبدأ، از هر صفحهٔ وبی که کاربر باز می‌کند
-قابل اجراست — یعنی آن صفحه می‌تواند اعتبار API شما را خرج کند. CORS جلوی این
-را نمی‌گیرد.
+A local server with an open API and no origin checks can be driven by any web
+page the user opens — spending your API credit. CORS does not stop this.
 
-`app/web.py` این‌ها را دارد:
+`app/web.py` enforces:
 
-- بررسی `Sec-Fetch-Site` و `Origin` روی **همهٔ** متدهای تغییردهنده
-- بررسی `Host` روی **همهٔ** متدها، از جمله GET، برای جلوگیری از DNS rebinding
-- اتصال فقط به `127.0.0.1`
+- `Sec-Fetch-Site` and `Origin` checks on **all** mutating methods
+- `Host` checks on **all** methods, including GETs, against DNS rebinding
+- Loopback-only binding (`127.0.0.1`)
 
-**تأیید‌شده با حملهٔ واقعی:** درخواستی که قبلاً `201 Created` برمی‌گرداند،
-الان `403` می‌گیرد.
+**Verified with a real attack:** a request that used to return `201 Created`
+now returns `403`.
 
-### بهداشت کلید
+### Local auth
+
+`app/auth` adds password login on top, stdlib only: PBKDF2-HMAC-SHA256
+(210,000 iterations) for password storage, `secrets`-generated session tokens
+of which only the SHA-256 digest touches the database. Sessions ride an
+HttpOnly `SameSite=Lax` cookie. No brute-force lockout by design: on a
+loopback-only server the attacker already runs code on the machine, where the
+database is directly readable — a lockout would be theatre, not defence.
+
+### Key hygiene
 
 | | |
 | --- | --- |
-| کجا زندگی می‌کند | فقط `config/config.yaml` |
-| در Git | **نه** — با یک قاعدهٔ نام‌دار در `.gitignore` |
-| commitهای قبلی | بررسی شدند: پاک |
+| Where it lives | Only `config/config.yaml` |
+| In Git | **No** — via a named `.gitignore` rule |
+| Past commits | Audited: clean |
 
-> قاعدهٔ عمداً **نام‌دار** است و نه `*.yaml`. یک wildcard می‌توانست در آینده
-> فایل‌های CI و packaging را هم بی‌صدا حذف کند، بدون هیچ هشداری.
+> The rule is deliberately **named**, not `*.yaml`. A wildcard could silently
+> swallow future CI and packaging files with no warning.
 
-### تصاویر Reader
+### Reader images
 
-تصاویر EPUB و PDF به‌عنوان asset محلی سرو می‌شوند، نه HTML درون‌خطی:
+EPUB and PDF images are served as local assets, never inline HTML:
 
-- رویدادهای `onerror`/`onload` و تگ `<base>` حذف می‌شوند
-- `src`های `javascript:`، `data:` و راه دور رد می‌شوند
-- SVG با `Content-Security-Policy: sandbox` و `X-Content-Type-Options: nosniff`
+- `onerror`/`onload` handlers and `<base>` tags are stripped
+- `javascript:`, `data:` and remote `src` values are rejected
+- SVG is served with `Content-Security-Policy: sandbox` and
+  `X-Content-Type-Options: nosniff`
 
 ---
 
-## 🧪 تست
+## 🧪 Testing
 
 ```powershell
 python -m pytest -q
@@ -531,94 +688,110 @@ python -m pytest -q
 
 <div align="center">
 
-**۲۹۱ تست — همه پاس**
+**635 tests — all passing (51 files)**
 
 </div>
 
-| فایل | تست | چه چیزی را نگه می‌دارد |
-| --- | --- | --- |
-| `test_audit_regressions.py` | ۳۳ | همهٔ اصلاحات این دور |
-| `test_reader_images.py` | ۳۶ | جداسازی asset و محافظ SVG |
-| `test_model_selection.py` | ۲۴ | تک‌منبعی بودن مدل |
-| `test_glossary_proposal.py` | ۱۹ | نمونه‌برداری و قواعد تأیید |
-| `test_jobs_detail.py` | ۸ | مانیتور ترجمه |
-| `test_outputs.py` | — | قالب‌های خروجی |
-| `test_quality_scorer.py` | — | سنجش کیفیت |
+| File | What it guards |
+| --- | --- |
+| `test_audit_regressions.py` | Every fix of the audit round |
+| `test_reader_images.py` | Asset separation & SVG guards |
+| `test_model_selection.py` | Single-source model truth |
+| `test_glossary_proposal.py` | Sampling & approval rules |
+| `test_jobs_detail.py` | Translation monitor |
+| `test_estimate.py` / `test_rescue_*.py` | Honest estimates & rescue round-trip |
+| `test_semantic_chunker.py` | Lossless chunking invariant |
+| `test_quality_scorer.py` | QA scoring |
+| `test_outputs.py` | Output formats |
 
-### اجرای بخشی از تست‌ها
+### Running a subset
 
 ```powershell
 python -m pytest tests/test_model_selection.py -q
 ```
 
-### اگر پوشهٔ موقت سیستم محدود بود
+### If the system temp dir is restricted
 
 ```powershell
 python -m pytest -q -p no:cacheprovider --basetemp .test-tmp\full
 ```
 
-> ⚠️ **سرور باید متوقف باشد.** یک `python -m app.web` در حال اجرا قفل SQLite
-> را نگه می‌دارد و حدود ۵۳ خطای الکی می‌سازد.
+> ⚠️ **The server must be stopped.** A running `python -m app.web` holds the
+> SQLite lock and produces ~53 spurious failures.
+
+### Frontend tests
+
+```powershell
+cd frontend/ui
+npm run verify   # typecheck → lint (oxlint) → tests
+```
 
 ---
 
-## 🛠 توسعه
+## 🛠 Development
 
-راهنمای کامل ساختار، نام‌گذاری و قوانین Pull Request در
-[`AGENTS.md`](AGENTS.md) است.
+The full structure, naming and pull-request rules live in
+[`AGENTS.md`](AGENTS.md). The React-side rules live in
+[`frontend/AGENTS.md`](frontend/AGENTS.md).
 
-خلاصه:
+Summary:
 
-- چهار فاصله، `snake_case` برای توابع و متغیرها
-- تست را کنار تغییر بنویسید، مخصوصاً برای state، resume، واژه‌نامه و Reader
-- پیام commit به سبک Conventional Commits
-- `data/`، `temp/`، `output/`، کلیدها و کتاب‌های تولیدشده هرگز commit نمی‌شوند
+- 4 spaces, `snake_case` for functions and variables
+- Write the test next to the change, especially for state, resume, glossary
+  and the reader
+- Conventional-Commits messages
+- `data/`, `temp/`, `output/`, keys and generated books are never committed
+- **Python is the single source of truth** — the React UI ports, never
+  reimplements; when they disagree, the Python page is correct
 
-### ساختار پیشنهادی یک تغییر
+### Suggested shape of a change
 
-۱. کوچک‌ترین تستی که باگ را نشان می‌دهد بنویسید
-۲. تغییر را اعمال کنید
-۳. باریک‌ترین تست مرتبط را اجرا کنید
-۴. بعد کل مجموعه را اجرا کنید
+1. Write the smallest test that shows the bug
+2. Apply the change
+3. Run the narrowest related test
+4. Then run the full suite
 
 ---
 
-## 📋 موارد باز
+## 📋 Open issues
 
-صادقانه، چیزهایی که هنوز درست نیستند:
+Honest list of things still not right:
 
-| مورد | وضعیت |
+| Issue | Status |
 | --- | --- |
-| `--mode pdfbilingual` | در `parser.py` و فرم وب ارائه می‌شود، ولی در `translator.py` جزو حالت‌های مجاز نیست و `ValueError` می‌دهد. باید تصمیم گرفته شود که می‌خواهیم یا نه — نه فقط اضافه کردن یک رشته به یک set. |
-| SRT | خروجی تولید می‌شود ولی محتوایش به فایل وصل نشده. |
-| فصل‌های EPUB با charset غیر UTF-8 | بی‌صدا رد می‌شوند. |
-| prompt بینایی PDF | در `pdf_handler.py` به‌صورت آلمانی←انگلیسی hardcode شده. |
-| OCR و مسیر سریع `get_text()` | وجود ندارد؛ هر PDF به‌عنوان تصویر رندر می‌شود. |
-| تست Ctrl+C و کرش | برای hermetic شدن روی ۱ worker pin شده‌اند، پس رفتار در concurrency ۱۲ را دیگر واقعاً نمی‌آزمایند. |
-| ادعای «۹۳ تست» در `landing.html` | عدد واقعی ۲۹۱ است. |
-| بدون `LICENSE` و `pyproject.toml` | بسته‌بندی هنوز نهایی نشده. |
+| `--mode pdfbilingual` | Offered in `parser.py` and the web form, but not an allowed mode in `translator.py` (`ValueError`). Needs a product decision — not just adding one string to a set. |
+| SRT | ✅ Fixed: translated text with estimated timing for books. |
+| Non-UTF-8 EPUB chapters | Silently skipped. |
+| PDF vision prompt | Hardcoded German→English in `pdf_handler.py`. |
+| OCR / `get_text()` fast path | Missing; every PDF renders as an image. |
+| Ctrl+C & crash tests | Pinned to 1 worker for hermeticity, so they no longer really exercise concurrency-12 behavior. |
+| Serve `dist/` from Python (Phase 6) | Not started and irreversible — needs `app/web.py` changes. |
 
 ---
 
-## 📄 مجوز (License)
+## 📄 License
 
-این پروژه تحت **مجوز MIT** منتشر شده است.
+This project is released under the **MIT License**.
 
-شما می‌توانید این نرم‌افزار را برای هر منظوری (شخصی، تجاری، آموزشی) استفاده، تغییر، توزیع و فروش کنید، فقط باید copyright notice و متن مجوز را در کپی‌ها حفظ کنید.
+You may use, modify, distribute and sell this software for any purpose
+(personal, commercial, educational) — just keep the copyright notice and the
+license text in copies.
 
-جزئیات کامل در فایل [`LICENSE`](LICENSE) موجود است.
+Full details in [`LICENSE`](LICENSE).
 
 ---
 
 <div align="center">
 
-**با ❤️ برای کسانی که کتاب ترجمه می‌خواهند و حوصلهٔ آپلودش به سرور غریبه را ندارند**
+**Made with ❤️ for people who want translated books without uploading them to a stranger's server**
 
 <br>
 
 <sub>
-اگر باگی دیدید یا می‌خواهید کمک کنید، Issue باز کنید.
-پیش از PR لطفاً <code>python -m pytest -q</code> را اجرا کنید.
+If you see a bug or want to help, open an issue.
+Before a PR, please run <code>python -m pytest -q</code>.
 </sub>
+
+<sub>Persian documentation: <a href="README_FA.md">README_FA.md</a></sub>
 
 </div>

@@ -33,7 +33,7 @@ OUTPUT_FORMATS = {
     "translated_epub": (
         "translated EPUB (the primary EPUB output)"
     ),
-    "srt": "translated subtitles with preserved timecodes",
+    "srt": "translated subtitles (book sources: estimated timing)",
     "quality_report": (
         "six-dimension chunk quality scores (QA) as JSON"
     ),
@@ -56,6 +56,7 @@ SUFFIXES = {
     "translated_pdf": ".pdf",
     "bilingual_pdf": ".bilingual.pdf",
     "quality_report": ".quality.json",
+    "srt": ".srt",
 }
 
 
@@ -190,11 +191,48 @@ def generate_outputs(
                     "output of this job"
                 )
 
-            else:
+                continue
+
+            from app.output.srt import (
+                segments_to_srt_blocks,
+                serialize_srt,
+                validate_srt,
+            )
+
+            blocks = segments_to_srt_blocks(segments)
+
+            if not blocks:
 
                 skipped[name] = (
-                    "SRT output requires a subtitle source"
+                    "no translated segments to subtitle"
                 )
+
+                continue
+
+            target = (
+                output_dir
+                / f"{base_name}{SUFFIXES[name]}"
+            )
+
+            target.write_text(
+                serialize_srt(blocks),
+                encoding="utf-8",
+            )
+
+            issues = validate_srt(
+                target.read_text(encoding="utf-8")
+            )
+
+            if issues:
+
+                skipped[name] = (
+                    "SRT written but failed validation: "
+                    + "; ".join(issues[:3])
+                )
+
+                continue
+
+            generated[name] = str(target)
 
             continue
 

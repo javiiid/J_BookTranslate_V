@@ -274,15 +274,77 @@ def test_srt_break_long_lines_keeps_lines_short():
 
 def test_srt_merge_preserves_timecodes_and_translations():
     blocks = srt_module.parse_srt(SRT_DOCUMENT)
-    merged = srt_module.merge_translations(
+    merged, missing = srt_module.merge_translations(
         blocks,
         {"chunk-0": "ترجمه اول", "chunk-1": "ترجمه دوم"},
     )
+    assert missing == []
     assert merged[0].index == 1
     assert merged[0].start == "00:00:01,000"
     assert merged[1].end == "00:00:08,000"
     assert merged[0].text == "ترجمه اول"
     assert merged[1].text == "ترجمه دوم"
+
+
+def test_srt_merge_flags_missing_translations():
+    blocks = srt_module.parse_srt(SRT_DOCUMENT)
+    merged, missing = srt_module.merge_translations(
+        blocks,
+        {"chunk-0": "ترجمه اول"},
+    )
+    assert missing == [2]
+    # The gap stays visible: source text kept, index reported.
+    assert merged[1].text == "Second line here."
+
+
+def test_segments_to_srt_blocks_uses_translated_text():
+    segments = [
+        {"id": "chunk-0", "position": 0, "source": "Hello world.",
+         "target": "سلام دنیا.", "format": "epub",
+         "chapter": "ch1.xhtml", "flagged": False, "notes": []},
+        {"id": "chunk-1", "position": 1, "source": "Second line here.",
+         "target": "خط دوم اینجا است.", "format": "epub",
+         "chapter": "ch1.xhtml", "flagged": False, "notes": []},
+    ]
+    blocks = srt_module.segments_to_srt_blocks(segments)
+    assert blocks
+    assert [block.index for block in blocks] == list(range(1, len(blocks) + 1))
+    joined = "\n".join(block.text for block in blocks)
+    assert "سلام دنیا." in joined
+    assert "خط دوم اینجا است." in joined
+    assert "Hello world." not in joined
+    assert srt_module.validate_srt(srt_module.serialize_srt(blocks)) == []
+
+
+def test_segments_to_srt_blocks_timing_is_monotonic():
+    segments = [
+        {"id": f"chunk-{i}", "position": i, "source": f"Source {i}.",
+         "target": f"ترجمه شماره {i} با چند کلمه اضافه.",
+         "format": "epub", "chapter": "ch1.xhtml",
+         "flagged": False, "notes": []}
+        for i in range(5)
+    ]
+    blocks = srt_module.segments_to_srt_blocks(segments)
+    starts = [srt_module._timecode_ms(block.start) for block in blocks]
+    ends = [srt_module._timecode_ms(block.end) for block in blocks]
+    assert all(ms is not None for ms in starts + ends)
+    assert all(end > start for start, end in zip(starts, ends))
+    assert all(later >= earlier for later, earlier in zip(starts[1:], ends[:-1]))
+    assert all(len(line) <= 42 for block in blocks for line in block.text.splitlines())
+
+
+def test_segments_to_srt_blocks_skips_empty_and_rejects_bad_rate():
+    assert srt_module.segments_to_srt_blocks([]) == []
+    assert srt_module.segments_to_srt_blocks(
+        [{"id": "chunk-0", "position": 0, "source": "Hi.",
+          "target": "   ", "format": "epub", "chapter": "",
+          "flagged": False, "notes": []}]
+    ) == []
+    try:
+        srt_module.segments_to_srt_blocks(SAMPLE, chars_per_second=0)
+        raise AssertionError("expected ValueError")
+    except ValueError:
+        pass
 
 
 def test_srt_validate_reports_structure_and_timecode_issues():
@@ -363,15 +425,20 @@ def test_generate_outputs_writes_requested_formats():
         )
         generated = result["generated"]
         for name in ("json_segments", "txt_bilingual", "markdown",
-                     "docx", "translated_pdf", "bilingual_pdf"):
+                     "docx", "translated_pdf", "bilingual_pdf", "srt"):
             assert Path(generated[name]).is_file(), name
         assert "translated_epub" in result["skipped"]
-        assert "srt" in result["skipped"]
+        assert "srt" not in result["skipped"]
         assert result["flagged"] == 1
         assert "QA_REPORT" in result["qa_report"]
         assert (tmp / "book.segments.json").exists()
         assert (tmp / "book.bilingual.txt").exists()
         assert (tmp / "book.bilingual.pdf").exists()
+        srt_text = (tmp / "book.srt").read_text(encoding="utf-8")
+        flat = " ".join(srt_text.split())
+        assert "translated sentence" in flat
+        assert "original sentence" not in flat
+        assert srt_module.validate_srt(srt_text) == []
 
 
 def test_emit_outputs_returns_cleaned_translations():
