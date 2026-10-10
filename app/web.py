@@ -80,6 +80,8 @@ from app.auth.service import (
     list_sessions as auth_list_sessions,
     revoke_session as auth_revoke_session,
     revoke_all_sessions as auth_revoke_all_sessions,
+    request_email_code as auth_request_email_code,
+    verify_email_code as auth_verify_email_code,
 )
 from app.glossary.proposal import (
     _key as _glossary_key,
@@ -1165,6 +1167,12 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             return ""
         return morsel.value if morsel else ""
+    def _client_ip(self) -> str:
+        """Remote address for login throttling. Proxies are untrusted: raw peer only."""
+        try:
+            return str((self.client_address or [""])[0] or "")
+        except Exception:
+            return ""
     def _set_session_cookie(self, token: str) -> dict[str, str]:
         return {"Set-Cookie": f"{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={SESSION_DAYS * 86400}"}
     def _clear_session_cookie(self) -> dict[str, str]:
@@ -1416,12 +1424,25 @@ class Handler(BaseHTTPRequestHandler):
         if calibration_route(self, "POST"): return
         path=urlparse(self.path).path
         if path in {"/api/auth/signup", "/api/auth/login", "/api/auth/logout",
-                      "/api/auth/change-password", "/api/auth/sessions/revoke", "/api/auth/revoke-all"}:
+                      "/api/auth/change-password", "/api/auth/sessions/revoke", "/api/auth/revoke-all",
+                      "/api/auth/email-code/request", "/api/auth/email-code/verify"}:
             try: body = self._request_json()
             except (ValueError, json.JSONDecodeError) as exc: self._json({"error": str(exc)}, 400); return
             if path == "/api/auth/logout":
                 auth_logout(db, self._session_token())
                 self._json({"ok": True}, headers=self._clear_session_cookie()); return
+            if path == "/api/auth/email-code/request":
+                try:
+                    result = auth_request_email_code(db, body.get("email"))
+                except LookupError as exc: self._json({"error": str(exc)}, 429); return
+                except (ValueError, TypeError) as exc: self._json({"error": str(exc)}, 400); return
+                self._json(result); return
+            if path == "/api/auth/email-code/verify":
+                try:
+                    user, token = auth_verify_email_code(db, body.get("email"), body.get("code"))
+                except LookupError as exc: self._json({"error": str(exc)}, 401); return
+                except (ValueError, TypeError) as exc: self._json({"error": str(exc)}, 400); return
+                self._json({"user": user}, headers=self._set_session_cookie(token)); return
             try:
                 if path == "/api/auth/change-password":
                     user = auth_change_password(db, self._session_token(), body.get("current_password"), body.get("new_password"))
@@ -1437,9 +1458,11 @@ class Handler(BaseHTTPRequestHandler):
                     self._json({"ok": True, "closed": closed}); return
                 if path == "/api/auth/signup":
                     auth_signup(db, body.get("email"), body.get("password"), body.get("display_name", ""))
-                user, token = auth_login(db, body.get("email"), body.get("password"))
+                user, token = auth_login(db, body.get("email"), body.get("password"), ip=self._client_ip())
             except LookupError as exc:
                 status = 409 if path == "/api/auth/signup" else 401
+                if "تلاش‌های ناموفق" in str(exc):
+                    status = 429
                 self._json({"error": str(exc)}, status); return
             except (ValueError, TypeError) as exc: self._json({"error": str(exc)}, 400); return
             self._json({"user": user}, 201 if path == "/api/auth/signup" else 200, headers=self._set_session_cookie(token)); return

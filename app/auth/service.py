@@ -124,21 +124,32 @@ def _dummy_verify() -> None:
     verify_password(secrets.token_hex(8), hash_password(secrets.token_hex(8)))
 
 
-def login(db, email: object, password: object) -> tuple[dict, str]:
+def login(db, email: object, password: object, ip: object = None) -> tuple[dict, str]:
     """Check credentials and open a session. Returns (user, raw token).
 
     Unknown email and wrong password raise the same ``LookupError`` with the
-    same message: the caller must not learn which half was wrong.
+    same message: the caller must not learn which half was wrong. Failures
+    feed the DB-backed throttle (per email and, when known, per IP).
     """
+    raw_ip = str(ip or "").strip()
     try:
         address = normalize_email(email)
     except ValueError:
         _dummy_verify()
+        record_auth_failure(db, "password", "unknown")
+        if raw_ip:
+            record_auth_failure(db, "password-ip", raw_ip)
         raise LookupError("ایمیل یا گذرواژه درست نیست.")
+    check_auth_throttle(db, "password", address)
+    if raw_ip:
+        check_auth_throttle(db, "password-ip", raw_ip)
     row = db.fetch_one("SELECT * FROM users WHERE email=?", (address,))
-    if row is None or not verify_password(str(password or ""), row["password_hash"]):
+    if row is None or not verify_password(str(password or ""), row["password_hash"] or ""):
         if row is None:
             _dummy_verify()
+        record_auth_failure(db, "password", address)
+        if raw_ip:
+            record_auth_failure(db, "password-ip", raw_ip)
         raise LookupError("ایمیل یا گذرواژه درست نیست.")
     token = secrets.token_urlsafe(32)
     timestamp = _now()
@@ -286,3 +297,194 @@ def change_password(db, token: object, current_password: object, new_password: o
     )
     revoke_all_sessions(db, raw)
     return user_public(db.fetch_one("SELECT * FROM users WHERE id=?", (user_id,)))
+
+
+# ============================================================
+# LOGIN ABUSE THROTTLE (DB-backed)
+# ============================================================
+#
+# The old loopback-only reasoning ("no brute-force lockout, it would be
+# theatre") dies at launch: password and OTP endpoints now share a durable
+# attempt log with progressive rejection. Counts live in the database so a
+# restart does not reset the attacker's budget.
+
+THROTTLE_WINDOW_SECONDS = 600
+THROTTLE_MAX_FAILURES = 10
+
+
+def _throttle_key(kind: str, scope: str) -> str:
+    return f"{kind}:{scope.strip().lower()}"
+
+
+def record_auth_failure(db, kind: str, scope: str) -> None:
+    """Log one failed attempt for independent (kind, scope) throttling."""
+    db.execute(
+        "INSERT INTO auth_attempts(scope_key, created_at) VALUES (?, ?)",
+        (_throttle_key(kind, str(scope or "")), _now()),
+    )
+
+
+def check_auth_throttle(db, kind: str, scope: str) -> None:
+    """Raise LookupError when the scope exhausted its failure budget."""
+    cutoff = (datetime.now(UTC) - timedelta(seconds=THROTTLE_WINDOW_SECONDS)).isoformat()
+    row = db.fetch_one(
+        "SELECT COUNT(*) AS count FROM auth_attempts WHERE scope_key=? AND created_at>?",
+        (_throttle_key(kind, str(scope or "")), cutoff),
+    )
+    if row is not None and (row["count"] or 0) >= THROTTLE_MAX_FAILURES:
+        raise LookupError("تلاش‌های ناموفق زیاد است؛ چند دقیقه دیگر تلاش کنید.")
+
+
+# ============================================================
+# PASSWORDLESS EMAIL OTP
+# ============================================================
+
+OTP_TTL_SECONDS = 600
+OTP_MAX_ATTEMPTS = 5
+OTP_MAX_SENDS_PER_WINDOW = 3
+OTP_WINDOW_SECONDS = 600
+
+
+def _smtp_configured() -> bool:
+    try:
+        from app.core.config import read_config_safe
+
+        return bool((read_config_safe().get("smtp") or {}).get("enabled"))
+    except (OSError, AttributeError, TypeError, ValueError):
+        return False
+
+
+def _otp_sender(kind: str = "log"):
+    """Build the OTP sender. ``log`` writes to the server log (dev default)."""
+    if kind == "smtp":
+        return _smtp_otp_sender()
+    return _log_otp_sender()
+
+
+def _log_otp_sender():
+    def send(email, code):
+        print(f"[auth] OTP for {email}: {code} (log sender — no SMTP configured)")
+        return "log"
+
+    return send
+
+
+def _smtp_otp_sender():
+    from app.core.config import read_config_safe
+
+    settings = (read_config_safe().get("smtp") or {})
+    if not settings.get("enabled"):
+        return _log_otp_sender()
+
+    def send(email, code):
+        import smtplib
+        from email.message import EmailMessage
+
+        message = EmailMessage()
+        message["From"] = settings.get("from", "kalima@localhost")
+        message["To"] = email
+        message["Subject"] = "کد ورود کالیما"
+        message.set_content(f"کد ورود شما: {code}\nاین کد ۱۰ دقیقه اعتبار دارد.")
+        with smtplib.SMTP(str(settings.get("host", "localhost")), int(settings.get("port", 25))) as server:
+            if settings.get("user"):
+                server.login(str(settings.get("user")), str(settings.get("password", "")))
+            server.send_message(message)
+        return "smtp"
+
+    return send
+
+
+def _otp_hash(email: str, code: str) -> str:
+    return hashlib.sha256(f"{email}\n{code}".encode("utf-8")).hexdigest()
+
+
+def request_email_code(db, email: object, sender=None) -> dict:
+    """Issue (or re-issue) a login code. Uniform success shape, always.
+
+    Well-formed but unknown addresses get the same response as known ones so
+    the endpoint cannot enumerate accounts. Malformed addresses raise
+    ValueError like signup does.
+    """
+    address = normalize_email(email)
+    timestamp = _now()
+    row = db.fetch_one("SELECT * FROM auth_otps WHERE email=?", (address,))
+    window_start = (
+        datetime.now(UTC) - timedelta(seconds=OTP_WINDOW_SECONDS)
+    ).isoformat()
+    sends = 0
+    if row is not None and str(row.get("window_started_at") or "") >= window_start:
+        sends = int(row.get("sent_count") or 0)
+    if sends >= OTP_MAX_SENDS_PER_WINDOW:
+        raise LookupError("کد زیادی درخواست شده؛ چند دقیقه دیگر تلاش کنید.")
+    code = f"{secrets.randbelow(1000000):06d}"
+    send = sender or _otp_sender("smtp" if _smtp_configured() else "log")
+    channel = send(address, code)
+    if row is None:
+        db.execute(
+            "INSERT INTO auth_otps(email, code_hash, expires_at, attempts, used, sent_count, window_started_at, created_at)"
+            " VALUES (?, ?, ?, 0, 0, 1, ?, ?)",
+            (address, _otp_hash(address, code),
+             (datetime.now(UTC) + timedelta(seconds=OTP_TTL_SECONDS)).isoformat(),
+             timestamp, timestamp),
+        )
+    else:
+        fresh_window = str(row.get("window_started_at") or "") < window_start
+        db.execute(
+            "UPDATE auth_otps SET code_hash=?, expires_at=?, attempts=0, used=0,"
+            " sent_count=?, window_started_at=?, created_at=? WHERE email=?",
+            (_otp_hash(address, code),
+             (datetime.now(UTC) + timedelta(seconds=OTP_TTL_SECONDS)).isoformat(),
+             1 if fresh_window else sends + 1,
+             timestamp if fresh_window else row.get("window_started_at"),
+             timestamp, address),
+        )
+    return {"sent": True, "channel": channel}
+
+
+def verify_email_code(db, email: object, code: object) -> tuple[dict, str]:
+    """Verify a login code; creates the account on first use. Returns (user, token)."""
+    address = normalize_email(email)
+    check_auth_throttle(db, "otp", address)
+    row = db.fetch_one("SELECT * FROM auth_otps WHERE email=?", (address,))
+    digest = _otp_hash(address, str(code or "").strip())
+    valid = (
+        row is not None
+        and not row.get("used")
+        and str(row.get("expires_at") or "") > _now()
+        and int(row.get("attempts") or 0) < OTP_MAX_ATTEMPTS
+        and secrets.compare_digest(str(row.get("code_hash") or ""), digest)
+    )
+    if not valid:
+        record_auth_failure(db, "otp", address)
+        if row is not None:
+            attempts = int(row.get("attempts") or 0) + 1
+            db.execute(
+                "UPDATE auth_otps SET attempts=?, used=? WHERE email=?",
+                (attempts, 1 if attempts >= OTP_MAX_ATTEMPTS else 0, address),
+            )
+        raise LookupError("کد ورود درست نیست یا منقضی شده است.")
+    db.execute("UPDATE auth_otps SET used=1 WHERE email=?", (address,))
+    existing = db.fetch_one("SELECT * FROM users WHERE email=?", (address,))
+    timestamp = _now()
+    if existing is None:
+        name = address.split("@")[0][:100] or address
+        # Empty hash, never NULL: older installs created users.password_hash
+        # NOT NULL, and verify_password("") is always False anyway.
+        user_id = db.execute(
+            "INSERT INTO users(email, display_name, password_hash, created_at, updated_at)"
+            " VALUES (?, ?, '', ?, ?)",
+            (address, name, timestamp, timestamp),
+        )
+        existing = db.fetch_one("SELECT * FROM users WHERE id=?", (user_id,))
+    db.execute("UPDATE users SET email_verified=1, updated_at=? WHERE id=?", (timestamp, existing["id"]))
+    token = secrets.token_urlsafe(32)
+    db.execute(
+        "INSERT INTO auth_sessions(token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
+        (
+            hashlib.sha256(token.encode("utf-8")).hexdigest(),
+            existing["id"],
+            timestamp,
+            (datetime.now(UTC) + timedelta(days=SESSION_DAYS)).isoformat(),
+        ),
+    )
+    return user_public(db.fetch_one("SELECT * FROM users WHERE id=?", (existing["id"],))), token

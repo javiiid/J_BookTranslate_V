@@ -169,3 +169,76 @@ def test_revoke_all_keeps_only_caller(database):
     assert service.revoke_all_sessions(database, first) == 0
     with pytest.raises(LookupError):
         service.revoke_all_sessions(database, "bogus")
+
+
+def make_capturing_sender(captured):
+    def send(email, code):
+        captured.append((email, code))
+        return "test"
+
+    return send
+
+
+def test_email_code_login_creates_account_and_session(database):
+    captured = []
+    result = service.request_email_code(database, "new@example.com", sender=make_capturing_sender(captured))
+    assert result == {"sent": True, "channel": "test"}
+    assert len(captured) == 1
+    email, code = captured[0]
+    assert email == "new@example.com"
+    user, token = service.verify_email_code(database, "new@example.com", code)
+    assert user["email"] == "new@example.com"
+    assert service.user_from_token(database, token) is not None
+    row = database.fetch_one("SELECT email_verified, password_hash FROM users WHERE email=?", ("new@example.com",))
+    assert row["email_verified"] == 1
+    assert row["password_hash"] == ""
+    # Password login refuses passwordless accounts without revealing why.
+    with pytest.raises(LookupError):
+        service.login(database, "new@example.com", "anything")
+
+
+def test_email_code_wrong_attempts_invalidate(database):
+    captured = []
+    service.request_email_code(database, "new@example.com", sender=make_capturing_sender(captured))
+    for _ in range(5):
+        with pytest.raises(LookupError):
+            service.verify_email_code(database, "new@example.com", "000000")
+    _, code = captured[0]
+    with pytest.raises(LookupError):
+        service.verify_email_code(database, "new@example.com", code)
+
+
+def test_email_code_expiry_and_resend_window(database):
+    captured = []
+    service.request_email_code(database, "new@example.com", sender=make_capturing_sender(captured))
+    database.execute("UPDATE auth_otps SET expires_at='2000-01-01T00:00:00+00:00' WHERE email=?", ("new@example.com",))
+    with pytest.raises(LookupError):
+        service.verify_email_code(database, "new@example.com", captured[0][1])
+    for _ in range(2):
+        service.request_email_code(database, "new@example.com", sender=make_capturing_sender(captured))
+    with pytest.raises(LookupError):
+        service.request_email_code(database, "new@example.com", sender=make_capturing_sender(captured))
+
+
+def test_email_code_responses_do_not_enumerate(database):
+    captured = []
+    assert service.request_email_code(database, "ghost@example.com", sender=make_capturing_sender(captured))["sent"] is True
+    with pytest.raises(ValueError):
+        service.request_email_code(database, "not-an-email", sender=make_capturing_sender(captured))
+
+
+def test_password_login_throttle_after_failures(database):
+    service.signup(database, "user@example.com", "s3cret-pass", "Test User")
+    service.signup(database, "other@example.com", "s3cret-pass", "Other User")
+    for _ in range(10):
+        with pytest.raises(LookupError):
+            service.login(database, "user@example.com", "wrong-pass", ip="10.0.0.9")
+    with pytest.raises(LookupError) as throttled:
+        service.login(database, "user@example.com", "s3cret-pass", ip="10.0.0.9")
+    assert "تلاش‌های ناموفق" in str(throttled.value)
+    # Per-email scope follows the address to a clean IP.
+    with pytest.raises(LookupError):
+        service.login(database, "user@example.com", "s3cret-pass", ip="10.0.0.10")
+    # An untouched account on a clean IP is unaffected.
+    _, token = service.login(database, "other@example.com", "s3cret-pass", ip="10.0.0.10")
+    assert token

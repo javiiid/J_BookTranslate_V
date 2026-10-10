@@ -136,6 +136,25 @@ class Database:
             expires_at TEXT NOT NULL
         )""")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_auth_sessions_user_id ON auth_sessions(user_id)")
+        existing_users = {row[1] for row in connection.execute("PRAGMA table_info(users)").fetchall()}
+        if "email_verified" not in existing_users:
+            connection.execute("ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 0")
+        connection.execute("""CREATE TABLE IF NOT EXISTS auth_otps (
+            email TEXT PRIMARY KEY,
+            code_hash TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            attempts INTEGER NOT NULL DEFAULT 0,
+            used INTEGER NOT NULL DEFAULT 0,
+            sent_count INTEGER NOT NULL DEFAULT 0,
+            window_started_at TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL
+        )""")
+        connection.execute("""CREATE TABLE IF NOT EXISTS auth_attempts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            scope_key TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )""")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_auth_attempts_scope ON auth_attempts(scope_key, created_at)")
 
     @staticmethod
     def _seed_defaults(connection):
