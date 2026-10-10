@@ -5,7 +5,7 @@
  * `docs/inventory/` (Phase 0), not guessed. When the backend contract changes,
  * `npm run check:api` re-captures and the diff shows the drift.
  */
-import type { AuthMeResponse, AuthResponse } from './auth.ts'
+import type { AuthMeResponse, AuthResponse, AuthSession } from './auth.ts'
 
 export type JobStatus =
   | 'queued'
@@ -734,6 +734,45 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: '{}',
     }),
+  authChangePassword: (body: { current_password: string; new_password: string }) =>
+    request<AuthResponse>('/api/auth/change-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  authSessions: () => request<{ items: AuthSession[] }>('/api/auth/sessions'),
+  authRevokeSession: (body: { session_id: string }) =>
+    request<{ ok: boolean }>('/api/auth/sessions/revoke', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  authRevokeAll: () =>
+    request<{ ok: boolean; closed: number }>('/api/auth/revoke-all', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    }),
+  authRequestEmailCode: (body: { email: string }) =>
+    request<{ sent: boolean; channel: string }>('/api/auth/email-code/request', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  authVerifyEmailCode: (body: { email: string; code: string }) =>
+    request<AuthResponse>('/api/auth/email-code/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  /**
+   * Start Google/Apple login. The server answers `{auth_url, state}` as JSON
+   * (never a redirect), so the caller sets `window.location.href` itself and
+   * the OAuth callback — which sets the cookie and 302s to /library — runs
+   * as a top-level navigation where cookies belong.
+   */
+  authOAuthStart: (provider: 'google' | 'apple') =>
+    request<{ auth_url: string; state: string }>(`/api/auth/oauth/${provider}/start`),
 
   /**
    * Ask the provider whether it is reachable, and whether the chosen model is in

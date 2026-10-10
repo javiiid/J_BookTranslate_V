@@ -9,7 +9,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { validDisplayName, validEmail, validPassword } from '../src/lib/auth.ts'
+import { validDisplayName, validEmail, validOtpCode, validPassword } from '../src/lib/auth.ts'
 
 describe('auth validators', () => {
   it('accepts a normal address and rejects the usual junk', () => {
@@ -34,5 +34,13 @@ describe('auth validators', () => {
     assert.equal(validDisplayName(''), false)
     assert.equal(validDisplayName('  padded  '), true)
     assert.equal(validDisplayName('x'.repeat(101)), false)
+  })
+
+  it('accepts only 6-digit login codes, like the server', () => {
+    assert.equal(validOtpCode('123456'), true)
+    assert.equal(validOtpCode(' 123456 '), true)
+    for (const bad of ['', '12345', '1234567', '12345a', '12 3456', 'abcdef']) {
+      assert.equal(validOtpCode(bad), false, `${bad} passed`)
+    }
   })
 })

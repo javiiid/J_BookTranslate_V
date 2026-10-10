@@ -28,6 +28,7 @@ import { Link } from 'react-router-dom'
 import { KalimaMark, LanguageToggle, ThemeToggle } from '@/components/AppShell'
 import { NavIcon } from '@/components/NavIcon'
 import type { NavIconName } from '@/components/nav'
+import { api } from '@/lib/api.ts'
 import { useLanguage } from '@/i18n/useLanguage.ts'
 import type { Language } from '@/i18n/lang.ts'
 import './landing.css'
@@ -388,6 +389,23 @@ export function LandingPage(): React.JSX.Element {
   useLandingSeo(lang)
   useReveal()
   const [menuOpen, setMenuOpen] = useState<boolean>(false)
+  /* null = still checking; a name = signed in; '' = signed out. The navbar
+     login action becomes the account action for a signed-in visitor. */
+  const [accountName, setAccountName] = useState<string | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    void api
+      .authMe()
+      .then((me) => {
+        if (!cancelled) setAccountName(me.user.display_name || me.user.email)
+      })
+      .catch(() => {
+        if (!cancelled) setAccountName('')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const anchors: Anchor[] = [
     { href: '#product', label: t('landing.nav.product') },
@@ -636,8 +654,8 @@ export function LandingPage(): React.JSX.Element {
                   <LanguageToggle />
                 </span>
               </span>
-              <Link to="/login" className="btn btn-ghost landing-login">
-                {t('landing.login')}
+              <Link to={accountName ? '/account' : '/login'} className="btn btn-ghost landing-login">
+                {accountName || t('landing.login')}
               </Link>
               <Link to="/workspace" className="btn btn-primary">
                 {t('landing.cta')}
@@ -673,8 +691,8 @@ export function LandingPage(): React.JSX.Element {
                   {a.label}
                 </a>
               ))}
-              <Link to="/login" onClick={() => setMenuOpen(false)}>
-                {t('landing.accountLink')}
+              <Link to={accountName ? '/account' : '/login'} onClick={() => setMenuOpen(false)}>
+                {accountName || t('landing.accountLink')}
               </Link>
               <div className="landing-menu-actions">
                 <LanguageToggle />
