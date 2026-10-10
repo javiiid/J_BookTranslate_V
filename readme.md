@@ -469,13 +469,14 @@ Main code: **~17K lines** of Python.
 ### Where data goes
 
 ```text
-data/     database & library metadata
-temp/     resumable job state
-output/   translated books
+data/kalima.db   database (auto-adopted by copy from legacy jbooktranslate.db)
+data/backups/    timestamped backups (before every migration, daily, keep 5)
+temp/            resumable job state
+output/          translated books
 ```
 
 None of them are in Git. One PDF export alone reached 99 MB, and Git keeps
-every blob forever.
+every blob forever. Download the newest backup any time from `/account`.
 
 > 🚀 At launch these become per-user storage (volumes first, object storage
 > later) — see `LAUNCH.md`. New paths go through `app/core/paths.py` only.

@@ -32,7 +32,16 @@ def account_overview() -> dict:
         "open_orders": (db.fetch_one("SELECT COUNT(*) AS count FROM translation_orders WHERE status NOT IN ('completed','cancelled')") or {"count": 0})["count"],
     }
     recent_transactions = db.fetch_all("SELECT id,kind,reference_id,amount_usd,credits,status,created_at FROM billing_transactions ORDER BY id DESC LIMIT 8")
-    return {"account": account, "plan": PLANS.get(account.get("plan", "free"), PLANS["free"]), "counts": counts, "transactions": recent_transactions}
+    try:
+        backups = db.list_backups()
+        backup = {
+            "count": len(backups),
+            "latest": backups[0].name if backups else None,
+            "latest_at": datetime.fromtimestamp(backups[0].stat().st_mtime, UTC).isoformat() if backups else None,
+        }
+    except OSError:
+        backup = {"count": 0, "latest": None, "latest_at": None}
+    return {"account": account, "plan": PLANS.get(account.get("plan", "free"), PLANS["free"]), "counts": counts, "transactions": recent_transactions, "backup": backup}
 
 
 def update_account(payload: dict) -> dict:

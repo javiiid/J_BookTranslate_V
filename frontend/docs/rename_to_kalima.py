@@ -9,8 +9,10 @@ Scope is decided by what each string IS, not by what it contains:
            `kalima-theme` / `kalima-lang` class names in landing.html, and the
            JBT_API environment variable, which keeps the old name as a fallback
            so an existing setup does not break.
-  KEPT     the SQLite file `jbooktranslate.db`. Renaming it orphans every
-           existing job, book and glossary.
+  KEPT     the SQLite file `jbooktranslate.db` at the time. Renaming it by move
+           orphans every existing job, book and glossary. (Later adopted
+           safely: `app/storage/database.py` copies it to `kalima.db` on
+           first run and keeps the original as backup.)
   KEPT     the localStorage key `jbook-study-dark`. Renaming it silently resets
            every existing user's theme, and the two UIs read the same key, so
            one would change without the other.

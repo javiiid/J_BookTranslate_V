@@ -1318,6 +1318,13 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers(); return
         if parsed.path == "/api/account/portal":
             self._json({"overview": account_overview(), "plans": plans_catalog(), "packages": credit_packages(), "api_keys": account_api_keys(), "marketplace": account_marketplace(), "orders": account_orders(), "publisher": publisher_overview()}); return
+        if parsed.path == "/api/account/backup":
+            backups = db.list_backups()
+            if not backups or not backups[0].is_file(): self._json({"error": "بکاپی وجود ندارد."}, 404); return
+            latest = backups[0]
+            self.send_response(200); self.send_header("Content-Type","application/octet-stream"); self.send_header("Content-Disposition",f'attachment; filename="{latest.name}"'); self.send_header("Content-Length",str(latest.stat().st_size)); self.end_headers()
+            with latest.open("rb") as backup: shutil.copyfileobj(backup,self.wfile)
+            return
         if parsed.path == "/api/account/marketplace":
             self._json(account_marketplace(parse_qs(parsed.query).get("kind", [""])[0])); return
         if parsed.path == "/api/jobs":

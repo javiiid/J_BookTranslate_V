@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<style>
+  @font-face { font-family: 'Vazirmatn'; src: url('../resumes/fonts/Vazirmatn-Regular.woff2') format('woff2'); font-weight: 400; }
+  @font-face { font-family: 'Vazirmatn'; src: url('../resumes/fonts/Vazirmatn-Medium.woff2') format('woff2'); font-weight: 500; }
+  @font-face { font-family: 'Vazirmatn'; src: url('../resumes/fonts/Vazirmatn-Bold.woff2') format('woff2'); font-weight: 700; }
+  @page { size: A4; margin: 0; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Vazirmatn', Tahoma, Arial, sans-serif; color: #1e293b; font-size: 9.3pt; line-height: 1.85; background: #fff; }
+  .page { width: 210mm; min-height: 297mm; padding: 14mm 16mm 12mm 16mm; margin: 0 auto; page-break-after: always; }
+  .page:last-child { page-break-after: auto; }
+  .cover { background: #0b1e33; color: #fff; border-radius: 12px; padding: 26px 26px 20px 26px; margin-bottom: 14px; position: relative; overflow: hidden; }
+  .cover::after { content: ''; position: absolute; left: 0; top: 0; width: 8px; height: 100%; background: #38bdf8; }
+  .cover .kicker { font-size: 9pt; color: #7dd3fc; font-weight: 700; letter-spacing: 0.5px; }
+  .cover h1 { font-size: 23pt; font-weight: 700; line-height: 1.6; margin: 4px 0; }
+  .cover h1 span { color: #38bdf8; }
+  .cover p { font-size: 9.5pt; color: #cbd5e1; }
+  .cover .meta { margin-top: 10px; font-size: 8.5pt; color: #94a3b8; }
+  h2 { font-size: 11.5pt; font-weight: 700; color: #0b1e33; margin: 14px 0 6px 0; display: flex; align-items: center; gap: 8px; }
+  h2::before { content: ''; width: 22px; height: 3px; background: #38bdf8; border-radius: 2px; display: inline-block; flex-shrink: 0; }
+  h2 .num { background: #0b1e33; color: #fff; font-size: 8.5pt; width: 22px; height: 22px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; }
+  .state { background: #f8fafc; border-right: 3px solid #94a3b8; padding: 6px 10px; font-size: 8.9pt; color: #475569; border-radius: 6px 0 0 6px; margin-bottom: 6px; }
+  ul { margin: 4px 18px 6px 0; }
+  li { margin-bottom: 3px; font-size: 9.1pt; text-align: justify; }
+  li::marker { color: #0284c7; }
+  li strong { color: #0b1e33; }
+  .pill { display: inline-block; font-size: 7.8pt; font-weight: 700; border-radius: 20px; padding: 0 9px; margin-left: 4px; vertical-align: middle; }
+  .p0 { background: #fee2e2; color: #991b1b; }
+  .p1 { background: #fef3c7; color: #92400e; }
+  .p2 { background: #e0f2fe; color: #075985; }
+  .eff { background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; }
+  table { width: 100%; border-collapse: collapse; font-size: 8.8pt; margin: 6px 0; }
+  th { background: #0b1e33; color: #fff; padding: 5px 8px; }
+  td { border: 1px solid #e2e8f0; padding: 5px 8px; vertical-align: top; }
+  tr:nth-child(even) td { background: #f8fafc; }
+  .tip { background: #ecfdf5; border: 1px solid #6ee7b7; border-radius: 8px; padding: 7px 10px; font-size: 8.9pt; margin: 8px 0; }
+  .warn { background: #fffbeb; border: 1px solid #fcd34d; border-radius: 8px; padding: 7px 10px; font-size: 8.9pt; margin: 8px 0; }
+  .footer { margin-top: 12px; font-size: 7.8pt; color: #94a3b8; border-top: 1px solid #e2e8f0; padding-top: 6px; }
+  .ltr { direction: ltr; unicode-bidi: embed; }
+</style>
+</head>
+<body>
+
+<!-- PAGE 1 -->
+<div class="page">
+  <div class="cover">
+    <div class="kicker">KALIMA · TECHNICAL ROADMAP</div>
+    <h1>نقشه راه توسعه <span>کالیما</span></h1>
+    <p>پیشنهادهای اولویت‌بندی‌شده برای همه بخش‌ها: دیتابیس، احراز هویت، موتور ترجمه، کالیبراسیون، ریدر، واژه‌نامه، خروجی‌ها، کتابخانه، فرانت‌اند، تست و استقرار — بر اساس وضعیت واقعی امروز کد.</p>
+    <div class="meta">مهر ۱۴۰۵ · نسخه ۱ · مبنا: بک‌اند پایتون + فرانت ری‌اکت، ۶۳۵ تست، ۵۱ فایل تست</div>
+  </div>
+
+  <h2>راهنمای خواندن</h2>
+  <ul>
+    <li>هر بخش با <strong>وضعیت فعلی</strong> (یک خط، طبق کد امروز) شروع می‌شود، بعد پیشنهادها.</li>
+    <li>برچسب‌ها: <span class="pill p0">P0 حیاتی</span> <span class="pill p1">P1 مهم</span> <span class="pill p2">P2 بعداً</span> و تلاش <span class="pill eff">S کوچک</span> <span class="pill eff">M متوسط</span> <span class="pill eff">L بزرگ</span>.</li>
+    <li>قاعده طلایی پروژه سر جایش می‌ماند: <strong>پایتون تنها منبع حقیقت</strong>؛ فرانت پورت می‌کند، بازپیاده‌سازی نمی‌کند.</li>
+  </ul>
+
+  <h2><span class="num">۱</span> دیتابیس (SQLite)</h2>
+  <div class="state">وضعیت فعلی: WAL روشن، کلید خارجی روشن، مهاجرت‌های افزایشی، ایندکس روی کتابخانه؛ قفل SQLite هنگام روشن‌بودن سرور تست‌ها را می‌شکند (~۵۳ خطای کاذب).</div>
+  <ul>
+    <li><span class="pill p0">P0</span> <span class="pill eff">S</span> <strong>بکاپ خودکار:</strong> کپی زمان‌بندی‌شده <span class="ltr">data/kalima.db</span> پیش از هر مهاجرت + دکمه «دانلود بکاپ» در <span class="ltr">/account</span>. ✅ انجام شد: نسخه‌بندی اسکیما، نگهداری ۵ بکاپ، rename امن از <span class="ltr">jbooktranslate.db</span>.</li>
+    <li><span class="pill p0">P0</span> <span class="pill eff">S</span> <strong>جدا کردن تست از دیتابیس واقعی:</strong> متغیر محیطی برای مسیر دیتابیس تا دیگر لازم نباشد سرور را برای تست خاموش کرد.</li>
+    <li><span class="pill p1">P1</span> <span class="pill eff">S</span> <strong>ایندکس‌های جاافتاده:</strong> روی <span class="ltr">job_chunks(job_id)</span> و <span class="ltr">job_events(job_id, timestamp)</span>؛ جدول ایونت‌ها با کتاب‌های بزرگ باد می‌کند.</li>
+    <li><span class="pill p1">P1</span> <span class="pill eff">M</span> <strong>نسخه‌بندی مهاجرت‌ها:</strong> جدول <span class="ltr">schema_version</span> به‌جای زنجیره توابع مهاجرت؛ هر مهاجرت برگشت‌پذیر با تست.</li>
+    <li><span class="pill p2">P2</span> <span class="pill eff">M</span> <strong>جستجوی تمام‌متن:</strong> جدول مجازی <span class="ltr">FTS5</span> روی ترجمه‌ها برای جستجو در کتابخانه (بخش ۸).</li>
+  </ul>
+
+  <h2><span class="num">۲</span> احراز هویت (login / signup)</h2>
+  <div class="state">وضعیت فعلی: ثبت‌نام/ورود/خروج با PBKDF2 و سشن ۳۰روزه در کوکی HttpOnly؛ بدون ریست پسورد، بدون مدیریت سشن‌ها در UI.</div>
+  <ul>
+    <li><span class="pill p0">P0</span> <span class="pill eff">S</span> <strong>تغییر پسورد + خروج از همه دستگاه‌ها:</strong> با دانستن پسورد فعلی؛ دکمه revoke-all در <span class="ltr">/account</span>. امروز اگر کوکی لو برود هیچ راهی برای باطل‌کردن نیست.</li>
+    <li><span class="pill p0">P0</span> <span class="pill eff">M</span> <strong>ریست پسورد محلی:</strong> نه ایمیل (سرور محلی است) — چاپ توکن یک‌بارمصرف در لاگ/ترمینال سرور. صادقانه و بدون زیرساخت خارجی.</li>
+    <li><span class="pill p1">P1</span> <span class="pill eff">S</span> <strong>صفحه سشن‌ها:</strong> فهرست دستگاه‌های فعال با آخرین ورود + دکمه ابطال تکی؛ لاگ رویداد ورود/خروج.</li>
+    <li><span class="pill p1">P1</span> <span class="pill eff">S</span> <strong>محدودیت نرخ ورود:</strong> تأخیر تصاعدی روی <span class="ltr">login</span> (نه قفل اکانت — طبق یادداشت تهدید خودتان، قفل روی سرور لوکال تئاتر است).</li>
+    <li><span class="pill p2">P2</span> <span class="pill eff">L</span> <strong>نقش‌ها:</strong> فقط وقتی محصول هاستی شد (admin/publisher)؛ الان عجله نکنید.</li>
+  </ul>
+</div>
+
+<!-- PAGE 2 -->
+<div class="page">
+  <h2><span class="num">۳</span> موتور ترجمه <span class="pill p0">مهم‌ترین بخش</span></h2>
+  <div class="state">وضعیت فعلی: ۱۲ ورکر Thread، ریت‌لیمیتر تطبیقی، resume سالم؛ جدول <span class="ltr">translation_memory</span> فقط CRUD دستی است و موتور هرگز آن را نمی‌خواند.</div>
+  <ul>
+    <li><span class="pill p0">P0</span> <span class="pill eff">M</span> <strong>وصل‌کردن حافظه ترجمه به موتور:</strong> پیش از هر فراخوانی API، جستجوی تطابق دقیق در <span class="ltr">translation_memory</span>؛ جمله‌های تکراری (فهرست، تیترها، فرمول‌ها) بدون هزینه پر می‌شوند. مستقیم پول ذخیره می‌کند و از قبل ستون فقراتش (یونیک + <span class="ltr">last_used_at</span>) آماده است.</li>
+    <li><span class="pill p0">P0</span> <span class="pill eff">M</span> <strong>fallback مدل:</strong> اگر مدل اصلی ۵ بار خطا داد، ادامه با مدل ارزان‌تر به‌جای مرگ کل Job؛ انتخاب در پروفایل کالیبراسیون.</li>
+    <li><span class="pill p1">P1</span> <span class="pill eff">M</span> <strong>کش پاسخ‌ها:</strong> کش (متن+مدل+پرامپت‌هش) → پاسخ؛ اجرای مجدد نمونه‌ها و تست‌ها را رایگان می‌کند.</li>
+    <li><span class="pill p1">P1</span> <span class="pill eff">M</span> <strong>ترتیب هوشمند chunkها:</strong> اول chunkهای شروع فصل (که ریدر زودتر نشان می‌دهد) بعد بقیه؛ حس سرعت برای کاربر دو برابر بدون هزینه اضافه.</li>
+    <li><span class="pill p1">P1</span> <span class="pill eff">S</span> <strong>سقف هزینه روی Job:</strong> توقف خودکار با پیام فارسی وقتی برآورد از سقف گذشت (مکمل نگهبان بودجه کالیبراسیون).</li>
+    <li><span class="pill p2">P2</span> <span class="pill eff">L</span> <strong>تطابق فازی TM:</strong> شباهت بالای ۹۰٪ با هایلایت تفاوت برای تأیید انسانی؛ بعد از تطابق دقیق.</li>
+  </ul>
+
+  <h2><span class="num">۴</span> کالیبراسیون</h2>
+  <div class="state">وضعیت فعلی: سشن نمونه روی ۱–۳ chunk واقعی، لحن/مدل/بودجه، پروفایل قفل‌شده؛ بازگشایی کتاب مشابه وضعیت را نگه می‌دارد.</div>
+  <ul>
+    <li><span class="pill p0">P0</span> <span class="pill eff">M</span> <strong>مقایسه A/B لحن‌ها:</strong> دو لحن روی یک نمونه، نمایش کنار هم، انتخاب با یک کلیک. امروز انتخاب لحن کور است.</li>
+    <li><span class="pill p1">P1</span> <span class="pill eff">S</span> <strong>چند پروفایل ذخیره‌شده:</strong> «رمان»، «مقاله»، «کتاب کودک» — انتخاب در شروع سشن به‌جای تنظیم دستی هر بار.</li>
+    <li><span class="pill p1">P1</span> <span class="pill eff">M</span> <strong>کالیبراسیون مجدد جزئی:</strong> تغییر لحن وسط راه فقط chunkهای مانده را تحت تأثیر بگذارد، نه از صفر.</li>
+    <li><span class="pill p2">P2</span> <span class="pill eff">S</span> <strong>قیمت واقعی در بودجه:</strong> اتصال نگهبان بودجه به قیمت‌های واقعی مدل‌ها به‌جای عدد ثابت.</li>
+  </ul>
+
+  <h2><span class="num">۵</span> ریدر</h2>
+  <div class="state">وضعیت فعلی: ریدر پایتون کامل است؛ پورت ری‌اکت ناقص (بدون pairing پاراگراف، پنل واژه‌نامه، تنظیمات، حالت columns) و <span class="ltr">/reader</span> به پایتون پروکسی می‌شود.</div>
+  <ul>
+    <li><span class="pill p0">P0</span> <span class="pill eff">L</span> <strong>تکمیل پورت ری‌اکت به ترتیب:</strong> تنظیمات (فونت/اندازه) ← پنل واژه‌نامه ← pairing پاراگراف ← حالت columns؛ هر کدام با تست و بعد بستن استثنای پروکسی.</li>
+    <li><span class="pill p1">P1</span> <span class="pill eff">M</span> <strong>جستجو در کتاب + بوکمارک همگام:</strong> جستجوی فارسی‌فهم (نیم‌فاصله!) روی هر دو زبان؛ بوکمارک‌ها در دیتابیس‌اند، در UI قابل مدیریت شوند.</li>
+    <li><span class="pill p1">P1</span> <span class="pill eff">M</span> <strong>هایلایت و یادداشت:</strong> ذخیره محلی روی آدرس پاراگراف؛ خروجی گرفتن به Markdown.</li>
+    <li><span class="pill p2">P2</span> <span class="pill eff">M</span> <strong>خواندن آفلاین کامل:</strong> با فاز ۶ (سرو <span class="ltr">dist</span> از پایتون) یک بسته واحد شود.</li>
+  </ul>
+</div>
+
+<!-- PAGE 3 -->
+<div class="page">
+  <h2><span class="num">۶</span> واژه‌نامه</h2>
+  <div class="state">وضعیت فعلی: پیشنهاد از ۱۲ نمونه → بازبینی انسانی → Snapshot در شروع Job + فیلتر ضدتوهم؛ حالت‌های off/deferred/inline.</div>
+  <ul>
+    <li><span class="pill p1">P1</span> <span class="pill eff">S</span> <strong>ورود/خروج CSV و TMX:</strong> واژه‌نامه‌های آماده بازار (مخصوصاً فنی/پزشکی) یک‌کلیکه وارد شوند.</li>
+    <li><span class="pill p1">P1</span> <span class="pill eff">M</span> <strong>واژه‌نامه مشترک بین کتاب‌ها:</strong> «واژه‌نامه من» که به هر کتاب جدید لینک می‌شود + گزارش پوشش (چند٪ chunkها اصطلاح دارند).</li>
+    <li><span class="pill p2">P2</span> <span class="pill eff">S</span> <strong>نسخه‌بندی:</strong> هر تأیید نسخه جدید؛ بازگشت به نسخه قبلی بدون ترجمه دوباره.</li>
+  </ul>
+
+  <h2><span class="num">۷</span> خروجی‌ها</h2>
+  <div class="state">وضعیت فعلی: ۹ قالب، فونت وزیرمتن امبدشده، RTL در DOCX/PDF؛ SRT بدون محتوای ترجمه، prompt بینایی PDF هاردکد DE→EN، بدون OCR.</div>
+  <ul>
+    <li><span class="pill p0">P0</span> <span class="pill eff">M</span> <strong>رفع SRT:</strong> اتصال محتوای ترجمه + زمان‌بندی از روی chunkها؛ یا از منو حذف شود — خروجی خراب بدتر از نبودن است.</li>
+    <li><span class="pill p1">P1</span> <span class="pill eff">S</span> <strong>پرامپت بینایی PDF چندزبانه:</strong> ساخت پرامپت از from/to زبان‌ها به‌جای هاردکد آلمانی→انگلیسی.</li>
+    <li><span class="pill p1">P1</span> <span class="pill eff">M</span> <strong>متادیتای EPUB:</strong> عنوان/نویسنده/جلد ترجمه‌شده در خروجی؛ امروز کتاب ترجمه‌شده شناسنامه ندارد.</li>
+    <li><span class="pill p2">P2</span> <span class="pill eff">L</span> <strong>OCR:</strong> فقط برای PDFهای اسکن‌شده (تشخیص خودکار صفحه تصویری)؛ مسیر متنی سریع <span class="ltr">get_text</span> اول، OCR فقط در صورت نیاز.</li>
+  </ul>
+
+  <h2><span class="num">۸</span> کتابخانه و داشبورد</h2>
+  <div class="state">وضعیت فعلی: جستجو، جلد، آرشیو، خلاصه داشبورد؛ بدون جستجوی تمام‌متن و تگ.</div>
+  <ul>
+    <li><span class="pill p1">P1</span> <span class="pill eff">M</span> <strong>جستجوی تمام‌متن فارسی (FTS5):</strong> tokenizer مناسب نیم‌فاصله؛ جستجو در متن اصلی و ترجمه.</li>
+    <li><span class="pill p1">P1</span> <span class="pill eff">S</span> <strong>تگ و قفسه:</strong> «در حال خواندن»، «تمام‌شده»، تگ دلخواه + آمار مطالعه (صفحه/روز).</li>
+    <li><span class="pill p2">P2</span> <span class="pill eff">S</span> <strong>اعلان پایان کار:</strong> نوتیف دسکتاپ/صدا وقتی Job طولانی تمام شد.</li>
+  </ul>
+
+  <h2><span class="num">۹</span> فرانت‌اند</h2>
+  <div class="state">وضعیت فعلی: Vite + TS سخت‌گیرانه، توکن‌های طراحی، ۱۴۴ جفت کنتراست، موبایل‌نو؛ فاز ۶ (سرو dist از پایتون) شروع‌نشده.</div>
+  <ul>
+    <li><span class="pill p1">P1</span> <span class="pill eff">M</span> <strong>فاز ۶ با احتیاط:</strong> اول <span class="ltr">audit_bundle.py</span>، بعد سرو dist از پایتون و حذف قالب‌های قدیمی — برگشت‌ناپذیر است.</li>
+    <li><span class="pill p2">P2</span> <span class="pill eff">M</span> <strong>PWA:</strong> نصب‌پذیر شدن + کش خواندن آفلاین کتاب‌های تمام‌شده.</li>
+    <li><span class="pill p2">P2</span> <span class="pill eff">S</span> <strong>گسترش مرکز راهنما:</strong> ویدیوی کوتاه فارسی برای کالیبراسیون و واژه‌نامه (پربازدیدترین سؤال‌های بعدی).</li>
+  </ul>
+</div>
+
+<!-- PAGE 4 -->
+<div class="page">
+  <h2><span class="num">۱۰</span> تست و کیفیت</h2>
+  <div class="state">وضعیت فعلی: ۶۳۵ تست سبز؛ تست‌های Ctrl+C روی ۱ ورکر pin شده‌اند و رفتار واقعی هم‌روندی-۱۲ را نمی‌سنجند.</div>
+  <ul>
+    <li><span class="pill p1">P1</span> <span class="pill eff">M</span> <strong>تست واقعی هم‌روندی-۱۲:</strong> محیط hermetic با provider جعلی ولی ۱۲ ورکر واقعی؛ باگ‌های race امروز نامرئی‌اند.</li>
+    <li><span class="pill p1">P1</span> <span class="pill eff">M</span> <strong>تست طلایی سرتاسری:</strong> یک EPUB کوچک ثابت → خروجی ثابت؛ هر تغییری در چانکر/پرامپت خودش را نشان می‌دهد.</li>
+    <li><span class="pill p2">P2</span> <span class="pill eff">S</span> <strong>seed ثابت در CI:</strong> حذف flake از تست‌های زمان‌محور.</li>
+  </ul>
+
+  <h2><span class="num">۱۱</span> بسته‌بندی و امنیت</h2>
+  <div class="state">وضعیت فعلی: بدون LICENSE؟ نه — MIT دارد؛ بدون <span class="ltr">pyproject.toml</span>، بدون اینستالر؛ امنیت loopback + CSRF تأییدشده.</div>
+  <ul>
+    <li><span class="pill p1">P1</span> <span class="pill eff">S</span> <strong><span class="ltr">pyproject.toml</span>:</strong> بسته‌بندی نهایی، نسخه، entry-point تمیز.</li>
+    <li><span class="pill p1">P1</span> <span class="pill eff">M</span> <strong>اینستالر ویندوز تک‌کلیکه:</strong> کاربر واقعی <span class="ltr">venv</span> نمی‌سازد؛ آیکون + اجرای خودکار + بکاپ خودکار دیتابیس.</li>
+    <li><span class="pill p2">P2</span> <span class="pill eff">M</span> <strong>گزارش امنیتی (audit log):</strong> ثبت ورودها، تغییرات کلید و خروجی‌ها؛ چرخش دوره‌ای کلید API.</li>
+  </ul>
+
+  <div class="tip"><strong>سه قدم اول پیشنهادی (همین هفته):</strong> ۱) وصل‌کردن حافظه ترجمه به موتور — مستقیم هزینه کم می‌کند و تستش آسان است. ۲) بکاپ خودکار دیتابیس + جدا کردن مسیر دیتابیس تست — ریسک صفر. ۳) رفع SRT یا حذفش از منو — اعتماد کاربر.</div>
+
+  <h2>نقشه فازی</h2>
+  <table>
+    <tr><th>فاز</th><th>شامل</th><th>خروجی قابل نمایش</th></tr>
+    <tr><td><strong>فاز ۱</strong><br>اعتماد و پول</td><td>TM در موتور، fallback مدل، بکاپ دیتابیس، تغییر/ریست پسورد، رفع SRT، مقایسه A/B لحن</td><td>ترجمه ارزان‌تر + بدون ترس از دست‌دادن داده</td></tr>
+    <tr><td><strong>فاز ۲</strong><br>تجربه خواندن</td><td>تکمیل ریدر ری‌اکت، جستجوی تمام‌متن، تگ/قفسه، ورود CSV واژه‌نامه، متادیتای EPUB</td><td>اپی که روزانه باز می‌شود، نه فقط ابزار ترجمه</td></tr>
+    <tr><td><strong>فاز ۳</strong><br>رشد</td><td>OCR، تطابق فازی، PWA، اینستالر ویندوز، نقش‌ها، فاز ۶</td><td>آمادگی برای کاربر غیرفنی و محصول هاستی</td></tr>
+  </table>
+
+  <div class="warn"><strong>چه چیزهایی عجله ندارند:</strong> نقش‌های کاربری و چندکاربره (سرور لوکال تک‌نفره است)، بازنویسی asyncio (هزینه بدون سود)، OCR کامل (اول مسیر متنی سریع).</div>
+
+  <div class="footer">مبنای هر پیشنهاد کد امروز است (مسیر فایل‌ها در AGENTS.md). با انتخاب فاز ۱ شروع می‌کنیم: اول TM، بعد بکاپ، بعد SRT.</div>
+</div>
+
+</body>
+</html>

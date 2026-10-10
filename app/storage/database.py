@@ -9,15 +9,42 @@ from typing import Any
 from app.core.paths import ensure_dir
 
 UTC = timezone.utc
-# The product was renamed to KALIMA, and this file name was deliberately left
-# alone. It holds every job, book, glossary and billing row the user has; a
-# rename here would point the app at an empty database and orphan the real one
-# with no error, just an app that has forgotten everything.
-DB_PATH = ensure_dir("data") / "jbooktranslate.db"
+# Canonical database file. The product was renamed to KALIMA while the file
+# stayed ``jbooktranslate.db``; renaming by move would point the app at an
+# empty database and orphan the real one with no error, so the migration below
+# copies (never moves) and the old file stays as a pre-rename backup.
+LEGACY_DB_NAME = "jbooktranslate.db"
+DB_NAME = "kalima.db"
+DB_PATH = ensure_dir("data") / DB_NAME
+# Bump when the schema or any _migrate_* changes: a bump takes exactly one
+# timestamped backup BEFORE migrating. See backup_database().
+SCHEMA_VERSION = 1
+BACKUP_KEEP = 5
+BACKUP_MAX_AGE_SECONDS = 86400
 
 class Database:
     def __init__(self, path: str | Path = DB_PATH):
-        self.path = Path(path); self.path.parent.mkdir(parents=True, exist_ok=True); self._lock = threading.RLock(); self.initialize()
+        self.path = Path(path); self.path.parent.mkdir(parents=True, exist_ok=True); self._lock = threading.RLock(); self._adopt_legacy_file_for(self.path); self.initialize()
+
+    @staticmethod
+    def _adopt_legacy_file_for(path: Path) -> Path | None:
+        """Copy the pre-rename database into place. Returns the backup path kept.
+
+        Only when the canonical file is missing, its legacy sibling exists,
+        and the target is the canonical name: a copy, never a move, so the
+        old file survives as the pre-rename backup.
+        """
+        path = Path(path)
+        if path.name != DB_NAME or path.exists():
+            return None
+        legacy = path.parent / LEGACY_DB_NAME
+        if not legacy.is_file():
+            return None
+        import shutil
+
+        shutil.copy2(legacy, path)
+        print(f"Database renamed by copy: {legacy.name} -> {path.name} (original kept as backup)")
+        return legacy
 
     def connect(self):
         connection = sqlite3.connect(self.path, timeout=30, check_same_thread=False)
@@ -37,6 +64,13 @@ class Database:
         CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL);
         """
         with self._lock, self.connect() as connection:
+            tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            stored = None
+            if "settings" in tables:
+                row = connection.execute("SELECT value_json FROM settings WHERE key='schema_version'").fetchone()
+                stored = json.loads(row[0]) if row else 0
+            if stored is not None and stored < SCHEMA_VERSION:
+                self._backup_locked("migrate")
             connection.executescript(schema); self._seed_defaults(connection)
             self._migrate_library(connection)
             self._migrate_account_portal(connection)
@@ -55,6 +89,79 @@ class Database:
                 created_at TEXT NOT NULL,
                 PRIMARY KEY(book_id, source_language, target_language, origin)
             )""")
+            connection.execute(
+                "INSERT INTO settings(key, value_json, updated_at) VALUES ('schema_version', ?, ?)"
+                " ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json, updated_at=excluded.updated_at",
+                (json.dumps(SCHEMA_VERSION), datetime.now(UTC).isoformat()),
+            )
+        self._scheduled_backup(stored is not None)
+
+    def backup_dir(self) -> Path:
+        directory = self.path.parent / "backups"
+        directory.mkdir(parents=True, exist_ok=True)
+        return directory
+
+    def list_backups(self) -> list[Path]:
+        """Backup files, newest first. Never raises on a missing directory."""
+        directory = self.path.parent / "backups"
+        if not directory.is_dir():
+            return []
+        return sorted(
+            (entry for entry in directory.iterdir()
+             if entry.is_file() and entry.name.startswith("kalima-") and entry.suffix == ".db"),
+            reverse=True,
+        )
+
+    def _backup_locked(self, reason: str) -> Path:
+        """Copy the live database with the SQLite backup API (WAL-safe).
+
+        Call with self._lock held. Raw file copies of a WAL-mode database can
+        catch a mid-write state; backup() copies a consistent snapshot.
+        """
+        stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
+        target = self.backup_dir() / f"kalima-{stamp}.db"
+        source = sqlite3.connect(self.path, timeout=30)
+        try:
+            dest = sqlite3.connect(target)
+            try:
+                source.backup(dest)
+            finally:
+                dest.close()
+        finally:
+            source.close()
+        for stale in self.list_backups()[BACKUP_KEEP:]:
+            try:
+                stale.unlink()
+                print(f"Database backup pruned: {stale.name}")
+            except OSError:
+                pass
+        print(f"Database backup ({reason}): {target.name}")
+        return target
+
+    def backup_database(self, reason: str = "manual") -> Path:
+        """Take a timestamped backup now. Returns the backup path."""
+        with self._lock:
+            return self._backup_locked(reason)
+
+    def _scheduled_backup(self, has_history: bool) -> None:
+        """Once-a-day safety copy without a scheduler thread.
+
+        Runs at init: backs up when the newest copy is older than 24h, or when
+        a versioned database has no backup at all. Brand-new files (no history
+        yet) are skipped — there is nothing to protect on first creation.
+        """
+        if not has_history:
+            return
+        try:
+            with self._lock:
+                backups = self.list_backups()
+                if backups:
+                    age = datetime.now(UTC).timestamp() - backups[0].stat().st_mtime
+                    if age < BACKUP_MAX_AGE_SECONDS:
+                        return
+                self._backup_locked("scheduled")
+        except OSError as exc:
+            print(f"Scheduled database backup skipped: {exc}")
 
     @staticmethod
     def _migrate_library(connection):
