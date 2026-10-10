@@ -187,3 +187,102 @@ def logout(db, token: object) -> None:
             "DELETE FROM auth_sessions WHERE token_hash=?",
             (hashlib.sha256(raw.encode("utf-8")).hexdigest(),),
         )
+
+
+def _session_user_id(db, token: object) -> int | None:
+    """User id behind a live session, or None when unknown/expired."""
+    row = user_from_token(db, token)
+    if row is None:
+        return None
+    return row["id"]
+
+
+def _token_hash(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def list_sessions(db, token: object) -> list[dict]:
+    """Live sessions of the caller, newest first. Raises LookupError when unknown."""
+    user_id = _session_user_id(db, token)
+    if user_id is None:
+        raise LookupError("وارد نشده‌اید.")
+    current = _token_hash(str(token or ""))
+    rows = db.fetch_all(
+        "SELECT token_hash, created_at, expires_at FROM auth_sessions"
+        " WHERE user_id=? ORDER BY created_at DESC",
+        (user_id,),
+    )
+    return [
+        {
+            "id": row["token_hash"][:16],
+            "created_at": row["created_at"],
+            "expires_at": row["expires_at"],
+            "current": row["token_hash"] == current,
+        }
+        for row in rows
+    ]
+
+
+def revoke_session(db, token: object, session_id: object) -> None:
+    """Close one of the caller's sessions by id prefix. Raises on unknown."""
+    user_id = _session_user_id(db, token)
+    if user_id is None:
+        raise LookupError("وارد نشده‌اید.")
+    prefix = str(session_id or "").strip().lower()
+    if not prefix or len(prefix) < 8 or any(c not in "0123456789abcdef" for c in prefix):
+        raise ValueError("شناسهٔ نشست نامعتبر است.")
+    matches = db.fetch_all(
+        "SELECT token_hash FROM auth_sessions WHERE user_id=? AND token_hash LIKE ?",
+        (user_id, prefix + "%"),
+    )
+    if len(matches) != 1:
+        raise LookupError("نشست پیدا نشد.")
+    db.execute(
+        "DELETE FROM auth_sessions WHERE user_id=? AND token_hash=?",
+        (user_id, matches[0]["token_hash"]),
+    )
+
+
+def revoke_all_sessions(db, token: object) -> int:
+    """Close every session of the caller except the current one.
+
+    Returns the number of sessions closed. This is the recovery path for a
+    leaked cookie: one call invalidates everything the caller is not holding.
+    """
+    user_id = _session_user_id(db, token)
+    if user_id is None:
+        raise LookupError("وارد نشده‌اید.")
+    current = _token_hash(str(token or ""))
+    others = db.fetch_all(
+        "SELECT token_hash FROM auth_sessions WHERE user_id=? AND token_hash!=?",
+        (user_id, current),
+    )
+    if others:
+        db.execute(
+            "DELETE FROM auth_sessions WHERE user_id=? AND token_hash!=?",
+            (user_id, current),
+        )
+    return len(others)
+
+
+def change_password(db, token: object, current_password: object, new_password: object) -> dict:
+    """Change password after proving the current one; other sessions die.
+
+    Wrong current password raises the same LookupError as login, so the
+    endpoint is not a password oracle. Returns the public user.
+    """
+    raw = str(token or "")
+    user_id = _session_user_id(db, raw)
+    if user_id is None:
+        raise LookupError("وارد نشده‌اید.")
+    row = db.fetch_one("SELECT * FROM users WHERE id=?", (user_id,))
+    if row is None or not verify_password(str(current_password or ""), row["password_hash"] or ""):
+        raise LookupError("گذرواژهٔ فعلی درست نیست.")
+    secret = validate_password(new_password)
+    timestamp = _now()
+    db.execute(
+        "UPDATE users SET password_hash=?, updated_at=? WHERE id=?",
+        (hash_password(secret), timestamp, user_id),
+    )
+    revoke_all_sessions(db, raw)
+    return user_public(db.fetch_one("SELECT * FROM users WHERE id=?", (user_id,)))

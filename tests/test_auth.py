@@ -117,3 +117,55 @@ def test_expired_session_is_rejected_and_cleaned(database):
     database.execute("UPDATE auth_sessions SET expires_at='2000-01-01T00:00:00+00:00' WHERE token_hash=?", (digest,))
     assert service.user_from_token(database, token) is None
     assert database.fetch_one("SELECT 1 FROM auth_sessions WHERE token_hash=?", (digest,)) is None
+
+
+def test_change_password_needs_current_and_kills_other_sessions(database):
+    service.signup(database, "user@example.com", "s3cret-pass", "Test User")
+    _, first = service.login(database, "user@example.com", "s3cret-pass")
+    _, second = service.login(database, "user@example.com", "s3cret-pass")
+    with pytest.raises(LookupError):
+        service.change_password(database, first, "wrong-pass", "new-secret-pass")
+    assert service.user_from_token(database, first) is not None
+    assert service.user_from_token(database, second) is not None
+    user = service.change_password(database, first, "s3cret-pass", "new-secret-pass")
+    assert user["email"] == "user@example.com"
+    assert service.user_from_token(database, first) is not None
+    assert service.user_from_token(database, second) is None
+    _, third = service.login(database, "user@example.com", "new-secret-pass")
+    assert third
+    with pytest.raises(LookupError):
+        service.login(database, "user@example.com", "s3cret-pass")
+
+
+def test_list_and_revoke_single_session(database):
+    service.signup(database, "user@example.com", "s3cret-pass", "Test User")
+    _, first = service.login(database, "user@example.com", "s3cret-pass")
+    _, second = service.login(database, "user@example.com", "s3cret-pass")
+    items = service.list_sessions(database, first)
+    assert len(items) == 2
+    assert sum(1 for item in items if item["current"]) == 1
+    other = next(item for item in items if not item["current"])
+    service.revoke_session(database, first, other["id"])
+    assert service.user_from_token(database, first) is not None
+    assert service.user_from_token(database, second) is None
+    with pytest.raises(LookupError):
+        service.revoke_session(database, first, other["id"])
+    with pytest.raises(ValueError):
+        service.revoke_session(database, first, "xyz")
+    with pytest.raises(LookupError):
+        service.list_sessions(database, "bogus")
+
+
+def test_revoke_all_keeps_only_caller(database):
+    service.signup(database, "user@example.com", "s3cret-pass", "Test User")
+    _, first = service.login(database, "user@example.com", "s3cret-pass")
+    _, second = service.login(database, "user@example.com", "s3cret-pass")
+    _, third = service.login(database, "user@example.com", "s3cret-pass")
+    closed = service.revoke_all_sessions(database, first)
+    assert closed == 2
+    assert service.user_from_token(database, first) is not None
+    assert service.user_from_token(database, second) is None
+    assert service.user_from_token(database, third) is None
+    assert service.revoke_all_sessions(database, first) == 0
+    with pytest.raises(LookupError):
+        service.revoke_all_sessions(database, "bogus")

@@ -76,6 +76,10 @@ from app.auth.service import (
     logout as auth_logout,
     signup as auth_signup,
     user_from_token,
+    change_password as auth_change_password,
+    list_sessions as auth_list_sessions,
+    revoke_session as auth_revoke_session,
+    revoke_all_sessions as auth_revoke_all_sessions,
 )
 from app.glossary.proposal import (
     _key as _glossary_key,
@@ -1267,6 +1271,11 @@ class Handler(BaseHTTPRequestHandler):
             user = user_from_token(db, self._session_token())
             if user is None: self._json({"error": "وارد نشده‌اید."}, 401); return
             self._json({"user": user}); return
+        if parsed.path == "/api/auth/sessions":
+            try:
+                items = auth_list_sessions(db, self._session_token())
+            except LookupError as exc: self._json({"error": str(exc)}, 401); return
+            self._json({"items": items}); return
         if parsed.path == "/api/account/portal":
             self._json({"overview": account_overview(), "plans": plans_catalog(), "packages": credit_packages(), "api_keys": account_api_keys(), "marketplace": account_marketplace(), "orders": account_orders(), "publisher": publisher_overview()}); return
         if parsed.path == "/api/account/marketplace":
@@ -1406,13 +1415,26 @@ class Handler(BaseHTTPRequestHandler):
         if not self._guarded(): return
         if calibration_route(self, "POST"): return
         path=urlparse(self.path).path
-        if path in {"/api/auth/signup", "/api/auth/login", "/api/auth/logout"}:
+        if path in {"/api/auth/signup", "/api/auth/login", "/api/auth/logout",
+                      "/api/auth/change-password", "/api/auth/sessions/revoke", "/api/auth/revoke-all"}:
             try: body = self._request_json()
             except (ValueError, json.JSONDecodeError) as exc: self._json({"error": str(exc)}, 400); return
             if path == "/api/auth/logout":
                 auth_logout(db, self._session_token())
                 self._json({"ok": True}, headers=self._clear_session_cookie()); return
             try:
+                if path == "/api/auth/change-password":
+                    user = auth_change_password(db, self._session_token(), body.get("current_password"), body.get("new_password"))
+                    self._json({"user": user}); return
+                if path == "/api/auth/sessions/revoke":
+                    try:
+                        auth_revoke_session(db, self._session_token(), body.get("session_id"))
+                    except LookupError as exc:
+                        self._json({"error": str(exc)}, 401 if str(exc) == "وارد نشده‌اید." else 404); return
+                    self._json({"ok": True}); return
+                if path == "/api/auth/revoke-all":
+                    closed = auth_revoke_all_sessions(db, self._session_token())
+                    self._json({"ok": True, "closed": closed}); return
                 if path == "/api/auth/signup":
                     auth_signup(db, body.get("email"), body.get("password"), body.get("display_name", ""))
                 user, token = auth_login(db, body.get("email"), body.get("password"))
