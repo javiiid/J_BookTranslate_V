@@ -108,7 +108,7 @@ crash means "resume from the last healthy spot", not "start from zero".
 | ✅ | **Quality scorer** | Six-dimension chunk QA, opt-in via `quality_report` |
 | 🖼️ | **Images in the reader** | Full asset/text separation |
 | 🗂️ | **Local library** | With search, covers, and archive |
-| 🔑 | **Local auth** | Password login with sessions, stdlib only |
+| 🔑 | **Auth** | Password + OTP email + Google/Apple OAuth, throttled |
 | ❓ | **Help center** | Searchable articles and FAQ in Persian and English |
 | 🖥️ | **React frontend** | Strict-TypeScript UI served locally on :5173 |
 | 🌙 | **Night reading mode** | OLED theme for long sessions |
@@ -668,16 +668,27 @@ now returns `403`.
 > `LAUNCH.md` Phase A. The loopback-only posture below is the starting point,
 > not the target.
 
-### Local auth
+### Auth
 
-`app/auth` adds password login on top, stdlib only: PBKDF2-HMAC-SHA256
-(210,000 iterations) for password storage, `secrets`-generated session tokens
-of which only the SHA-256 digest touches the database. Sessions ride an
-HttpOnly `SameSite=Lax` cookie. No brute-force lockout by design *for the local
-build*: on a loopback-only server the attacker already runs code on the
-machine, where the database is directly readable — a lockout would be theatre,
-not defence. **This reasoning dies at launch: hosted login gets rate-limiting
-and lockout (see `LAUNCH.md`).**
+`app/auth` adds login on top, stdlib only (plus `cryptography` for Apple):
+PBKDF2-HMAC-SHA256 (210,000 iterations) for password storage,
+`secrets`-generated session tokens of which only the SHA-256 digest touches
+the database. Sessions ride an HttpOnly `SameSite=Lax` cookie.
+
+- **Password**: signup/login/logout, change-password (proves the current one,
+  kills all other sessions), session list, per-session revoke, revoke-all —
+  the leaked-cookie recovery path.
+- **Passwordless email**: 6-digit OTP, 10-minute expiry, single-use, hashed
+  at rest; log-sender by default, SMTP driver from `config.yaml` when
+  configured. First use creates the account.
+- **Google / Apple OAuth**: authorization-code flow with one-time state;
+  Google verified via tokeninfo over TLS; Apple verified against JWKS (RS256)
+  with an ES256 client_secret. Accounts link by provider sub, else by verified
+  email. Unconfigured providers fail with an explicit error naming the missing
+  `config.yaml` keys — never silently.
+- **Abuse throttle**: DB-backed per-email + per-IP failure log with
+  progressive rejection on password and OTP endpoints. This retires the old
+  loopback-only "no lockout" reasoning (see `LAUNCH.md`).
 
 ### Key hygiene
 
