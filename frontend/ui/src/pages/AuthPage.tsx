@@ -33,6 +33,50 @@ import './auth.css'
 type Mode = 'login' | 'signup'
 type Method = 'password' | 'code'
 
+/**
+ * Brand marks for the OAuth buttons. Product logos, not UI chrome: the
+ * Google "G" keeps its official colours so it stays recognisable, while the
+ * Apple mark uses the text colour so it follows both themes. aria-hidden --
+ * the button label already names the provider.
+ */
+function GoogleMark(): React.JSX.Element {
+  return (
+    <svg width={18} height={18} viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path
+        fill="#4285F4"
+        d="M23.5 12.3c0-.9-.1-1.5-.3-2.3H12v4.5h6.5c-.1 1.1-.8 2.7-2.4 3.8l-.1.1 3.5 2.7.2.1c2.2-2 3.8-5 3.8-8.9z"
+      />
+      <path
+        fill="#34A853"
+        d="M12 24c3.2 0 5.9-1.1 7.9-2.9l-3.8-2.9c-1 .7-2.4 1.2-4.1 1.2-3.1 0-5.8-2.1-6.8-5l-.1.1-3.6 2.8v.1C3.5 21.3 7.4 24 12 24z"
+      />
+      <path
+        fill="#FBBC05"
+        d="M5.2 14.4c-.2-.7-.4-1.5-.4-2.4s.1-1.7.4-2.4l-.1-.1-3.6-2.8-.1.1C.5 8.6 0 10.2 0 12s.5 3.4 1.4 4.9l3.8-2.5z"
+      />
+      <path
+        fill="#EA4335"
+        d="M12 4.7c1.8 0 3 .8 3.7 1.4l3.3-3.2C17.9 1.1 15.2 0 12 0 7.4 0 3.5 2.7 1.4 6.7l3.8 2.9c1-2.9 3.7-4.9 6.8-4.9z"
+      />
+    </svg>
+  )
+}
+
+function AppleMark(): React.JSX.Element {
+  return (
+    <svg
+      width={18}
+      height={18}
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d="M17.05 12.54c0-2.4 1.96-3.55 2.05-3.6-1.12-1.64-2.86-1.86-3.48-1.89-1.48-.15-2.89.87-3.64.87-.75 0-1.9-.85-3.13-.83-1.61.02-3.1.94-3.93 2.38-1.68 2.9-.43 7.2 1.2 9.56.8 1.15 1.75 2.45 3 2.4 1.2-.05 1.66-.78 3.12-.78s1.87.78 3.14.75c1.3-.02 2.12-1.17 2.91-2.33.92-1.34 1.3-2.64 1.32-2.71-.03-.01-2.54-.97-2.56-3.82zM14.65 5.4c.66-.8 1.1-1.9 1.1-3.1-1.07.04-2.37.71-3.14 1.51-.69.8-1.3 1.9-1.13 3.1 1.19.09 2.4-.6 3.17-1.51z" />
+    </svg>
+  )
+}
+
 export function AuthPage(): React.JSX.Element {
   const { t, dir } = useLanguage()
   const { pathname } = useLocation()
@@ -389,7 +433,7 @@ export function AuthPage(): React.JSX.Element {
             {method === 'code' ? t('auth.codeSub') : mode === 'signup' ? t('auth.signupSub') : t('auth.loginSub')}
           </p>
 
-          <div className="auth-tabs mt-[var(--spacing-4)]" role="group" aria-label={t('auth.loginTab')}>
+          <div className="auth-tabs mt-[var(--spacing-4)]" role="group" aria-label={t('auth.passwordTab')}>
             {(['password', 'code'] as const).map((tab) => (
               <button
                 key={tab}
@@ -402,7 +446,7 @@ export function AuthPage(): React.JSX.Element {
                   setNotice(null)
                 }}
               >
-                {tab === 'code' ? t('auth.codeTab') : t('auth.loginTab')}
+                {tab === 'code' ? t('auth.codeTab') : t('auth.passwordTab')}
               </button>
             ))}
           </div>
@@ -556,10 +600,16 @@ export function AuthPage(): React.JSX.Element {
           </p>
           <div className="control-row mt-[var(--spacing-2)]">
             <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => void startOAuth('google')}>
-              {t('auth.google')}
+              <span className="flex items-center gap-[var(--spacing-2)]">
+                <GoogleMark />
+                {t('auth.google')}
+              </span>
             </button>
             <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => void startOAuth('apple')}>
-              {t('auth.apple')}
+              <span className="flex items-center gap-[var(--spacing-2)]">
+                <AppleMark />
+                {t('auth.apple')}
+              </span>
             </button>
           </div>
 

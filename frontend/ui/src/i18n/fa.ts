@@ -675,6 +675,7 @@ export const fa = {
   'auth.dashboard': 'رفتن به داشبورد',
   'auth.codeTab': 'کد ایمیل',
   'auth.codeTitle': 'ورود با کد ایمیل',
+  'auth.passwordTab': 'گذرواژه',
   'auth.codeSub': 'یک کد ۶رقمی می‌فرستیم. ۱۰ دقیقه اعتبار دارد.',
   'auth.code': 'کد ورود',
   'auth.codePh': '۱۲۳۴۵۶',

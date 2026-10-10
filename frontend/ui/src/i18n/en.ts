@@ -664,6 +664,7 @@ export const en: Record<StringKey, string> = {
   'auth.dashboard': 'Go to dashboard',
   'auth.codeTab': 'Email code',
   'auth.codeTitle': 'Log in with an email code',
+  'auth.passwordTab': 'Password',
   'auth.codeSub': 'We send a 6-digit code. It expires in 10 minutes.',
   'auth.code': 'Login code',
   'auth.codePh': '123456',
