@@ -1,10 +1,14 @@
 # KALIMA UI — agent guide
 
-React port of the Python app at `D:\J_BookTranslate_V`. **Python is single source of truth — port, don't reimplement.** When they disagree, the Python page is correct. Full rationale in `README.md`; this file is only what agents get wrong.
+React front end of KALIMA at `D:\J_BookTranslate_V`. Product direction is a
+**hosted launch** (see `LAUNCH.md` at the repo root): this UI is the product
+face, not a local companion. **Python is single source of truth — port, don't
+reimplement.** When they disagree, the Python page is correct. Full rationale
+in `README.md`; this file is only what agents get wrong.
 
 ## Run
 
-Both processes must run:
+Both processes must run (local dev):
 
 ```powershell
 # backend (from the Python repo)
@@ -14,7 +18,7 @@ npm install
 npm run dev                                # http://localhost:5173
 ```
 
-Vite proxies only `/api`, `/downloads`, `/reader` to the backend — no CORS anywhere. Backend address: `KALIMA_API`, legacy `JBT_API` fallback, default `http://127.0.0.1:8765`.
+Vite proxies only `/api`, `/downloads`, `/reader` to the backend — no CORS anywhere **in dev**. For launch the UI targets the hosted API via `KALIMA_API` (legacy `JBT_API` fallback); same-origin proxying still applies when the backend serves `dist/` (Phase 6), otherwise the backend needs an explicit CORS allowlist for the product domain — never `*`. Backend address: `KALIMA_API`, legacy `JBT_API` fallback, default `http://127.0.0.1:8765`.
 
 ## Commands (from `ui/`)
 
@@ -42,8 +46,8 @@ Vite proxies only `/api`, `/downloads`, `/reader` to the backend — no CORS any
 - **`truncate` in an RTL line cuts the wrong end.** The ellipsis goes at the *containing block's* inline end, so a long Latin filename showed its tail and lost the part that identifies the book. Put `dir="ltr"` on the truncating element itself (plus `text-right` to keep it against its badge). A `<bdi>` isolate does **not** help — it reorders the text and leaves the ellipsis where it was.
 - `job.reader` is a backend path (`/reader/<id>`): link it with `<a href>`, never `<Link to>` — the router would intercept it and render the handover placeholder. Same reason bare `/reader` is a dead end: don't link to it (landing/404 go to `/library`). Two cards may point at one destination there — key the list on `title`, not `to`, or React drops one for duplicate keys.
 - **Viewport height is owned once, in `tokens.css` `body`.** `dvh` re-resolves when the mobile browser bar slides, so stacking `min-h-dvh` on the shell made the page grow while you scrolled down it — "I reach the end and there's more empty page". `AppShell` grows with its content.
-- Workspace uploads twice (POST `/api/jobs/upload` for the estimate, then POST `/api/jobs` with the File again): localhost-cheap but orphans one temp file per run. The backend comment promises an `upload_token` lookup, but POST `/api/jobs` never implemented it — needs a backend change, not a frontend one. (The calibration path does not have this problem: it never re-uploads.)
+- Workspace uploads twice (POST `/api/jobs/upload` for the estimate, then POST `/api/jobs` with the File again): localhost-cheap but orphans one temp file per run. In production uploads cost bandwidth and storage, so this moves from nuisance to must-fix: the backend comment promises an `upload_token` lookup, but POST `/api/jobs` never implemented it — needs a backend change, not a frontend one. (The calibration path does not have this problem: it never re-uploads.)
 - PUT `/api/reader/settings` takes a FLAT partial (`{reading_font_size: 20}`); `{value: {...}}` returns `ok:true` while saving nothing. POST `/api/provider-config/test` returns `{message, base_url, models: <count>, selected_model, model_available}` — `models` is a number, not a list.
 - `request()` in `lib/api.ts` throws `ApiError` (with status) even for non-JSON proxy pages — never let a raw `SyntaxError` reach a page. `badgeClass`/`statusLabel` in `lib/format.ts` fall back for unknown future statuses.
 - Mojibake is invisible to tsc/lint/diff/contrast audit (valid UTF-8 + valid TSX, wrong glyphs). `tests/encoding.test.ts` rejects Latin-1 signatures and asserts real Persian remains; repair with `docs/fix_mojibake.py` (cp1252 with latin-1 fallback, writes only if unambiguously better).
-- Phase 6 (serve `dist/` from Python, delete old templates) is **not started** and irreversible — needs `app/web.py` changes (otherwise frozen). Run `docs/audit_bundle.py` before deciding.
+- Phase 6 (serve `dist/` from Python, delete old templates) is **the launch deployment path** — single container, same-origin API, no CORS. Still **not started** and irreversible — needs `app/web.py` changes (otherwise frozen). Run `docs/audit_bundle.py` before deciding, and see `LAUNCH.md` Phase B.

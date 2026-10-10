@@ -2,11 +2,14 @@
 
 # 📖 KALIMA
 
-**Translate EPUB and PDF books on your own machine — no uploads anywhere, no build step.**
+**Translate EPUB and PDF books with any OpenAI-compatible API — chunked, resumable, with a human-approved glossary.**
 
-A local, single-command book translator for any OpenAI-compatible API.
 Translation is split into small chunks, progress persists on disk, and work
 resumes exactly where it stopped — even after a reboot.
+
+> 🚀 **Product direction: hosted launch.** The current build still runs locally
+> (see Quick start); the launch plan — multi-user accounts, server-side billing,
+> production deployment — lives in [`LAUNCH.md`](LAUNCH.md).
 
 **[فارسی](README_FA.md)** · Persian readers: the full original documentation lives in `README_FA.md`.
 
@@ -19,7 +22,7 @@ resumes exactly where it stopped — even after a reboot.
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![Tests](https://img.shields.io/badge/tests-635%20passing-brightgreen.svg)]()
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Local](https://img.shields.io/badge/server-127.0.0.1%3A8765-informational.svg)]()
+[![Launch](https://img.shields.io/badge/launch-in_progress-yellow.svg)](LAUNCH.md)
 
 <br>
 
@@ -48,19 +51,22 @@ resumes exactly where it stopped — even after a reboot.
 - [Testing](#-testing)
 - [Development](#-development)
 - [Open issues](#-open-issues)
+- [Launch plan (hosted)](LAUNCH.md)
 
 ---
 
 ## 💡 Why this project is different
 
-Most book-translation tools either upload your book to someone else's server,
-send the whole book in one request, or lose everything when work stops halfway.
+Most book-translation tools send the whole book in one request, learn
+terminology without asking you, or lose everything when work stops halfway.
 These three problems drive every decision in this project:
 
-### 1. Your book goes nowhere
+### 1. Your book stays in your workspace
 
-The server listens only on `127.0.0.1`, and the API key lives in a file that is
-not in Git. Nothing is uploaded anywhere except the file you choose yourself.
+Your files live in your own workspace and are processed only by the model
+provider you chose — never shared, never used for training. (The current build
+runs on your own machine at `127.0.0.1` with the API key in a gitignored file;
+the hosted launch keeps the same promise per user — see `LAUNCH.md`.)
 
 ### 2. Many chunks go up at once
 
@@ -471,6 +477,9 @@ output/   translated books
 None of them are in Git. One PDF export alone reached 99 MB, and Git keeps
 every blob forever.
 
+> 🚀 At launch these become per-user storage (volumes first, object storage
+> later) — see `LAUNCH.md`. New paths go through `app/core/paths.py` only.
+
 ---
 
 ## ⚙ Configuration
@@ -530,7 +539,7 @@ The server runs at `http://127.0.0.1:8765`, loopback only.
 | `/landing` | Landing page |
 | `/workspace` | Workspace: upload & monitor (intake — calibration owns the rest) |
 | `/workspace/job/{id}` | Single-translation monitor (5 tabs) |
-| `/library` | Local library |
+| `/library` | Library (per-user at launch) |
 | `/reader/{id}` | Bilingual reader |
 | `/account` | Account portal |
 | `/help` | Help center (React UI): search, articles, FAQ |
@@ -645,7 +654,7 @@ instead of failing on the first paid chunk.
 A local server with an open API and no origin checks can be driven by any web
 page the user opens — spending your API credit. CORS does not stop this.
 
-`app/web.py` enforces:
+`app/web.py` enforces (current local build):
 
 - `Sec-Fetch-Site` and `Origin` checks on **all** mutating methods
 - `Host` checks on **all** methods, including GETs, against DNS rebinding
@@ -654,22 +663,29 @@ page the user opens — spending your API credit. CORS does not stop this.
 **Verified with a real attack:** a request that used to return `201 Created`
 now returns `403`.
 
+> 🚀 At launch the binding becomes configurable behind a TLS reverse proxy,
+> with real CSRF tokens, `Secure` cookies, and login rate-limiting — see
+> `LAUNCH.md` Phase A. The loopback-only posture below is the starting point,
+> not the target.
+
 ### Local auth
 
 `app/auth` adds password login on top, stdlib only: PBKDF2-HMAC-SHA256
 (210,000 iterations) for password storage, `secrets`-generated session tokens
 of which only the SHA-256 digest touches the database. Sessions ride an
-HttpOnly `SameSite=Lax` cookie. No brute-force lockout by design: on a
-loopback-only server the attacker already runs code on the machine, where the
-database is directly readable — a lockout would be theatre, not defence.
+HttpOnly `SameSite=Lax` cookie. No brute-force lockout by design *for the local
+build*: on a loopback-only server the attacker already runs code on the
+machine, where the database is directly readable — a lockout would be theatre,
+not defence. **This reasoning dies at launch: hosted login gets rate-limiting
+and lockout (see `LAUNCH.md`).**
 
 ### Key hygiene
 
-| | |
-| --- | --- |
-| Where it lives | Only `config/config.yaml` |
-| In Git | **No** — via a named `.gitignore` rule |
-| Past commits | Audited: clean |
+| | Current (local build) | At launch |
+| --- | --- | --- |
+| Provider key | Only `config/config.yaml` (global) | Server-side, per-workspace; users spend credits, never see keys |
+| In Git | **No** — via a named `.gitignore` rule | Same rule; plus secret scanning in CI |
+| Past commits | Audited: clean | Re-audit before launch |
 
 > The rule is deliberately **named**, not `*.yaml`. A wildcard could silently
 > swallow future CI and packaging files with no warning.

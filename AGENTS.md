@@ -1,6 +1,24 @@
 # KALIMA backend — agent guide
 
-Python EPUB/PDF translator. Local-only: server binds `127.0.0.1:8765`, OpenAI-compatible API, thread-based concurrency, resumable on-disk jobs. `app/main.py` is CLI entry, `app/web.py` is web/API server. Full product spec in `readme.md`; this file is only what agents get wrong.
+Python EPUB/PDF translator. Product direction is a **hosted launch**: the code
+still runs local-only today (`127.0.0.1:8765`, OpenAI-compatible API,
+thread-based concurrency, resumable on-disk jobs), and every local-only
+assumption below is marked for migration in `LAUNCH.md`. `app/main.py` is CLI
+entry, `app/web.py` is web/API server. Full product spec in `readme.md`; launch
+plan in `LAUNCH.md`; this file is only what agents get wrong.
+
+## Product direction (read first)
+
+- Default assumption is now **hosted SaaS**, not a local tool. New work must
+  not deepen local-only coupling (loopback checks, single-user DB rows,
+  global provider key). When a shortcut is loopback-justified, say so inline.
+- Current code still binds `127.0.0.1:8765` and stores one global API key in
+  `config/config.yaml`. Until `LAUNCH.md` Phase A lands, keep that behavior —
+  but never present it as the target.
+- Biggest known gap: domain tables (`jobs`, glossaries, library, translation
+  memory) have **no `user_id`** while `users`/`auth_sessions` do. Any new
+  table or query must be user-scoped from day one; do not add more unscoped
+  tables that Phase A will have to migrate.
 
 ## Setup & commands
 
@@ -22,8 +40,8 @@ Python EPUB/PDF translator. Local-only: server binds `127.0.0.1:8765`, OpenAI-co
 - Thread-based parallelism (`max_concurrency: 12`, hard cap in `app/core/config.py`), **not asyncio** — deliberate, preserves commit order + stop/resume. `app/core/rate_limit.py` (`AdaptiveRateLimiter`): halves ceiling on `429`, honors `Retry-After`, stoppable via `stop_event`.
 - `Ctrl+C` at concurrency 12 can waste up to 12 paid requests (finished but uncommitted). Nothing is ever mis-marked complete; resume is always safe.
 - Glossary is snapshotted at job start so chunk 1 uses the same terms as chunk 300. `glossary_mode: off` (default) | `deferred` (+1 LLM call/chunk after) | `inline` (+1/chunk, forces sequential). Proposal = 12 sampled chunks → 1 LLM call → user ticks approves; server-side filter drops terms not literally in the sampled text. Never auto-add during translation.
-- Runtime dirs `data/`, `temp/`, `/output/` are gitignored and never committed (one PDF export hit 99 MB). Leading slash in `/output/` is load-bearing: bare `output/` would also swallow source `app/output/` (format modules). Verify: `git check-ignore -v app/output/convert.py` must print nothing.
-- Security: `Host` checked on **all** methods (DNS-rebinding), `Origin`/`Sec-Fetch-Site` on mutating methods, bind loopback only. Reader images served as local assets, never inline HTML: strip `onerror`/`onload`/`<base>`/`javascript:`/`data:`/remote `src`; SVG with `sandbox` + `nosniff`. `sanitize_html` stays Python-side — the React UI must not re-implement it.
+- Runtime dirs `data/`, `temp/`, `/output/` are gitignored and never committed (one PDF export hit 99 MB). Leading slash in `/output/` is load-bearing: bare `output/` would also swallow source `app/output/` (format modules). Verify: `git check-ignore -v app/output/convert.py` must print nothing. For launch these become per-user storage (volumes first, object storage later) — see `LAUNCH.md`; do not hardcode new paths outside `app/core/paths.py`.
+- Security: `Host` checked on **all** methods (DNS-rebinding), `Origin`/`Sec-Fetch-Site` on mutating methods, bind loopback only **(current local build — the launch target is configurable bind behind a TLS reverse proxy, real CSRF tokens, `Secure` cookies, and login rate-limiting; the old "no brute-force lockout, it would be theatre" reasoning in `app/auth/service.py` applied to loopback-only and DIES at launch)**. Reader images served as local assets, never inline HTML: strip `onerror`/`onload`/`<base>`/`javascript:`/`data:`/remote `src`; SVG with `sandbox` + `nosniff`. `sanitize_html` stays Python-side — the React UI must not re-implement it.
 
 ## Known-broken (don't "fix" by adding one string)
 

@@ -1,23 +1,21 @@
 # KALIMA UI
 
-The new React front end for KALIMA.
+The React front end of KALIMA — and the face of the hosted product.
 
-## Status: un-parked, resuming Phase 2
+## Status: the launch UI
 
-This was **paused** on purpose. The original trigger was the move from a local
-tool to a hosted commercial product, because the local product promises
-`pip install` and `python -m app.web` with no build step, and that promise is
-worth more than component reuse while the tool runs on the user's own machine.
+Product direction is a **hosted launch** (see `LAUNCH.md` at the repo root).
+This UI is the product face, not a local companion: what ships to users is
+this app talking to the hosted API.
 
-That trade has since tipped the other way, for a reason worth recording:
+That reframes the old trade, which is worth recording:
 
-- `app/web.py` is 1,461 lines, and the user-facing pages are now large blocks of
-  HTML, CSS and JavaScript embedded in Python strings — `detail_page.py`,
-  `proposal_page.py`, `account/page.py`, `library/view.py`, `jobs/workspace.py`.
-  That is the failure mode the park was meant to avoid, and it has arrived
-  anyway, only without the benefit of components.
-- A QA review interface and a quality scorer now exist (`quality_scorer.py`).
-  That was listed as a resume trigger.
+- `app/web.py` grew to 1,461+ lines, and the user-facing pages became large
+  blocks of HTML, CSS and JavaScript embedded in Python strings. Components
+  win for a served product; server-rendered strings stay only where the React
+  port has not caught up yet (`/reader`).
+- The local-dev flow below stays for development, but it is no longer the
+  product promise. The promise is the hosted app.
 
 **The rule has not changed: the Python project stays the single source of truth
 and this is a port, not a second implementation.** No feature is built here that
@@ -26,19 +24,19 @@ does not already exist there. When the two disagree, the Python page is correct.
 The `local-first` promise is still the reason this is a *separate* repository
 rather than a rewrite: it can be deleted in one `rm -rf` if the trade reverses.
 
-## Why this is a separate repository
+## Why this is a separate directory
 
-The Python project at `D:\J_BookTranslate_V` is **frozen and untouched**. It already
-exposes everything as a plain HTTP API under `/api/*`, so the UI needs no shared
+The Python API is a plain HTTP API under `/api/*`, so the UI needs no shared
 code, only a network call. That gives:
 
-- zero regression risk to the 291 Python tests
-- the migration can be abandoned by deleting one folder
+- zero regression risk to the Python tests
 - `node_modules` never enters the Python repo's history
+- the UI deploys on its own cadence (static hosting now, served `dist/` from
+  Python at Phase 6 — see `LAUNCH.md` Phase B)
 
 ## Prerequisites
 
-Both processes must run:
+Local development runs both processes:
 
 ```powershell
 # 1. backend (existing project)
@@ -52,9 +50,11 @@ npm run dev                                     # http://localhost:5173
 ```
 
 Vite proxies `/api`, `/reader`, `/downloads`, `/library`, `/account`,
-`/workspace` to the backend, so there is no CORS setup anywhere.
+`/workspace` to the backend, so there is no CORS setup anywhere in dev.
 
-Override the backend address with `JBT_API` if it is not on port 8765.
+Backend address for production: `KALIMA_API` (legacy `JBT_API` fallback),
+default `http://127.0.0.1:8765`. Point it at the hosted API when building
+for launch; never bake a localhost URL into a production build.
 
 ## Commands
 
