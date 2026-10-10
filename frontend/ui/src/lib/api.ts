@@ -773,6 +773,11 @@ export const api = {
    */
   authOAuthStart: (provider: 'google' | 'apple') =>
     request<{ auth_url: string; state: string }>(`/api/auth/oauth/${provider}/start`),
+  /**
+   * Which social providers are fully configured. The login page hides any
+   * provider that is not — a button that can only fail is worse than none.
+   */
+  authOAuthStatus: () => request<{ google: boolean; apple: boolean }>('/api/auth/oauth/status'),
 
   /**
    * Ask the provider whether it is reachable, and whether the chosen model is in

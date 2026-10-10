@@ -24,6 +24,27 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def provider_status() -> dict:
+    """Which social providers are fully configured (safe to offer as buttons).
+
+    A provider counts as configured only when every key its start endpoint
+    requires is present — the UI hides anything else instead of showing a
+    button that can only fail.
+    """
+    google = oauth_config("google")
+    apple = oauth_config("apple")
+    return {
+        "google": bool(str(google.get("client_id") or "").strip() and str(google.get("redirect_uri") or "").strip()),
+        "apple": bool(
+            str(apple.get("client_id") or "").strip()
+            and str(apple.get("team_id") or "").strip()
+            and str(apple.get("key_id") or "").strip()
+            and str(apple.get("private_key") or "").strip()
+            and str(apple.get("redirect_uri") or "").strip()
+        ),
+    }
+
+
 def oauth_config(provider: str) -> dict:
     """Provider settings from config.yaml. Missing keys are the caller's error."""
     try:

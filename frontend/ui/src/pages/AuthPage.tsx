@@ -89,6 +89,9 @@ export function AuthPage(): React.JSX.Element {
   const [showPassword, setShowPassword] = useState<boolean>(false)
   const [code, setCode] = useState<string>('')
   const [codeSent, setCodeSent] = useState<boolean>(false)
+  /* null = still checking; neither button renders until the server says
+     which providers are actually configured. */
+  const [providers, setProviders] = useState<{ google: boolean; apple: boolean } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [busy, setBusy] = useState<boolean>(false)
@@ -128,6 +131,25 @@ export function AuthPage(): React.JSX.Element {
       })
       .catch(() => {
         if (!cancelled) setSessions([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [session])
+
+  /* Which social buttons may render. Unconfigured providers stay hidden:
+     a button that can only fail is worse than none. Fail-closed to hidden
+     when the status call itself fails. */
+  useEffect(() => {
+    if (session !== null) return
+    let cancelled = false
+    void api
+      .authOAuthStatus()
+      .then((status) => {
+        if (!cancelled) setProviders({ google: status.google, apple: status.apple })
+      })
+      .catch(() => {
+        if (!cancelled) setProviders({ google: false, apple: false })
       })
     return () => {
       cancelled = true
@@ -595,23 +617,31 @@ export function AuthPage(): React.JSX.Element {
             </>
           )}
 
-          <p className="mt-[var(--spacing-4)] text-center text-[length:var(--text-caption)]" style={{ color: 'var(--color-text-muted)' }}>
-            {t('auth.orDivider')}
-          </p>
-          <div className="control-row mt-[var(--spacing-2)]">
-            <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => void startOAuth('google')}>
-              <span className="flex items-center gap-[var(--spacing-2)]">
-                <GoogleMark />
-                {t('auth.google')}
-              </span>
-            </button>
-            <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => void startOAuth('apple')}>
-              <span className="flex items-center gap-[var(--spacing-2)]">
-                <AppleMark />
-                {t('auth.apple')}
-              </span>
-            </button>
-          </div>
+          {providers !== null && (providers.google || providers.apple) ? (
+            <>
+              <p className="mt-[var(--spacing-4)] text-center text-[length:var(--text-caption)]" style={{ color: 'var(--color-text-muted)' }}>
+                {t('auth.orDivider')}
+              </p>
+              <div className="control-row mt-[var(--spacing-2)]">
+                {providers.google ? (
+                  <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => void startOAuth('google')}>
+                    <span className="flex items-center gap-[var(--spacing-2)]">
+                      <GoogleMark />
+                      {t('auth.google')}
+                    </span>
+                  </button>
+                ) : null}
+                {providers.apple ? (
+                  <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => void startOAuth('apple')}>
+                    <span className="flex items-center gap-[var(--spacing-2)]">
+                      <AppleMark />
+                      {t('auth.apple')}
+                    </span>
+                  </button>
+                ) : null}
+              </div>
+            </>
+          ) : null}
 
           {method === 'password' ? (
             <p className="mt-[var(--spacing-4)] text-center text-[length:var(--text-small)]" style={{ color: 'var(--color-text-secondary)' }}>

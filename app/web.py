@@ -1289,6 +1289,9 @@ class Handler(BaseHTTPRequestHandler):
                 from app.auth import oauth as auth_oauth
                 self._json(auth_oauth.google_start(db)); return
             except (ValueError, TypeError) as exc: self._json({"error": str(exc)}, 422); return
+        if parsed.path == "/api/auth/oauth/status":
+            from app.auth import oauth as auth_oauth
+            self._json(auth_oauth.provider_status()); return
         if parsed.path == "/api/auth/oauth/apple/start":
             try:
                 from app.auth import oauth as auth_oauth

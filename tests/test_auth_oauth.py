@@ -68,6 +68,15 @@ def test_google_start_needs_config(database):
     assert "oauth.google" in str(exc.value)
 
 
+def test_provider_status_reflects_config(database, monkeypatch):
+    assert oauth.provider_status() == {"google": False, "apple": False}
+    monkeypatch.setattr(
+        oauth, "oauth_config",
+        lambda provider: {"client_id": "x", "redirect_uri": "http://x/cb"} if provider == "google" else {},
+    )
+    assert oauth.provider_status() == {"google": True, "apple": False}
+
+
 def test_google_login_creates_and_relinks_user(database, google_settings):
     started = oauth.google_start(database, )
     assert started["auth_url"].startswith("https://accounts.google.com/")
