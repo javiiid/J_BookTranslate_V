@@ -242,3 +242,105 @@ def test_password_login_throttle_after_failures(database):
     # An untouched account on a clean IP is unaffected.
     _, token = service.login(database, "other@example.com", "s3cret-pass", ip="10.0.0.10")
     assert token
+
+
+def test_auth_tables_include_events_and_last_seen(database):
+    tables = {row["name"] for row in database.fetch_all(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('users', 'auth_sessions', 'auth_events')")}
+    assert tables == {"users", "auth_sessions", "auth_events"}
+    columns = {row["name"] for row in database.fetch_all("PRAGMA table_info(auth_sessions)")}
+    assert "last_seen_at" in columns
+    indexes = {row["name"] for row in database.fetch_all(
+        "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='auth_events'")}
+    assert "idx_auth_events_user_time" in indexes
+
+
+def test_login_and_logout_are_recorded(database):
+    service.signup(database, "user@example.com", "s3cret-pass", "Test User")
+    _, token = service.login(database, "user@example.com", "s3cret-pass", ip="10.0.0.1")
+    events = service.list_auth_events(database, token)
+    assert [event["event"] for event in events] == ["login"]
+    assert events[0]["detail"] == "password"
+    assert events[0]["ip"] == "10.0.0.1"
+    service.logout(database, token)
+    # The logged-out token cannot read the trail; a fresh login can.
+    _, fresh = service.login(database, "user@example.com", "s3cret-pass")
+    assert [event["event"] for event in service.list_auth_events(database, fresh)] == [
+        "login", "logout", "login",
+    ]
+
+
+def test_wrong_password_on_known_account_is_recorded_but_unknown_email_is_not(database):
+    service.signup(database, "user@example.com", "s3cret-pass", "Test User")
+    with pytest.raises(LookupError):
+        service.login(database, "user@example.com", "wrong-pass")
+    with pytest.raises(LookupError):
+        service.login(database, "ghost@example.com", "wrong-pass")
+    _, token = service.login(database, "user@example.com", "s3cret-pass")
+    kinds = [(event["event"], event["detail"]) for event in service.list_auth_events(database, token)]
+    assert ("login_failed", "password") in kinds
+    assert sum(1 for kind in kinds if kind[0] == "login_failed") == 1
+
+
+def test_email_code_login_is_recorded(database):
+    captured = []
+    service.request_email_code(database, "new@example.com", sender=make_capturing_sender(captured))
+    _, token = service.verify_email_code(database, "new@example.com", captured[0][1])
+    assert service.list_auth_events(database, token)[0]["detail"] == "email-code"
+
+
+def test_last_seen_starts_at_login_and_refreshes_when_stale(database):
+    service.signup(database, "user@example.com", "s3cret-pass", "Test User")
+    _, token = service.login(database, "user@example.com", "s3cret-pass")
+    items = service.list_sessions(database, token)
+    assert len(items) == 1
+    assert items[0]["last_seen_at"] == items[0]["created_at"]
+    digest = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    database.execute(
+        "UPDATE auth_sessions SET last_seen_at='2000-01-01T00:00:00+00:00' WHERE token_hash=?", (digest,))
+    assert service.user_from_token(database, token) is not None
+    row = database.fetch_one("SELECT last_seen_at FROM auth_sessions WHERE token_hash=?", (digest,))
+    assert row["last_seen_at"] != "2000-01-01T00:00:00+00:00"
+    assert service.list_sessions(database, token)[0]["last_seen_at"] == row["last_seen_at"]
+    # A fresh stamp is left alone: no write churn on every request.
+    assert service.user_from_token(database, token) is not None
+    kept = database.fetch_one("SELECT last_seen_at FROM auth_sessions WHERE token_hash=?", (digest,))
+    assert kept["last_seen_at"] == row["last_seen_at"]
+
+
+def test_revoke_and_password_change_are_recorded(database):
+    service.signup(database, "user@example.com", "s3cret-pass", "Test User")
+    _, first = service.login(database, "user@example.com", "s3cret-pass")
+    _, second = service.login(database, "user@example.com", "s3cret-pass")
+    items = service.list_sessions(database, first)
+    other = next(item for item in items if not item["current"])
+    service.revoke_session(database, first, other["id"])
+    _, third = service.login(database, "user@example.com", "s3cret-pass")
+    assert third
+    service.change_password(database, first, "s3cret-pass", "new-secret-pass")
+    events = {event["event"]: event["detail"] for event in service.list_auth_events(database, first)}
+    assert events["session_revoked"] == other["id"][:8]
+    assert events["sessions_revoked"] == "1"
+    assert events["password_changed"] == ""
+
+
+def test_auth_events_are_pruned_to_newest_keep(database):
+    service.signup(database, "user@example.com", "s3cret-pass", "Test User")
+    _, token = service.login(database, "user@example.com", "s3cret-pass")
+    user = service.user_from_token(database, token)
+    assert user is not None
+    for number in range(210):
+        service.record_auth_event(database, user["id"], "login", detail=str(number))
+    details = {row["detail"] for row in database.fetch_all("SELECT detail FROM auth_events")}
+    assert len(details) == service.AUTH_EVENT_KEEP
+    assert "209" in details
+    assert "0" not in details
+
+
+def test_list_auth_events_requires_login_and_caps_limit(database):
+    service.signup(database, "user@example.com", "s3cret-pass", "Test User")
+    _, token = service.login(database, "user@example.com", "s3cret-pass")
+    with pytest.raises(LookupError):
+        service.list_auth_events(database, "bogus")
+    assert len(service.list_auth_events(database, token, 500)) <= 100
+    assert len(service.list_auth_events(database, token, "junk")) >= 1

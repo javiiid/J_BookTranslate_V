@@ -31,7 +31,7 @@ plan in `LAUNCH.md`; this file is only what agents get wrong.
 ## Test
 
 - `python -m pytest -q` (full suite, ~291 tests). Single module: `python -m pytest tests/test_library.py -q`.
-- **Stop `python -m app.web` before testing.** It holds the SQLite lock → ~53 spurious failures.
+- Tests never touch `data/kalima.db`: `tests/conftest.py` points `KALIMA_DB_PATH` at a temp file before any app import and swaps the `db` singleton per test. No need to stop `python -m app.web`. Manual override: `$env:KALIMA_DB_PATH = "D:\tmp\kalima-test.db"`.
 - If system temp is restricted: `python -m pytest -q -p no:cacheprovider --basetemp .test-tmp\full`.
 - `pytest.ini` only sets `pythonpath=. testpaths=tests`. No formatter/linter/typecheck enforced — match nearby code (4-space, `snake_case` funcs, `PascalCase` classes).
 

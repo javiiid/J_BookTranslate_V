@@ -734,6 +734,7 @@ export const en: Record<StringKey, string> = {
   'monitor.ov.updated': 'Last change',
   'monitor.ov.access': 'Outputs and access',
   'monitor.ov.download': 'Download main output',
+  'monitor.ov.downloadAsset': 'Download',
   'monitor.ov.openReader': 'Open in Reader',
   'monitor.ov.noOutputs': 'No downloadable output yet.',
   'monitor.ov.outputs': '{count} outputs',

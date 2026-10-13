@@ -149,12 +149,13 @@ def _open_session(db, user_id: int) -> str:
     token = secrets.token_urlsafe(32)
     timestamp = _now()
     db.execute(
-        "INSERT INTO auth_sessions(token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
+        "INSERT INTO auth_sessions(token_hash, user_id, created_at, expires_at, last_seen_at) VALUES (?, ?, ?, ?, ?)",
         (
             hashlib.sha256(token.encode("utf-8")).hexdigest(),
             user_id,
             timestamp,
             (datetime.now(UTC) + timedelta(days=SESSION_DAYS)).isoformat(),
+            timestamp,
         ),
     )
     return token
@@ -233,7 +234,11 @@ def google_callback(db, code: object, state: object, http_post=None, http_get=No
         db, provider="google", sub=sub, email=address,
         name=str(claims.get("name") or ""), verified=verified,
     )
-    return _public_user(db, row["id"]), _open_session(db, row["id"])
+    from app.auth.service import record_auth_event
+
+    token = _open_session(db, row["id"])
+    record_auth_event(db, row["id"], "login", detail="google")
+    return _public_user(db, row["id"]), token
 
 
 # ============================================================
@@ -392,4 +397,8 @@ def apple_callback(db, code: object, state: object, http_post=None, http_get=Non
         db, provider="apple", sub=sub, email=address,
         name="", verified=bool(email and claims.get("email_verified")),
     )
-    return _public_user(db, row["id"]), _open_session(db, row["id"])
+    from app.auth.service import record_auth_event
+
+    token = _open_session(db, row["id"])
+    record_auth_event(db, row["id"], "login", detail="apple")
+    return _public_user(db, row["id"]), token

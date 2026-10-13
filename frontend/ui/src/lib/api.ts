@@ -5,7 +5,7 @@
  * `docs/inventory/` (Phase 0), not guessed. When the backend contract changes,
  * `npm run check:api` re-captures and the diff shows the drift.
  */
-import type { AuthMeResponse, AuthResponse, AuthSession } from './auth.ts'
+import type { AuthEvent, AuthMeResponse, AuthResponse, AuthSession } from './auth.ts'
 
 export type JobStatus =
   | 'queued'
@@ -741,6 +741,7 @@ export const api = {
       body: JSON.stringify(body),
     }),
   authSessions: () => request<{ items: AuthSession[] }>('/api/auth/sessions'),
+  authEvents: () => request<{ items: AuthEvent[] }>('/api/auth/events'),
   authRevokeSession: (body: { session_id: string }) =>
     request<{ ok: boolean }>('/api/auth/sessions/revoke', {
       method: 'POST',

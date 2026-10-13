@@ -1,13 +1,17 @@
+import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   api,
+  ApiError,
   type AccountPortal,
   type MarketplaceItem,
   type PortalApiKey,
   type ProviderConfig,
   type ProviderTestResult,
 } from '@/lib/api'
-import { fa, faDate, maskSecretLike } from '@/lib/format'
+import { validPassword, type AuthEvent, type AuthSession } from '@/lib/auth.ts'
+import { fa, faAgo, faDate, maskSecretLike } from '@/lib/format'
 import { useTheme } from '@/hooks/useTheme'
 
 /**
@@ -52,6 +56,10 @@ import { useTheme } from '@/hooks/useTheme'
  *   glossaries. In a local install installing one copies a file; it is not a
  *   purchase, and the price is shown as a fact without offering to charge.
  * - **API keys, masked.** See `maskSecretLike` in `lib/format.ts`.
+ * - **Security.** Change-password (proves the current one, kills other
+ *   sessions), signed-in devices with last activity and per-session revoke,
+ *   revoke-all, and the login/logout audit trail — the leaked-cookie
+ *   recovery path, surfaced here instead of only on /auth.
  */
 
 const KIND_FA: Record<string, string> = {
@@ -350,6 +358,294 @@ function UsagePanel() {
 }
 
 /* ------------------------------------------------------------------ */
+/* Security                                                            */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Leaked-cookie recovery path, on /account where people look for it.
+ *
+ * The backend already owns the truth (`app/auth/service.py`: change-password
+ * proves the current one and kills other sessions, revoke-all keeps only the
+ * caller, per-session revoke by id prefix) and /auth already surfaces it —
+ * but nobody hunts for account recovery on the login page. So it lives here
+ * too: change the password, see the signed-in devices, leave them all.
+ */
+function SecurityPanel() {
+  const cache = useQueryClient()
+  const [currentPassword, setCurrentPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [formError, setFormError] = useState<string | null>(null)
+
+  const sessions = useQuery({
+    queryKey: ['sessions'],
+    queryFn: api.authSessions,
+    staleTime: 30_000,
+    retry: false,
+  })
+  const events = useQuery({
+    queryKey: ['auth-events'],
+    queryFn: api.authEvents,
+    staleTime: 30_000,
+    retry: false,
+  })
+
+  function refreshSecurity(): void {
+    void cache.invalidateQueries({ queryKey: ['sessions'] })
+    void cache.invalidateQueries({ queryKey: ['auth-events'] })
+  }
+
+  const change = useMutation({
+    mutationFn: (body: { current_password: string; new_password: string }) =>
+      api.authChangePassword(body),
+    onSuccess: () => {
+      setCurrentPassword('')
+      setNewPassword('')
+      setFormError(null)
+      refreshSecurity()
+    },
+  })
+
+  const revokeOne = useMutation({
+    mutationFn: (id: string) => api.authRevokeSession({ session_id: id }),
+    onSuccess: () => refreshSecurity(),
+  })
+
+  const revokeAll = useMutation({
+    mutationFn: () => api.authRevokeAll(),
+    onSuccess: () => refreshSecurity(),
+  })
+
+  /* The portal itself loads without a login, so a visitor meets this panel
+     logged out: offer the login, not an error box. */
+  if (sessions.error instanceof ApiError && sessions.error.status === 401) {
+    return (
+      <Panel title="امنیت" id="security-heading">
+        <p className="empty">
+          برای تغییر گذرواژه و مدیریت دستگاه‌ها اول{' '}
+          <Link to="/login">وارد شوید</Link>.
+        </p>
+      </Panel>
+    )
+  }
+
+  const items: AuthSession[] = sessions.data?.items ?? []
+  const log: AuthEvent[] = events.data?.items ?? []
+  const busy = change.isPending || revokeOne.isPending || revokeAll.isPending
+
+  function submitPassword(event: React.FormEvent): void {
+    event.preventDefault()
+    if (change.isPending) return
+    if (!validPassword(currentPassword) || !validPassword(newPassword)) {
+      setFormError('گذرواژه باید حداقل ۸ نویسه باشد.')
+      return
+    }
+    setFormError(null)
+    change.mutate({
+      current_password: currentPassword,
+      new_password: newPassword,
+    })
+  }
+
+  return (
+    <Panel
+      title="امنیت"
+      id="security-heading"
+      note="اگر کوکی‌تان لو رفته باشد، با عوض‌کردن گذرواژه یا خروج از همه دستگاه‌ها، نشست‌های دزدیده‌شده بلافاصله از کار می‌افتند."
+    >
+      <form
+        className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end"
+        onSubmit={submitPassword}
+      >
+        <label className="grid min-w-0 gap-1 text-[length:var(--text-label)]">
+          گذرواژه فعلی
+          <input
+            type="password"
+            autoComplete="current-password"
+            className="input min-w-0"
+            value={currentPassword}
+            onChange={(event) => setCurrentPassword(event.target.value)}
+          />
+        </label>
+        <label className="grid min-w-0 gap-1 text-[length:var(--text-label)]">
+          گذرواژه جدید
+          <input
+            type="password"
+            autoComplete="new-password"
+            className="input min-w-0"
+            value={newPassword}
+            onChange={(event) => setNewPassword(event.target.value)}
+          />
+        </label>
+        <button
+          type="submit"
+          className="btn btn-secondary"
+          disabled={change.isPending}
+        >
+          {change.isPending ? 'در حال تغییر…' : 'تغییر گذرواژه'}
+        </button>
+      </form>
+
+      {formError ? (
+        <p role="alert" className="alert alert-error mt-3">
+          {formError}
+        </p>
+      ) : null}
+      {change.isError ? (
+        <p role="alert" className="alert alert-error mt-3">
+          {change.error instanceof Error
+            ? change.error.message
+            : 'تغییر گذرواژه ممکن نشد.'}
+        </p>
+      ) : null}
+      {change.isSuccess ? (
+        <p role="status" className="alert alert-success mt-3">
+          گذرواژه عوض شد؛ همه دستگاه‌های دیگر خارج شدند.
+        </p>
+      ) : null}
+
+      <h3 className="mt-5 text-[length:var(--text-small)] font-extrabold">
+        دستگاه‌های واردشده
+      </h3>
+      {sessions.isPending ? (
+        <div className="skeleton mt-2" style={{ height: 64 }} />
+      ) : sessions.isError ? (
+        <p role="alert" className="alert alert-error mt-2">
+          دریافت فهرست دستگاه‌ها ممکن نشد.
+        </p>
+      ) : items.length === 0 ? (
+        <p className="empty mt-2">نشستی ثبت نشده است.</p>
+      ) : (
+        <ul className="mt-2 grid gap-2">
+          {items.map((item) => (
+            <li
+              key={item.id}
+              className="surface-card flex min-w-0 flex-wrap items-center justify-between gap-3 p-3"
+            >
+              <div className="min-w-0">
+                {/* dir="ltr" on the truncating element itself: in an RTL line
+                    the ellipsis would otherwise cut the identifying head. */}
+                <span
+                  dir="ltr"
+                  className="chunk-id block truncate text-right"
+                >
+                  {item.id}…
+                </span>
+                <span
+                  className="block text-[length:var(--text-caption)]"
+                  style={{ color: 'var(--color-text-muted)' }}
+                >
+                  ساخته‌شده {faDate(item.created_at)} · آخرین فعالیت{' '}
+                  {faAgo(item.last_seen_at) || faDate(item.last_seen_at)}
+                </span>
+              </div>
+              {item.current ? (
+                <span className="badge badge-success">این دستگاه</span>
+              ) : (
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={() => revokeOne.mutate(item.id)}
+                  disabled={busy}
+                >
+                  باطل کردن
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <div className="mt-4 flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          className="btn btn-secondary"
+          onClick={() => revokeAll.mutate()}
+          disabled={busy || items.filter((item) => !item.current).length === 0}
+        >
+          {revokeAll.isPending
+            ? 'در حال خروج…'
+            : 'خروج از همه دستگاه‌های دیگر'}
+        </button>
+        {revokeAll.isSuccess ? (
+          <p role="status" className="alert alert-success">
+            {fa(revokeAll.data.closed)} دستگاه دیگر خارج شد.
+          </p>
+        ) : null}
+        {revokeAll.isError ? (
+          <p role="alert" className="alert alert-error">
+            خروج از دستگاه‌ها ممکن نشد.
+          </p>
+        ) : null}
+      </div>
+
+      <h3 className="mt-5 text-[length:var(--text-small)] font-extrabold">
+        رویدادهای ورود و خروج
+      </h3>
+      {events.isPending ? (
+        <div className="skeleton mt-2" style={{ height: 64 }} />
+      ) : events.isError ? (
+        <p role="alert" className="alert alert-error mt-2">
+          دریافت رویدادها ممکن نشد.
+        </p>
+      ) : log.length === 0 ? (
+        <p className="empty mt-2">رویدادی ثبت نشده است.</p>
+      ) : (
+        <ul className="mt-2 grid gap-2">
+          {log.slice(0, 20).map((entry) => (
+            <li
+              key={entry.id}
+              className="surface-card flex min-w-0 flex-wrap items-center justify-between gap-3 p-3"
+            >
+              <div className="min-w-0">
+                <strong className="block text-[length:var(--text-body)]">
+                  {EVENT_FA[entry.event] ?? entry.event}
+                </strong>
+                <span
+                  className="block text-[length:var(--text-caption)]"
+                  style={{ color: 'var(--color-text-muted)' }}
+                >
+                  {eventDetail(entry)}
+                  {entry.ip ? ` · ${entry.ip}` : ''}
+                  {' · '}
+                  {faAgo(entry.created_at) || faDate(entry.created_at)}
+                </span>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Panel>
+  )
+}
+
+const EVENT_FA: Record<string, string> = {
+  login: 'ورود',
+  logout: 'خروج',
+  login_failed: 'ورود ناموفق',
+  password_changed: 'تغییر گذرواژه',
+  session_revoked: 'باطل‌کردن یک نشست',
+  sessions_revoked: 'خروج از دستگاه‌های دیگر',
+}
+
+const METHOD_FA: Record<string, string> = {
+  password: 'گذرواژه',
+  'email-code': 'کد ایمیل',
+  google: 'گوگل',
+  apple: 'اپل',
+}
+
+/** Human line for the audit detail: a method, a closed-session count, or raw. */
+function eventDetail(entry: AuthEvent): string {
+  if (entry.event === 'login' || entry.event === 'login_failed') {
+    return METHOD_FA[entry.detail] ?? entry.detail
+  }
+  if (entry.event === 'sessions_revoked' && /^\d+$/.test(entry.detail)) {
+    return `${fa(Number(entry.detail))} نشست`
+  }
+  return entry.detail
+}
+
+/* ------------------------------------------------------------------ */
 /* API keys                                                            */
 /* ------------------------------------------------------------------ */
 
@@ -621,6 +917,7 @@ export function AccountPage() {
       <SetupPanel config={config.data} />
       <WorkPanel portal={data} />
       <UsagePanel />
+      <SecurityPanel />
       <KeysPanel keys={keys} />
       <PacksPanel items={packs} />
     </main>

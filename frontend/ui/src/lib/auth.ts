@@ -26,7 +26,20 @@ export interface AuthSession {
   id: string
   created_at: string
   expires_at: string
+  /** Last request seen on this session (ISO). Falls back to created_at. */
+  last_seen_at: string
   current: boolean
+}
+
+/** One row of the login/logout audit trail (`auth_events` owns the truth). */
+export interface AuthEvent {
+  id: number
+  /** login | logout | login_failed | password_changed | session_revoked | sessions_revoked */
+  event: string
+  created_at: string
+  ip: string
+  /** Method (password, email-code, google, apple), a count, or an id prefix. */
+  detail: string
 }
 
 /** True for an address the server would accept (trimmed, one @, one dot). */

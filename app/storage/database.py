@@ -1,6 +1,7 @@
 """SQLite persistence layer for jobs, files, terminology and observability."""
 from __future__ import annotations
 import json
+import os
 import sqlite3
 import threading
 from datetime import datetime, timezone
@@ -15,16 +16,35 @@ UTC = timezone.utc
 # copies (never moves) and the old file stays as a pre-rename backup.
 LEGACY_DB_NAME = "jbooktranslate.db"
 DB_NAME = "kalima.db"
-DB_PATH = ensure_dir("data") / DB_NAME
+# Test isolation: KALIMA_DB_PATH points the whole app (including the `db`
+# singleton below) at another SQLite file. Pytest sets it before any app
+# import (see tests/conftest.py), so a running server keeps data/kalima.db
+# while tests use a temp file — no shutdown needed.
+DB_ENV_VAR = "KALIMA_DB_PATH"
+
+
+def resolve_db_path() -> Path:
+    """Return the live database file, honouring KALIMA_DB_PATH first."""
+    override = (os.environ.get(DB_ENV_VAR) or "").strip().strip("\"'")
+    if override:
+        return Path(override).expanduser()
+    return ensure_dir("data") / DB_NAME
+
+
+DB_PATH = resolve_db_path()
 # Bump when the schema or any _migrate_* changes: a bump takes exactly one
 # timestamped backup BEFORE migrating. See backup_database().
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 3
 BACKUP_KEEP = 5
 BACKUP_MAX_AGE_SECONDS = 86400
 
 class Database:
-    def __init__(self, path: str | Path = DB_PATH):
-        self.path = Path(path); self.path.parent.mkdir(parents=True, exist_ok=True); self._lock = threading.RLock(); self._adopt_legacy_file_for(self.path); self.initialize()
+    def __init__(self, path: str | Path | None = None):
+        # path=None resolves via the env var at call time, not def time: a
+        # default arg of DB_PATH would freeze the import-time value and ignore
+        # a later KALIMA_DB_PATH set by tests/conftest.py.
+        resolved = resolve_db_path() if path is None else Path(path)
+        self.path = resolved; self.path.parent.mkdir(parents=True, exist_ok=True); self._lock = threading.RLock(); self._adopt_legacy_file_for(self.path); self.initialize()
 
     @staticmethod
     def _adopt_legacy_file_for(path: Path) -> Path | None:
@@ -62,6 +82,13 @@ class Database:
         CREATE TABLE IF NOT EXISTS translation_profiles (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, system_prompt TEXT NOT NULL, temperature REAL DEFAULT 0.2, preserve_html INTEGER DEFAULT 1, preserve_quotes INTEGER DEFAULT 1, glossary_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, FOREIGN KEY(glossary_id) REFERENCES glossaries(id) ON DELETE SET NULL);
         CREATE TABLE IF NOT EXISTS providers (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, base_url TEXT NOT NULL, api_key_ref TEXT DEFAULT '', default_model TEXT DEFAULT '', enabled INTEGER DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL);
+        -- The monitor reads one job's events in time order
+        -- (WHERE job_id=? ORDER BY timestamp), and job_events is append-only,
+        -- so it outgrows every other table on large books. Without this the
+        -- read is a full table scan on every monitor refresh.
+        -- job_chunks needs no twin: its PRIMARY KEY starts with job_id, so
+        -- WHERE job_id=? already uses the PK's leftmost prefix.
+        CREATE INDEX IF NOT EXISTS idx_job_events_job_time ON job_events(job_id, timestamp);
         """
         with self._lock, self.connect() as connection:
             tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
@@ -277,6 +304,24 @@ class Database:
             created_at TEXT NOT NULL
         )""")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_auth_attempts_scope ON auth_attempts(scope_key, created_at)")
+        # Sessions carry their last activity so the device list can show it.
+        # Old rows are backfilled from created_at (the login moment), which is
+        # the honest value when nothing newer was ever recorded.
+        existing_sessions = {row[1] for row in connection.execute("PRAGMA table_info(auth_sessions)").fetchall()}
+        if "last_seen_at" not in existing_sessions:
+            connection.execute("ALTER TABLE auth_sessions ADD COLUMN last_seen_at TEXT")
+        connection.execute("UPDATE auth_sessions SET last_seen_at=created_at WHERE last_seen_at IS NULL")
+        # Login/logout audit trail. Bounded per user (see record_auth_event):
+        # a brute-force storm must not turn the security log into the bloat.
+        connection.execute("""CREATE TABLE IF NOT EXISTS auth_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+            event TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            ip TEXT NOT NULL DEFAULT '',
+            detail TEXT NOT NULL DEFAULT ''
+        )""")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_auth_events_user_time ON auth_events(user_id, created_at)")
 
     @staticmethod
     def _seed_defaults(connection):

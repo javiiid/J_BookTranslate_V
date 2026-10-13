@@ -749,8 +749,8 @@ python -m pytest tests/test_model_selection.py -q
 python -m pytest -q -p no:cacheprovider --basetemp .test-tmp\full
 ```
 
-> ⚠️ **The server must be stopped.** A running `python -m app.web` holds the
-> SQLite lock and produces ~53 spurious failures.
+> Tests use an isolated temp database via `KALIMA_DB_PATH`
+> (`tests/conftest.py`) — a running `python -m app.web` no longer blocks them.
 
 ### Frontend tests
 

@@ -195,12 +195,19 @@ class TestContextReachesTheModel:
     def test_the_payload_is_identical_either_way(self, monkeypatch):
         without = _Recorder()
         with_context = _Recorder()
-        translate_chunk(client=without, text="<p>She left.</p>", chunk_id="c2")
+        # Same text twice must reach the provider twice here: the memory
+        # would rightly serve the second call for free, leaving no payload
+        # to compare. Bypass it; the payload shape is what this pins.
+        translate_chunk(
+            client=without, text="<p>She left.</p>", chunk_id="c2",
+            memory_db=False,
+        )
         translate_chunk(
             client=with_context,
             text="<p>She left.</p>",
             chunk_id="c2",
             context_before="He had already gone.",
+            memory_db=False,
         )
         # What the model is asked to translate must not depend on whether context
         # was supplied, or the stored translation would not map to the chunk.

@@ -33,6 +33,13 @@ export function OverviewTab({ job }: { job: Job }) {
   const percent = Math.max(0, Math.min(100, progress.percent))
   const healthColor =
     job.health === 'red' ? 'var(--color-error)' : job.health === 'yellow' ? 'var(--color-warning)' : 'var(--color-success)'
+  const assetEntries = Object.entries(job.asset_downloads ?? {})
+  // The hero button already serves the main file; listing its 'main' asset
+  // again would offer the same bytes twice under two URLs. With no hero
+  // download, keep everything so the file stays reachable.
+  const assetRows = job.download
+    ? assetEntries.filter(([name]) => name !== 'main')
+    : assetEntries
 
   return (
     <div className="grid gap-[var(--spacing-4)]">
@@ -108,30 +115,57 @@ export function OverviewTab({ job }: { job: Job }) {
         <h2 id="ov-actions" className="mb-[var(--spacing-3)] text-[length:var(--text-h3)] font-extrabold">
           {t('monitor.ov.access')}
         </h2>
-        <div className="flex flex-wrap gap-2">
-          {job.download ? (
-            <a className="btn btn-secondary" href={job.download}>
-              {t('monitor.ov.download')}
-            </a>
-          ) : null}
-          {job.reader ? (
-            <a className="btn btn-secondary" href={job.reader}>
-              {t('monitor.ov.openReader')}
-            </a>
-          ) : null}
-          {!job.download && !job.reader ? (
-            <span className="text-[length:var(--text-label)]" style={{ color: 'var(--color-text-muted)' }}>
-              {t('monitor.ov.noOutputs')}
-            </span>
-          ) : null}
-        </div>
-        {Object.keys(job.assets ?? {}).length > 0 ? (
-          <p className="mt-[var(--spacing-3)] text-[length:var(--text-label)]" style={{ color: 'var(--color-text-muted)' }}>
-            {t('monitor.ov.outputs', { count: fa(Object.keys(job.assets).length) })}:{' '}
-            {Object.keys(job.assets)
-              .map((name) => assetLabel(name))
-              .join(lang === 'en' ? ', ' : '، ')}
-          </p>
+        {/* Primary action first: the main file is what almost every visit
+            wants. Secondary outputs get their own rows below instead of a
+            bare count line that names files nobody can click. */}
+        {(job.download || job.reader) && (
+          <div className="flex flex-wrap gap-2">
+            {job.download ? (
+              <a className="btn btn-primary" href={job.download}>
+                {t('monitor.ov.download')}
+              </a>
+            ) : null}
+            {job.reader ? (
+              <a className="btn btn-secondary" href={job.reader}>
+                {t('monitor.ov.openReader')}
+              </a>
+            ) : null}
+          </div>
+        )}
+        {assetRows.length > 0 ? (
+          <div className="mt-[var(--spacing-4)]">
+            <p
+              className="mb-[var(--spacing-2)] text-[length:var(--text-caption)] tabular-nums"
+              style={{ color: 'var(--color-text-muted)' }}
+            >
+              {t('monitor.ov.outputs', { count: fa(assetRows.length) })}
+            </p>
+            <ul className="grid gap-2">
+              {assetRows.map(([name, url]) => (
+                <li key={name}>
+                  <a
+                    className="surface-card flex min-w-0 items-center justify-between gap-3 p-3"
+                    href={url}
+                  >
+                    <strong
+                      className="min-w-0 truncate text-[length:var(--text-small)]"
+                      title={assetLabel(name)}
+                    >
+                      {assetLabel(name)}
+                    </strong>
+                    <span className="btn btn-ghost shrink-0">
+                      {t('monitor.ov.downloadAsset')}
+                    </span>
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+        {!job.download && !job.reader && assetRows.length === 0 ? (
+          <span className="text-[length:var(--text-label)]" style={{ color: 'var(--color-text-muted)' }}>
+            {t('monitor.ov.noOutputs')}
+          </span>
         ) : null}
       </section>
     </div>

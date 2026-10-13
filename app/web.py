@@ -77,6 +77,7 @@ from app.auth.service import (
     signup as auth_signup,
     user_from_token,
     change_password as auth_change_password,
+    list_auth_events as auth_list_events,
     list_sessions as auth_list_sessions,
     revoke_session as auth_revoke_session,
     revoke_all_sessions as auth_revoke_all_sessions,
@@ -1282,6 +1283,16 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/api/auth/sessions":
             try:
                 items = auth_list_sessions(db, self._session_token())
+            except LookupError as exc: self._json({"error": str(exc)}, 401); return
+            self._json({"items": items}); return
+        if parsed.path == "/api/auth/events":
+            try:
+                query = parse_qs(parsed.query)
+                try:
+                    limit = int((query.get("limit") or ["50"])[0])
+                except (TypeError, ValueError):
+                    limit = 50
+                items = auth_list_events(db, self._session_token(), limit)
             except LookupError as exc: self._json({"error": str(exc)}, 401); return
             self._json({"items": items}); return
         if parsed.path == "/api/auth/oauth/google/start":

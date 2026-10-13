@@ -31,6 +31,12 @@ UTC = timezone.utc
 
 SESSION_COOKIE = "kalima_session"
 SESSION_DAYS = 30
+# Device-list activity granularity: user_from_token touches last_seen_at at
+# most this often, so request polling does not become WAL write churn.
+LAST_SEEN_REFRESH_SECONDS = 300
+# Login/logout audit trail keeps this many newest rows per user, so a
+# brute-force storm cannot turn the security log into storage bloat.
+AUTH_EVENT_KEEP = 200
 
 _HASH_ALGORITHM = "pbkdf2-sha256"
 _PBKDF2_ITERATIONS = 210_000
@@ -147,6 +153,11 @@ def login(db, email: object, password: object, ip: object = None) -> tuple[dict,
     if row is None or not verify_password(str(password or ""), row["password_hash"] or ""):
         if row is None:
             _dummy_verify()
+        else:
+            # A wrong password on a real account is exactly what the owner's
+            # security log is for. Unknown emails stay out: logging them would
+            # let anyone write arbitrary rows keyed by nothing.
+            record_auth_event(db, row["id"], "login_failed", ip=raw_ip, detail="password")
         record_auth_failure(db, "password", address)
         if raw_ip:
             record_auth_failure(db, "password-ip", raw_ip)
@@ -154,14 +165,16 @@ def login(db, email: object, password: object, ip: object = None) -> tuple[dict,
     token = secrets.token_urlsafe(32)
     timestamp = _now()
     db.execute(
-        "INSERT INTO auth_sessions(token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
+        "INSERT INTO auth_sessions(token_hash, user_id, created_at, expires_at, last_seen_at) VALUES (?, ?, ?, ?, ?)",
         (
             hashlib.sha256(token.encode("utf-8")).hexdigest(),
             row["id"],
             timestamp,
             (datetime.now(UTC) + timedelta(days=SESSION_DAYS)).isoformat(),
+            timestamp,
         ),
     )
+    record_auth_event(db, row["id"], "login", ip=raw_ip, detail="password")
     return user_public(row), token
 
 
@@ -170,10 +183,11 @@ def user_from_token(db, token: object) -> dict | None:
     raw = str(token or "")
     if not raw:
         return None
+    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()
     row = db.fetch_one(
-        "SELECT u.*, s.expires_at AS expires_at FROM users u"
+        "SELECT u.*, s.expires_at AS expires_at, s.last_seen_at AS last_seen_at FROM users u"
         " JOIN auth_sessions s ON s.user_id=u.id WHERE s.token_hash=?",
-        (hashlib.sha256(raw.encode("utf-8")).hexdigest(),),
+        (digest,),
     )
     if row is None:
         return None
@@ -184,20 +198,44 @@ def user_from_token(db, token: object) -> dict | None:
     if expired:
         db.execute(
             "DELETE FROM auth_sessions WHERE token_hash=?",
-            (hashlib.sha256(raw.encode("utf-8")).hexdigest(),),
+            (digest,),
         )
         return None
+    _touch_last_seen(db, digest, row.get("last_seen_at"))
     return user_public(row)
+
+
+def _touch_last_seen(db, digest: str, last_seen: object) -> None:
+    """Record session activity, at most once per ``LAST_SEEN_REFRESH_SECONDS``.
+
+    Opportunistic on purpose: user_from_token runs on nearly every
+    authenticated request, and a write per request would be pure WAL churn.
+    A 5-minute granularity is plenty for a "last active" device list.
+    """
+    try:
+        fresh = (
+            last_seen
+            and datetime.now(UTC) - datetime.fromisoformat(str(last_seen))
+            < timedelta(seconds=LAST_SEEN_REFRESH_SECONDS)
+        )
+    except (TypeError, ValueError):
+        fresh = False
+    if not fresh:
+        db.execute(
+            "UPDATE auth_sessions SET last_seen_at=? WHERE token_hash=?",
+            (_now(), digest),
+        )
 
 
 def logout(db, token: object) -> None:
     """Close a session. Unknown tokens are a no-op, never an error."""
     raw = str(token or "")
     if raw:
-        db.execute(
-            "DELETE FROM auth_sessions WHERE token_hash=?",
-            (hashlib.sha256(raw.encode("utf-8")).hexdigest(),),
-        )
+        digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+        row = db.fetch_one("SELECT user_id FROM auth_sessions WHERE token_hash=?", (digest,))
+        db.execute("DELETE FROM auth_sessions WHERE token_hash=?", (digest,))
+        if row is not None:
+            record_auth_event(db, row["user_id"], "logout")
 
 
 def _session_user_id(db, token: object) -> int | None:
@@ -219,7 +257,7 @@ def list_sessions(db, token: object) -> list[dict]:
         raise LookupError("وارد نشده‌اید.")
     current = _token_hash(str(token or ""))
     rows = db.fetch_all(
-        "SELECT token_hash, created_at, expires_at FROM auth_sessions"
+        "SELECT token_hash, created_at, expires_at, last_seen_at FROM auth_sessions"
         " WHERE user_id=? ORDER BY created_at DESC",
         (user_id,),
     )
@@ -228,6 +266,9 @@ def list_sessions(db, token: object) -> list[dict]:
             "id": row["token_hash"][:16],
             "created_at": row["created_at"],
             "expires_at": row["expires_at"],
+            # Old rows predate the column; the migrate backfills from
+            # created_at, and this fallback keeps the shape honest anyway.
+            "last_seen_at": row.get("last_seen_at") or row["created_at"],
             "current": row["token_hash"] == current,
         }
         for row in rows
@@ -252,6 +293,9 @@ def revoke_session(db, token: object, session_id: object) -> None:
         "DELETE FROM auth_sessions WHERE user_id=? AND token_hash=?",
         (user_id, matches[0]["token_hash"]),
     )
+    # Prefix only: the full hash is secret-equivalent, the list shows the
+    # same 16 chars, and 8 are enough to correlate the two.
+    record_auth_event(db, user_id, "session_revoked", detail=matches[0]["token_hash"][:8])
 
 
 def revoke_all_sessions(db, token: object) -> int:
@@ -273,6 +317,7 @@ def revoke_all_sessions(db, token: object) -> int:
             "DELETE FROM auth_sessions WHERE user_id=? AND token_hash!=?",
             (user_id, current),
         )
+        record_auth_event(db, user_id, "sessions_revoked", detail=str(len(others)))
     return len(others)
 
 
@@ -296,7 +341,51 @@ def change_password(db, token: object, current_password: object, new_password: o
         (hash_password(secret), timestamp, user_id),
     )
     revoke_all_sessions(db, raw)
+    record_auth_event(db, user_id, "password_changed")
     return user_public(db.fetch_one("SELECT * FROM users WHERE id=?", (user_id,)))
+
+
+# ============================================================
+# LOGIN/LOGOUT AUDIT TRAIL
+# ============================================================
+#
+# Who came in, from where, and what happened to their sessions. The device
+# list answers "what is open now"; this answers "what happened". Bounded to
+# AUTH_EVENT_KEEP newest rows per user on every insert.
+
+
+def record_auth_event(db, user_id: int | None, event: str, ip: object = "", detail: object = "") -> None:
+    """Append one audit row and prune the user's tail. Never raises."""
+    try:
+        db.execute(
+            "INSERT INTO auth_events(user_id, event, created_at, ip, detail) VALUES (?, ?, ?, ?, ?)",
+            (user_id, str(event)[:40], _now(), str(ip or "")[:80], str(detail or "")[:200]),
+        )
+        if user_id is not None:
+            db.execute(
+                "DELETE FROM auth_events WHERE user_id=? AND id NOT IN"
+                " (SELECT id FROM auth_events WHERE user_id=? ORDER BY id DESC LIMIT ?)",
+                (user_id, user_id, AUTH_EVENT_KEEP),
+            )
+    except (OSError, ValueError, TypeError):
+        # Observability must never break authentication itself.
+        pass
+
+
+def list_auth_events(db, token: object, limit: object = 50) -> list[dict]:
+    """Newest security events of the caller. Raises LookupError when unknown."""
+    user_id = _session_user_id(db, token)
+    if user_id is None:
+        raise LookupError("وارد نشده‌اید.")
+    try:
+        count = max(1, min(100, int(str(limit or 50))))
+    except (TypeError, ValueError):
+        count = 50
+    return db.fetch_all(
+        "SELECT id, event, created_at, ip, detail FROM auth_events"
+        " WHERE user_id=? ORDER BY id DESC LIMIT ?",
+        (user_id, count),
+    )
 
 
 # ============================================================
@@ -479,12 +568,14 @@ def verify_email_code(db, email: object, code: object) -> tuple[dict, str]:
     db.execute("UPDATE users SET email_verified=1, updated_at=? WHERE id=?", (timestamp, existing["id"]))
     token = secrets.token_urlsafe(32)
     db.execute(
-        "INSERT INTO auth_sessions(token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
+        "INSERT INTO auth_sessions(token_hash, user_id, created_at, expires_at, last_seen_at) VALUES (?, ?, ?, ?, ?)",
         (
             hashlib.sha256(token.encode("utf-8")).hexdigest(),
             existing["id"],
             timestamp,
             (datetime.now(UTC) + timedelta(days=SESSION_DAYS)).isoformat(),
+            timestamp,
         ),
     )
+    record_auth_event(db, existing["id"], "login", detail="email-code")
     return user_public(db.fetch_one("SELECT * FROM users WHERE id=?", (existing["id"],))), token

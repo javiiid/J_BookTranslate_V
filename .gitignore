@@ -183,6 +183,11 @@ data/
 # Editor/agent tooling that is not part of the application.
 .opencode/
 
+# Working docs (roadmaps, generated reports). Personal planning artifacts,
+# not product documentation — same reason as data/ and /output/ below.
+# Anchored like /output/: frontend/docs/ stays tracked.
+/docs/
+
 # ============================================================
 # Local Windows Shortcuts
 # ============================================================

@@ -509,6 +509,29 @@ Return only the translated text.
 # SINGLE CHUNK TRANSLATION
 # ============================================================
 
+def _remember_chunk(
+    memory_db: Any,
+    source_text: str,
+    translated_text: str,
+    from_lang: str,
+    to_lang: str,
+) -> None:
+    """Write one engine-produced pair back to memory. Never raises."""
+    if memory_db is False:
+        return
+    try:
+        from app.translation.memory import store as _memory_store
+        database = memory_db
+        if database is None:
+            # Same call-time resolution as the lookup above.
+            from app.storage.database import db as database
+        _memory_store(
+            database, source_text, translated_text, from_lang, to_lang
+        )
+    except Exception:
+        pass
+
+
 def translate_chunk(
     client: Any,
     text: str,
@@ -525,12 +548,21 @@ def translate_chunk(
     context_before: str | None = None,
     fallback_model: str | None = None,
     fallback_record: list | None = None,
+    memory_db: Any = None,
+    memory_record: list | None = None,
 ) -> str:
     """
     Translate one chunk.
 
     This function performs exactly one API request per
     invocation of api_operation().
+
+    ``memory_db`` wires the translation memory: ``None`` resolves the app
+    database at call time, an explicit database uses it, and ``False``
+    bypasses the memory entirely (no read, no write) -- for callers that
+    must pay for a fresh translation, like payload-shape tests.
+    ``memory_record`` collects the ids served from memory, mirroring
+    ``fallback_record``.
 
     ``context_before`` is the plain text of the preceding chunks, supplied by the
     semantic chunker. It is sent to the model so pronouns and recurring names
@@ -609,6 +641,38 @@ def translate_chunk(
             f"[Translation content for "
             f"chunk-{chunk_id} would go here]"
         )
+
+    # ========================================================
+    # TRANSLATION MEMORY (exact match, before any API call)
+    # ========================================================
+
+    if test_translations is None and memory_db is not False:
+
+        from app.translation.memory import lookup as _memory_lookup
+
+        database = memory_db
+        if database is None:
+            # Resolved at call time, not import time, so tests that swap
+            # the singleton (tests/conftest.py) stay isolated per test.
+            from app.storage.database import db as database
+
+        remembered = _memory_lookup(
+            database, text, from_lang, to_lang
+        )
+
+        if remembered is not None:
+
+            if memory_record is not None:
+
+                memory_record.append(str(chunk_id))
+
+            print(
+                f"Memory hit: chunk {chunk_id} served "
+                f"from translation memory, no API call "
+                f"[translate_chunk]"
+            )
+
+            return remembered
 
     # ========================================================
     # BUILD SYSTEM PROMPT
@@ -738,7 +802,13 @@ def translate_chunk(
 
         try:
 
-            return attempt(model)
+            translated_text = attempt(model)
+
+            _remember_chunk(
+                memory_db, text, translated_text, from_lang, to_lang
+            )
+
+            return translated_text
 
         except RetryError as primary_error:
 
@@ -753,6 +823,10 @@ def translate_chunk(
             )
 
             translated_text = attempt(fallback_model)
+
+            _remember_chunk(
+                memory_db, text, translated_text, from_lang, to_lang
+            )
 
             if fallback_record is not None:
 
@@ -984,6 +1058,10 @@ def _process_fast_resume_sequential(
         "[_process_fast_resume]"
     )
 
+    # Chunk ids served from translation memory (zero API calls). Reported
+    # at the end of the run; mirrors fallback_record.
+    memory_hits: list[str] = []
+
     # ========================================================
     # CHUNK LOOP
     # ========================================================
@@ -1043,6 +1121,7 @@ def _process_fast_resume_sequential(
                 context_before=(chunk_contexts or {}).get(str(chunk_id)),
                 fallback_model=fallback_model,
                 fallback_record=fallback_record,
+                memory_record=memory_hits,
             )
 
             # ------------------------------------------------
@@ -1161,6 +1240,15 @@ def _process_fast_resume_sequential(
         f"Total translations: "
         f"{len(translations)}/{total_chunks}"
     )
+
+    if memory_hits:
+
+        print(
+            f"Translation memory served "
+            f"{len(memory_hits)} chunk(s) "
+            f"without API calls "
+            f"[_process_fast_resume]"
+        )
 
     print("=" * 60)
 
@@ -1378,6 +1466,7 @@ def _process_fast_resume(
             context_before=(chunk_contexts or {}).get(str(chunk_id)),
             fallback_model=fallback_model,
             fallback_record=fallback_record,
+            memory_record=memory_hits,
         )
         translated_text = _clean_translation(translated_text, chunk_text)
         if not translated_text:
@@ -1388,6 +1477,9 @@ def _process_fast_resume(
     pending = {}
     completed_results = {}
     deferred_glossary: list[tuple[Any, str, str]] = []
+    # Chunk ids served from translation memory (zero API calls); the commit
+    # path treats them exactly like translated chunks, so resume stays safe.
+    memory_hits: list[str] = []
     limiter = _build_rate_limiter(max_workers)
     if limiter is not None:
         print(
@@ -1471,6 +1563,11 @@ def _process_fast_resume(
     if stopping or (stop_event is not None and stop_event.is_set()):
         print("Stop requested. Completed concurrent translations are preserved.")
         raise TranslationStopped
+    if memory_hits:
+        print(
+            f"Translation memory served {len(memory_hits)} chunk(s) "
+            f"without API calls [_process_fast_resume]"
+        )
     return translations, None, None
 
 
