@@ -1,9 +1,18 @@
-import { useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useParams } from 'react-router-dom'
 import { api } from '@/lib/api'
 import type { Chapter, ChapterBlock, ChapterContent, ReadingSettings } from '@/lib/api'
 import { stripDuplicatedHeading, stripLeadingTitle } from '@/lib/chunks'
+import {
+  MAX_GLOSS_MARKS,
+  findTermAt,
+  prepareGlossTerms,
+  textFor,
+  tipFor,
+  type GlossSide,
+  type GlossTerm,
+} from '@/lib/glossary.ts'
 import {
   DIRECTION_OPTIONS,
   LINE_HEIGHT_FALLBACK,
@@ -21,6 +30,7 @@ import {
 import { fa } from '@/lib/format'
 import { useLanguage } from '@/i18n/useLanguage.ts'
 import type { StringKey } from '@/i18n/fa.ts'
+import './reader.css'
 
 /**
  * The bilingual reader.
@@ -51,6 +61,86 @@ const DIRECTION_KEY: Record<string, StringKey> = {
   auto: 'reader.direction.auto',
   rtl: 'reader.direction.rtl',
   ltr: 'reader.direction.ltr',
+}
+
+/**
+ * DOM helpers for glossary highlighting. They touch `document` and are
+ * therefore exercised by hand, not by `node --test` — everything decidable
+ * without a DOM lives tested in `lib/glossary.ts`.
+ *
+ * Mirrors `applyGloss`/`clearGloss` in `app/reader/page.py`: longest-first
+ * terms, one mark per (node, term), 200 marks per chapter, marks cleared
+ * before every re-apply so toggling mode or chapter never double-wraps.
+ */
+
+/** Which language a text node is in, from the nearest marked ancestor. */
+function sideOfNode(node: Text, mode: ReaderMode): GlossSide | null {
+  const element = node.parentElement
+  if (!element) return null
+  const marked = element.closest('[data-gloss-side]')
+  const side = marked?.getAttribute('data-gloss-side')
+  if (side === 'source' || side === 'target') return side
+  return mode === 'original' ? 'source' : 'target'
+}
+
+/** Unwrap every highlight mark, restoring the original text nodes. */
+function clearGlossMarks(root: Element): void {
+  for (const mark of Array.from(root.querySelectorAll('mark.gloss'))) {
+    mark.replaceWith(...Array.from(mark.childNodes))
+  }
+  root.normalize()
+}
+
+/** Collect highlightable text nodes before mutating, so the walk sees a stable list. */
+function glossTextNodes(root: Element): Text[] {
+  const nodes: Text[] = []
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode(node: Node): number {
+      if (!node.nodeValue?.trim()) return NodeFilter.FILTER_REJECT
+      const element = (node as Text).parentElement
+      if (!element || element.closest('mark.gloss, script, style')) {
+        return NodeFilter.FILTER_REJECT
+      }
+      return NodeFilter.FILTER_ACCEPT
+    },
+  })
+  let current = walker.nextNode()
+  while (current) {
+    nodes.push(current as Text)
+    current = walker.nextNode()
+  }
+  return nodes
+}
+
+function applyGlossMarks(
+  root: Element,
+  terms: readonly GlossTerm[],
+  mode: ReaderMode,
+  label: string,
+): number {
+  let count = 0
+  for (const textNode of glossTextNodes(root)) {
+    let node: Text | null = textNode
+    for (const term of terms) {
+      if (!node || count >= MAX_GLOSS_MARKS) return count
+      const side = sideOfNode(node, mode)
+      if (!side) continue
+      const match = findTermAt(node.nodeValue ?? '', textFor(term, side))
+      if (!match) continue
+      const middle = node.splitText(match.index)
+      const after = middle.splitText(match.length)
+      const mark = document.createElement('mark')
+      mark.className = 'gloss'
+      mark.tabIndex = 0
+      mark.dataset.tip = tipFor(term, side)
+      mark.setAttribute('aria-label', label)
+      mark.appendChild(middle)
+      node.parentNode?.insertBefore(mark, after)
+      node = after
+      count++
+    }
+  }
+  return count
 }
 
 export function ReaderPage() {
@@ -117,6 +207,30 @@ export function ReaderPage() {
     mutationFn: (next: Partial<ReadingSettings>) => api.updateReaderSettings(next),
     onSuccess: () => void client.invalidateQueries({ queryKey: ['reader-settings'] }),
   })
+
+  const glossTerms = useQuery({
+    queryKey: ['reader-glossary', id],
+    queryFn: () => api.readerGlossary(id),
+    // The snapshot never changes mid-read: fetch once per book and reuse it
+    // across chapters, like the Python `glossReady` flag.
+    enabled: Boolean(id) && glossary,
+    staleTime: 300_000,
+  })
+  const terms = useMemo(
+    () => prepareGlossTerms(glossTerms.data?.items),
+    [glossTerms.data],
+  )
+
+  // Highlight after every render that replaces the chapter DOM. Clearing
+  // first keeps mode/chapter switches from double-wrapping; toggling the
+  // switch off clears without re-marking.
+  useEffect(() => {
+    const root = scrollRef.current
+    if (!root) return
+    clearGlossMarks(root)
+    if (!glossary || terms.length === 0) return
+    applyGlossMarks(root, terms, mode, t('reader.glossary'))
+  }, [content.data, blocks.data, mode, chapterId, terms, glossary, t])
 
   const items = chapters.data?.items ?? []
 
@@ -374,15 +488,18 @@ function ChapterBody({
             {/* Both are sanitised server-side. See the note at the top. Both
                 also repeat the title as loose text and again in an <h1>, so
                 each side is stripped on its own: the original and the
-                translation carry different titles. */}
+                translation carry different titles. `data-gloss-side` tells
+                the highlighter which language each side is in. */}
             <div
               dir="ltr"
+              data-gloss-side="source"
               className="leading-8"
               style={{ color: 'var(--color-text-secondary)' }}
               dangerouslySetInnerHTML={{ __html: stripDuplicatedHeading(block.original_html) }}
             />
             <div
               dir="rtl"
+              data-gloss-side="target"
               className="leading-8"
               style={{ color: 'var(--color-text-primary)' }}
               dangerouslySetInnerHTML={{ __html: stripDuplicatedHeading(block.translation_html) }}

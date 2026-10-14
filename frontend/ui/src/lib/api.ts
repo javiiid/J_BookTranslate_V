@@ -120,6 +120,16 @@ export interface ChapterBlock {
   translation_html: string
 }
 
+/**
+ * One approved glossary pair for in-reader highlighting, from
+ * `GET /api/reader/:id/glossary`. The job's own snapshot — the same terms
+ * the book was translated with — longest source first, capped at 40.
+ */
+export interface ReaderGlossaryTerm {
+  source_term: string
+  target_term: string
+}
+
 /* ------------------------------------------------------------------ */
 /* Library                                                             */
 /* ------------------------------------------------------------------ */
@@ -649,6 +659,12 @@ export const api = {
     request<ChapterContent>(`/api/reader/${encodeURIComponent(id)}/chapters/${chapterId}`),
   readerBlocks: (id: string, chapterId: number) =>
     request<{ items: ChapterBlock[] }>(`/api/reader/${encodeURIComponent(id)}/chapters/${chapterId}/blocks`),
+  /**
+   * Approved glossary pairs for in-reader highlighting. Fetched once per
+   * book and reused across chapters: the snapshot never changes mid-read.
+   */
+  readerGlossary: (id: string) =>
+    request<{ items: ReaderGlossaryTerm[] }>(`/api/reader/${encodeURIComponent(id)}/glossary`),
   readerSettings: () => request<{ value: ReadingSettings }>('/api/reader/settings'),
   /**
    * Persist reader settings.
