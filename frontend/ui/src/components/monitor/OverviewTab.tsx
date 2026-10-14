@@ -1,4 +1,5 @@
 import type { Job } from '@/lib/api'
+import { Link } from 'react-router-dom'
 import {
   assetLabel,
   fa,
@@ -126,9 +127,9 @@ export function OverviewTab({ job }: { job: Job }) {
               </a>
             ) : null}
             {job.reader ? (
-              <a className="btn btn-secondary" href={job.reader}>
+              <Link className="btn btn-secondary" to={job.reader}>
                 {t('monitor.ov.openReader')}
-              </a>
+              </Link>
             ) : null}
           </div>
         )}

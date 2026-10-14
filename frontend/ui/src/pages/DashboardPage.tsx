@@ -681,13 +681,12 @@ export function DashboardPage() {
                       </span>
                     </Link>
                   </li>
-                  {/* `job.reader` is a BACKEND path (`/reader/<id>`), not a React route:
-                      a `<Link to>` would be intercepted by the router and land on the
-                      `ReaderHandedOver` placeholder. A plain anchor leaves the SPA for
-                      the Python reader, which is the point of the card. */}
+                  {/* `job.reader` is a React route (`/reader/:id`): a `<Link to>`
+                      stays in the SPA with the settings query warm, while a
+                      plain anchor would reload the whole app. */}
                   <li>
                     {lastReadable ? (
-                      <a href={lastReadable.reader} className="dash-quick-card">
+                      <Link to={lastReadable.reader} className="dash-quick-card">
                         <span className="dash-quick-icon" aria-hidden="true">
                           <NavIcon name="reader" size={20} />
                         </span>
@@ -697,7 +696,7 @@ export function DashboardPage() {
                             {lastReadable.filename}
                           </small>
                         </span>
-                      </a>
+                      </Link>
                     ) : (
                       <Link to="/library" className="dash-quick-card">
                         <span className="dash-quick-icon" aria-hidden="true">

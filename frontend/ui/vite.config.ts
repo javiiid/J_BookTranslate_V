@@ -31,23 +31,21 @@ export default defineConfig({
     // that returns HTML where the client expected a module -- which is why
     // navigating between pages kept landing somewhere that was not the app.
     //
-    // The frontend is the whole UI. The backend is an API -- with one exception,
-    // below.
+    // The frontend is the whole UI. The backend is an API -- with one narrow
+    // exception, below.
     //
-    // `/reader` is the exception, and it is temporary.
+    // `/reader` is proxied for chapter images only, not for the page.
     //
-    // The React reader (`src/pages/ReaderPage.tsx`) is a port of
-    // `app/reader/page.py`, and the Python original is better: it has the
-    // paragraph pairing, the glossary panel and the settings that the port does
-    // not have yet. Rather than hold the route hostage to an incomplete port,
-    // the path is proxied back to the Python page so the reader works today, and
-    // `tests/routing.test.ts` holds the exception open rather than treating it
-    // as the new normal.
-    //
-    // A proxy rule matches the prefix, so `/reader` also covers
-    // `/reader/<id>` and `/reader/<id>/asset/<path>` -- which is required, since
-    // the images in that page are served by the backend under the same prefix.
-    // Narrowing it to the exact paths would break the images.
+    // The React reader (`src/pages/ReaderPage.tsx`) finished its port
+    // (settings, glossary panel, paragraph pairing, columns mode), so the
+    // route belongs to the client router and `/reader/:id` renders the SPA
+    // shell. But the chapter HTML the API returns carries image URLs shaped
+    // `/reader/<id>/asset/<path>`, and those bytes only exist on the backend.
+    // In production this needs nothing (one origin serves both); in dev the
+    // rule below keeps the images working: asset URLs proxy through, every
+    // other `/reader/*` URL answers the SPA shell so the client router --
+    // not the proxy -- owns the page. `tests/routing.test.ts` pins both
+    // halves: the assets must reach the backend, and the page must not.
     proxy: {
       '/api': { target: BACKEND, changeOrigin: true },
       '/downloads': { target: BACKEND, changeOrigin: true },
@@ -57,9 +55,14 @@ export default defineConfig({
       // in dev the prefix has to reach the backend or Vite answers with the
       // SPA's HTML and the image breaks.
       '/covers': { target: BACKEND, changeOrigin: true },
-      // TEMPORARY: the Python reader, until the React one is finished. See the
-      // note above, and `src/pages/ReaderPage.tsx` for what is missing.
-      '/reader': { target: BACKEND, changeOrigin: true },
+      // Chapter images only -- see the note above. `bypass` returning a path
+      // serves that file instead of proxying; returning `undefined` lets the
+      // request proxy through to the backend.
+      '/reader': {
+        target: BACKEND,
+        changeOrigin: true,
+        bypass: (req) => (/\/asset\//.test(req.url ?? '') ? undefined : '/index.html'),
+      },
     },
   },
   build: {

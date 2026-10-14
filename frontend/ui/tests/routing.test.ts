@@ -65,7 +65,10 @@ describe('nothing but the API is proxied', () => {
    * on purpose rather than by appending a line to the config.
    */
   const API_PREFIXES = ['/api', '/downloads', '/covers']
-  /** The one exception, and why it is temporary. */
+  /** `/reader` stays listed because chapter images still come from the
+   *  backend — but only through the `bypass` rule (page → SPA shell,
+   *  `/reader/<id>/asset/*` → backend). It is no longer a page handover,
+   *  so the suite below pins both halves instead of a temporary exception. */
   const EXCEPTIONS = ['/reader']
 
   it('every proxy key is the API or a named exception', () => {
@@ -99,61 +102,72 @@ describe('nothing but the API is proxied', () => {
     assert.ok(block.includes("'/api'"), '/api is no longer proxied')
     assert.ok(block.includes("'/downloads'"), '/downloads is no longer proxied')
   })
+
+  it('the /reader rule is assets-only, with a bypass for the page', () => {
+    // The chapter HTML the API returns carries image URLs shaped
+    // `/reader/<id>/asset/<path>`, and those bytes only exist on the backend.
+    // The page itself belongs to the client router, so the rule must say
+    // `bypass` (page URLs answer the SPA shell) and name `/asset/` (image
+    // URLs proxy through). A blanket `/reader` target would shadow the React
+    // route again -- that was the handover this replaces.
+    const block = proxyBlock()
+    assert.ok(block.includes("'/reader'"), 'the /reader asset rule is gone; chapter images break in dev')
+    assert.ok(block.includes('bypass'), 'the /reader rule has no bypass, so it shadows the React route')
+    // The rule names the path as a regex (`/\/asset\//`), so the assertion
+    // looks for `/asset` rather than the quoted prefix.
+    assert.ok(block.includes('/asset'), 'the /reader rule does not name the asset URLs it must let through')
+  })
 })
 
-describe('the reader is handed to Python, temporarily', () => {
+describe('the reader belongs to React', () => {
   /**
-   * `/reader` is proxied to `app/reader/page.py` because that page is more
-   * complete than the React port: it has the paragraph pairing, the glossary
-   * panel and the reader settings, and the port does not. It is a deliberate
-   * handover, not the shape the app should end up in, so it is asserted in
-   * three directions: the path is proxied, the reason is written down, and the
-   * React port is still there to go back to.
+   * The React port finished its P0 (settings, glossary panel, paragraph
+   * pairing, columns mode), so `/reader/:id` renders `ReaderPage` and the
+   * Python handover is closed. Asserted in three directions: the route is
+   * mounted, no placeholder intercepts it, and the chapter images that still
+   * live on the backend keep working through the `bypass` rule.
    */
 
-  it('the path is proxied to the backend', () => {
-    const block = proxyBlock()
+  it('the route mounts the React reader', () => {
     assert.ok(
-      /'\/reader':\s*\{\s*target:\s*BACKEND/.test(block),
-      '/reader is not proxied, so the React port is being served instead of the Python page',
+      /path="\/reader\/:id"\s+element=\{<\s*ReaderPage\s*\/>\s*\}/.test(app),
+      '/reader/:id does not render ReaderPage',
     )
   })
 
-  it('the config says the handover is temporary', () => {
-    // Without this, the next reader of the config cannot tell a deliberate
-    // exception from an oversight, and the six bare-path rules come back.
-    assert.match(config, /TEMPORARY/i, 'the /reader proxy is not marked temporary')
-    assert.match(config, /app\/reader\/page\.py/, 'the config does not say which page took over')
+  it('no handover placeholder intercepts the route', () => {
+    assert.ok(
+      !/ReaderHandedOver/.test(app),
+      'ReaderHandedOver is still mounted, so the React port never runs',
+    )
   })
 
-  it('the React port is still on disk, so the handover is reversible', () => {
+  it('the React port is on disk and exported', () => {
     const source = readFileSync(new URL('../src/pages/ReaderPage.tsx', import.meta.url), 'utf8')
     assert.match(source, /export function ReaderPage\(/, 'the React reader is gone')
-    // A handover that also deleted the thing it handed over is not reversible.
+    // A route that names a component that was never written renders nothing;
+    // `npm run typecheck` would catch that, but the assertion here names it.
     assert.ok(
       readFileSync(new URL('../src/components/AppShell.tsx', import.meta.url), 'utf8').length > 0,
-      'AppShell is missing, so the port cannot be re-registered',
+      'AppShell is missing, so the port renders outside the shared chrome',
     )
   })
 
-  it('the router does not mount the React reader at the proxied path', () => {
-    // Both would be wrong: mounting it would make the route a lie, and leaving
-    // the path undeclared would let it fall through to NotFoundPage, which
-    // reads as a broken link on a page the dashboard links to.
-    assert.ok(
-      !/path="\/reader[^"]*"\s+element=\{<\s*ReaderPage/.test(app),
-      'the React reader is still mounted at /reader, so the proxy never runs',
-    )
-    assert.ok(
-      /path="\/reader\/\*" element=\{<\s*ReaderHandedOver\s*\/>/.test(app),
-      '/reader is undeclared, so it falls through to NotFoundPage if the proxy stops matching',
-    )
-  })
-
-  it('the handover notice names both readers, so neither is a mystery', () => {
-    const source = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
-    assert.match(source, /ReaderPage\.tsx/, 'the notice does not say where the React port is')
-    assert.match(source, /پایتون/, 'the notice does not say the page is the Python one')
+  it('reader links stay inside the SPA', () => {
+    // A plain anchor to `/reader/<id>` reloads the whole app; `<Link>`
+    // keeps the settings query warm. The library, the dashboard and the
+    // monitor all link to the reader, so all three are pinned here.
+    for (const file of [
+      '../src/pages/LibraryPage.tsx',
+      '../src/pages/DashboardPage.tsx',
+      '../src/components/monitor/OverviewTab.tsx',
+    ]) {
+      const source = readFileSync(new URL(file, import.meta.url), 'utf8')
+      assert.ok(
+        !/<a[^>]*href=\{(readable\.reader|last\.variant\.reader|lastReadable\.reader|job\.reader)\}/.test(source),
+        `${file} links to the reader with a plain anchor instead of <Link>`,
+      )
+    }
   })
 })
 
@@ -182,12 +196,6 @@ describe('every React route renders a React page', () => {
       const path = match[1] ?? ''
       const component = match[2] ?? ''
       assert.notEqual(component, 'Navigate', `${path} renders a Navigate`)
-      // `ReaderHandedOver` is the one element that is not a page: it is the
-      // notice for the path that is proxied away, and it is a component in
-      // `App.tsx` rather than a file. It is asserted in the handover suite
-      // above, with the reason it exists; naming it here rather than widening
-      // the pattern keeps the "is this a page?" question meaningful.
-      if (component === 'ReaderHandedOver') continue
       assert.match(component, /Page$/, `${path} renders ${component}, which is not a page`)
     }
   })

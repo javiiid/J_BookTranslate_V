@@ -211,10 +211,12 @@ function Tile({
  * A `<details>` element, so it opens and closes without state, closes on Escape
  * for free, and its items are links to places that navigate anyway.
  *
- * `reader` and `download` are plain anchors on purpose: both are *backend*
- * paths (`/reader/<id>`, `/downloads/<id>`), and the router would swallow them
- * and land the reader on the React `/reader/*` placeholder. The monitor is the
- * only React route here, so it is the only one that is a `<Link>`.
+ * The reader is a `<Link>`: `/reader/:id` is a React route now (the Python
+ * handover is closed), so client-side navigation keeps the reading settings
+ * query warm instead of reloading the app. The download stays a plain
+ * anchor — it is a backend file path, and the router would swallow it and
+ * land the reader on a placeholder. The monitor is a React route too, so it
+ * is a `<Link>` as well.
  */
 function BookMenu({ book }: { book: LibraryBook }) {
   const client = useQueryClient()
@@ -263,10 +265,10 @@ function BookMenu({ book }: { book: LibraryBook }) {
       </summary>
       <div className="lib-menu-list">
         {readable ? (
-          <a href={readable.reader}>
+          <Link to={readable.reader}>
             <NavIcon name="reader" size={16} />
             {t('dashboard.read')}
-          </a>
+          </Link>
         ) : null}
         {active?.job_id ? (
           <Link to={`/jobs/${active.job_id}`}>
@@ -455,11 +457,11 @@ function Spotlight({
             <div className="mt-[var(--spacing-3)] progress-track">
               <div className="progress-fill" style={{ width: `${last.percent}%` }} />
             </div>
-            {/* A plain anchor, not a `Link`: `/reader/<id>` is the Python
-                reader, and the router would intercept it. */}
-            <a className="btn btn-secondary mt-[var(--spacing-4)]" href={last.variant.reader}>
+            {/* A `Link`: `/reader/:id` is a React route now, so this stays
+                in the app instead of reloading it through the backend. */}
+            <Link className="btn btn-secondary mt-[var(--spacing-4)]" to={last.variant.reader}>
               {t('library.readBilingual')}
-            </a>
+            </Link>
           </>
         ) : (
           <p className="lib-spot-note mt-[var(--spacing-3)]">

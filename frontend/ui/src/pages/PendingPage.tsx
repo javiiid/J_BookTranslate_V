@@ -1,8 +1,8 @@
 import { Link } from 'react-router-dom'
 
 /** Where a lost visitor can go. Every entry is a mounted React route in
- *  `App.tsx` — never `/reader`, which is proxied to the Python page and has
- *  no React content to land on. */
+ *  `App.tsx` — never bare `/reader`, which names no book (books open at
+ *  `/reader/:id` from the library, the dashboard and the monitor). */
 const DESTINATIONS: { path: string; label: string; note: string }[] = [
   { path: '/', label: 'میز کار ترجمه', note: 'داشبورد' },
   { path: '/workspace', label: 'افزودن کتاب', note: 'شروع ترجمه' },
