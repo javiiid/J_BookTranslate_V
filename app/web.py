@@ -895,6 +895,14 @@ LOOPBACK_HOSTS = {"127.0.0.1", "localhost"}
 ALLOWED_ORIGINS = {"http://127.0.0.1:8765", "http://localhost:8765"}
 MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
+# A client that navigated away, reloaded, or cancelled a poller closes the
+# socket mid-response. Windows surfaces that as ConnectionAbortedError
+# (WinError 10053); POSIX as BrokenPipe/ConnectionReset. All three mean "the
+# reader is gone" — routine on a page that polls (health, library, jobs) and
+# keeps several requests in flight, never a server bug — so every response
+# write below tolerates them instead of printing one traceback per abort.
+_CLIENT_GONE = (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)
+
 
 def _loopback_authority(value: str) -> bool:
     """True for ``127.0.0.1[:port]`` / ``localhost[:port]``.
@@ -1135,7 +1143,7 @@ class Handler(BaseHTTPRequestHandler):
         """Refuse a request that a local page should never have issued."""
         try:
             self._json({"error": reason}, 403)
-        except (BrokenPipeError, ConnectionResetError):
+        except _CLIENT_GONE:
             pass
 
     def _host_allowed(self) -> bool:
@@ -1186,9 +1194,28 @@ class Handler(BaseHTTPRequestHandler):
 
     def _json(self, payload: dict, status: int = 200, headers: dict[str, str] | None = None) -> None:
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        self.send_response(status); self.send_header("Content-Type", "application/json; charset=utf-8"); self.send_header("Content-Length", str(len(data)))
-        for name, value in (headers or {}).items(): self.send_header(name, value)
-        self.end_headers(); self.wfile.write(data)
+        try:
+            self.send_response(status); self.send_header("Content-Type", "application/json; charset=utf-8"); self.send_header("Content-Length", str(len(data)))
+            for name, value in (headers or {}).items(): self.send_header(name, value)
+            self.end_headers(); self.wfile.write(data)
+        except _CLIENT_GONE:
+            pass
+
+    def _send_file(self, path: Path, content_type: str, disposition: str | None = None, extra: dict[str, str] | None = None) -> None:
+        """Stream one file; a client that disconnects mid-download is routine.
+
+        Cancelling a multi-megabyte download (covers, PDF/DOCX outputs, rescue
+        archives, backups) aborts the socket exactly like closing a tab aborts
+        a poll — the server just stops writing instead of tracebacks.
+        """
+        try:
+            self.send_response(200); self.send_header("Content-Type", content_type)
+            if disposition: self.send_header("Content-Disposition", disposition)
+            for name, value in (extra or {}).items(): self.send_header(name, value)
+            self.send_header("Content-Length", str(path.stat().st_size)); self.end_headers()
+            with path.open("rb") as stream: shutil.copyfileobj(stream, self.wfile)
+        except _CLIENT_GONE:
+            pass
     def _session_token(self) -> str:
         """Read the session cookie. A missing or unparsable cookie is no session."""
         try:
@@ -1278,7 +1305,9 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Cache-Control", "private, max-age=86400")
             if mime == "image/svg+xml":
                 self.send_header("Content-Disposition", "inline")
-            self.end_headers(); self.wfile.write(payload); return
+            try: self.end_headers(); self.wfile.write(payload)
+            except _CLIENT_GONE: pass
+            return
         if parsed.path.startswith("/api/reader/") and "/chapters/" in parsed.path:
             pieces = parsed.path.split("/")
             job = self._job(pieces[3])
@@ -1297,11 +1326,17 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path.startswith("/workspace/job/"):
             job = self._job(parsed.path.rstrip("/").rsplit("/", 1)[-1])
             if not job: self.send_error(404); return
-            data = job_detail_page(job.id).encode("utf-8"); self.send_response(HTTPStatus.OK); self.send_header("Content-Type", "text/html; charset=utf-8"); self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data); return
+            data = job_detail_page(job.id).encode("utf-8")
+            try: self.send_response(HTTPStatus.OK); self.send_header("Content-Type", "text/html; charset=utf-8"); self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data)
+            except _CLIENT_GONE: pass
+            return
         if parsed.path.startswith("/reader/"):
             job = self._job(parsed.path.rsplit("/", 1)[-1])
             if not job or job.filetype != "epub" or not job.output_path or not job.output_path.is_file(): self.send_error(404); return
-            data = reader_page(job.id).encode("utf-8"); self.send_response(HTTPStatus.OK); self.send_header("Content-Type", "text/html; charset=utf-8"); self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data); return
+            data = reader_page(job.id).encode("utf-8")
+            try: self.send_response(HTTPStatus.OK); self.send_header("Content-Type", "text/html; charset=utf-8"); self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data)
+            except _CLIENT_GONE: pass
+            return
         if parsed.path == "/api/dashboard/summary":
             self._json(dashboard_summary()); return
         if parsed.path == "/api/auth/me":
@@ -1361,8 +1396,7 @@ class Handler(BaseHTTPRequestHandler):
             backups = db.list_backups()
             if not backups or not backups[0].is_file(): self._json({"error": "بکاپی وجود ندارد."}, 404); return
             latest = backups[0]
-            self.send_response(200); self.send_header("Content-Type","application/octet-stream"); self.send_header("Content-Disposition",f'attachment; filename="{latest.name}"'); self.send_header("Content-Length",str(latest.stat().st_size)); self.end_headers()
-            with latest.open("rb") as backup: shutil.copyfileobj(backup,self.wfile)
+            self._send_file(latest, "application/octet-stream", f'attachment; filename="{latest.name}"')
             return
         if parsed.path == "/api/account/marketplace":
             self._json(account_marketplace(parse_qs(parsed.query).get("kind", [""])[0])); return
@@ -1454,9 +1488,7 @@ class Handler(BaseHTTPRequestHandler):
             if not cover_file.is_file():
                 self.send_error(404); return
             mime = mimetypes.guess_type(name)[0] or "application/octet-stream"
-            self.send_response(200); self.send_header("Content-Type", mime); self.send_header("Cache-Control", "public, max-age=86400"); self.send_header("Content-Length", str(cover_file.stat().st_size)); self.end_headers()
-            with cover_file.open("rb") as stream:
-                shutil.copyfileobj(stream, self.wfile)
+            self._send_file(cover_file, mime, extra={"Cache-Control": "public, max-age=86400"})
             return
         if parsed.path.startswith("/downloads/"):
             if parsed.path.startswith("/downloads/convert/"):
@@ -1477,15 +1509,13 @@ class Handler(BaseHTTPRequestHandler):
                     p2 = Path(file_path) if file_path else None
                     if not p2 or not p2.is_file() or WEB_OUTPUT_DIR not in p2.parents:
                         self.send_error(404); return
-                    self.send_response(200); self.send_header("Content-Type","application/octet-stream"); self.send_header("Content-Disposition",f'attachment; filename="{p2.name}"'); self.send_header("Content-Length",str(p2.stat().st_size)); self.end_headers()
-                    with p2.open("rb") as output: shutil.copyfileobj(output,self.wfile)
+                    self._send_file(p2, "application/octet-stream", f'attachment; filename="{p2.name}"')
                     return
             if parsed.path.startswith("/downloads/rescue/"):
                 job = self._job(parsed.path.rsplit("/", 1)[-1])
                 rescue_path = WEB_OUTPUT_DIR / f"{job.id}_rescue.zip" if job else None
                 if not rescue_path or not rescue_path.is_file(): self.send_error(404); return
-                self.send_response(200); self.send_header("Content-Type", "application/zip"); self.send_header("Content-Disposition", f'attachment; filename="{rescue_path.name}"'); self.send_header("Content-Length", str(rescue_path.stat().st_size)); self.end_headers()
-                with rescue_path.open("rb") as output: shutil.copyfileobj(output, self.wfile)
+                self._send_file(rescue_path, "application/zip", f'attachment; filename="{rescue_path.name}"')
                 return
             if parsed.path.count("/") == 3:
                 asset_job_id, asset_name = parsed.path[len("/downloads/"):].split("/", 1)
@@ -1494,13 +1524,11 @@ class Handler(BaseHTTPRequestHandler):
                 asset_file = Path(asset_path) if asset_path else None
                 if not asset_file or not asset_file.is_file() or WEB_OUTPUT_DIR not in asset_file.parents:
                     self.send_error(404); return
-                self.send_response(200); self.send_header("Content-Type","application/octet-stream"); self.send_header("Content-Disposition",f'attachment; filename="{asset_file.name}"'); self.send_header("Content-Length",str(asset_file.stat().st_size)); self.end_headers()
-                with asset_file.open("rb") as output: shutil.copyfileobj(output,self.wfile)
+                self._send_file(asset_file, "application/octet-stream", f'attachment; filename="{asset_file.name}"')
                 return
             job=self._job(parsed.path.rsplit("/",1)[-1])
             if not job or not job.output_path or not job.output_path.is_file(): self.send_error(404); return
-            self.send_response(200); self.send_header("Content-Type","application/octet-stream"); self.send_header("Content-Disposition",f'attachment; filename="{job.output_path.name}"'); self.send_header("Content-Length",str(job.output_path.stat().st_size)); self.end_headers()
-            with job.output_path.open("rb") as output: shutil.copyfileobj(output,self.wfile)
+            self._send_file(job.output_path, "application/octet-stream", f'attachment; filename="{job.output_path.name}"')
             return
         self.send_error(404)
     def do_POST(self) -> None:
