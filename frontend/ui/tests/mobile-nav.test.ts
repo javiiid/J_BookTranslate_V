@@ -208,3 +208,14 @@ describe('both navigations are in the tree, one of them hidden', () => {
     assert.ok(/var\(--mobile-nav-height\)/.test(bar), 'the bar does not read the height token')
   })
 })
+
+describe('the rail has no dead-end reader button', () => {
+  it('bare /reader is not a destination', () => {
+    // Bare `/reader` names no book and renders NotFound, so a rail button to
+    // it was a 404 with an active state. It was removed rather than relinked:
+    // books open at `/reader/:id` from the library, the dashboard and the
+    // monitor, and those links are pinned in `tests/routing.test.ts`.
+    const dead = NAV.filter((item) => item.to === '/reader')
+    assert.deepEqual(dead, [])
+  })
+})

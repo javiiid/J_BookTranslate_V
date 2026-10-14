@@ -20,7 +20,7 @@
  *
  * ## Why there are two lists
  *
- * The rail carries seven destinations. A bottom bar carries five, because six
+ * The rail carries six destinations. A bottom bar carries five, because six
  * already puts the label under 12px on a 393px screen -- and 12px is this
  * project's floor for Persian, where the letters join and the shapes are what
  * tell them apart.
@@ -49,7 +49,7 @@ export interface NavItem {
    * language's own words, and `tests/mobile-nav.test.ts` reads them directly
    * to assert the bar's shape without rendering anything.
    */
-  key: 'dashboard' | 'workspace' | 'convert' | 'jobs' | 'library' | 'reader' | 'account' | 'help'
+  key: 'dashboard' | 'workspace' | 'convert' | 'jobs' | 'library' | 'account' | 'help'
   /** The full label, for the rail, where there is room for it. */
   label: string
   /**
@@ -73,7 +73,9 @@ export const NAV: readonly NavItem[] = [
   { to: '/convert', key: 'convert', label: 'تبدیل فایل', short: 'تبدیل', icon: 'convert' },
   { to: '/jobs', key: 'jobs', label: 'پایش ترجمه', short: 'پایش', icon: 'monitor' },
   { to: '/library', key: 'library', label: 'کتابخانه', short: 'کتابخانه', icon: 'library' },
-  { to: '/reader', key: 'reader', label: 'مطالعه', short: 'مطالعه', icon: 'reader' },
+  /* No `/reader` entry: bare `/reader` names no book and renders NotFound, so
+     a rail button to it is a dead end with an active state. Books open at
+     `/reader/:id` from the library, the dashboard and the monitor instead. */
   { to: '/account', key: 'account', label: 'پنل کاربری', short: 'حساب', icon: 'account' },
   /* Help rides the rail only. The bottom bar stays five: a sixth label would
      drop under the 12px floor at 393px (`tests/mobile-nav.test.ts` holds it).
@@ -84,19 +86,18 @@ export const NAV: readonly NavItem[] = [
 /**
  * The bar's five, in reading order.
  *
- * `convert` and `reader` are not here. A bar is a summary, not a second rail:
- * what is missing has to be one tap from a page that is in the bar, and both
- * are -- conversion from the dashboard, the reader from the library and from any
- * finished job. Add a sixth only after measuring that a label still fits at
- * 393px, because the step below `--text-caption` does not exist in this project
- * at all.
+ * `convert` is not here. A bar is a summary, not a second rail:
+ * what is missing has to be one tap from a page that is in the bar, and it
+ * is -- conversion from the dashboard. Add a sixth only after measuring that
+ * a label still fits at 393px, because the step below `--text-caption` does
+ * not exist in this project at all.
  */
 export const MOBILE_NAV: readonly NavItem[] = [
   NAV[0] as NavItem,
   NAV[4] as NavItem,
   NAV[1] as NavItem,
   NAV[3] as NavItem,
-  NAV[6] as NavItem,
+  NAV[5] as NavItem,
 ]
 
 /** The item a list treats as its primary action, if one is marked. */
