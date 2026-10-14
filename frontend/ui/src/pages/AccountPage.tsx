@@ -11,7 +11,7 @@ import {
   type ProviderTestResult,
 } from '@/lib/api'
 import { validPassword, type AuthEvent, type AuthSession } from '@/lib/auth.ts'
-import { fa, faAgo, faDate, maskSecretLike } from '@/lib/format'
+import { fa, faAgo, faDate, maskSecretLike, serverError } from '@/lib/format'
 import { useTheme } from '@/hooks/useTheme'
 import { useLanguage } from '@/i18n/useLanguage.ts'
 import type { StringKey } from '@/i18n/fa.ts'
@@ -73,6 +73,8 @@ const KIND_KEY: Record<string, StringKey> = {
   glossary: 'account.packs.kind.glossary',
   preset: 'account.packs.kind.preset',
   style: 'account.packs.kind.style',
+  template: 'account.packs.kind.template',
+  model: 'account.packs.kind.model',
 }
 
 const kindLabel = (t: (key: StringKey) => string, kind: string): string => {
@@ -231,7 +233,7 @@ function ProviderTest({ config }: { config: ProviderConfig | undefined }) {
           role="status"
           className={result.model_available === false ? 'alert alert-warning' : 'alert alert-success'}
         >
-          {result.message}
+          {serverError(result.message)}
           {result.model_available === false
             ? t('account.test.modelMissing', { model: result.selected_model })
             : ''}
@@ -290,7 +292,7 @@ function SetupPanel({ config }: { config: ProviderConfig | undefined }) {
 /* ------------------------------------------------------------------ */
 
 function WorkPanel({ portal }: { portal: AccountPortal }) {
-  const { t } = useLanguage()
+  const { t, lang } = useLanguage()
   const { counts, account, plan } = portal.overview
   const done = counts.completed_jobs
   const total = counts.jobs
@@ -347,7 +349,7 @@ function WorkPanel({ portal }: { portal: AccountPortal }) {
         </div>
         <div>
           <dt className="data-label">{t('account.work.plan')}</dt>
-          <dd className="text-[length:var(--text-body)]">{plan.name_fa}</dd>
+          <dd className="text-[length:var(--text-body)]">{lang === 'fa' ? plan.name_fa : plan.name_en}</dd>
         </div>
         <div>
           <dt className="data-label">{t('account.work.created')}</dt>
@@ -764,7 +766,7 @@ function KeysPanel({ keys }: { keys: PortalApiKey[] }) {
 /* ------------------------------------------------------------------ */
 
 function PacksPanel({ items }: { items: MarketplaceItem[] }) {
-  const { t } = useLanguage()
+  const { t, lang } = useLanguage()
   const cache = useQueryClient()
   const install = useMutation({
     mutationFn: (id: string) => api.installMarketplaceItem(id),
@@ -786,7 +788,7 @@ function PacksPanel({ items }: { items: MarketplaceItem[] }) {
             <li key={item.id} className="surface-card flex flex-col gap-2 p-3">
               <div className="flex items-baseline justify-between gap-2">
                 <strong className="text-[length:var(--text-body)]">
-                  {item.title_fa}
+                  {lang === 'fa' ? item.title_fa : item.title_en}
                 </strong>
                 <span
                   className="text-[length:var(--text-caption)] tabular-nums"
@@ -799,7 +801,7 @@ function PacksPanel({ items }: { items: MarketplaceItem[] }) {
                 className="text-[length:var(--text-small)]"
                 style={{ color: 'var(--color-text-secondary)' }}
               >
-                {item.description_fa}
+                {lang === 'fa' ? item.description_fa : item.description_en}
               </p>
               <div className="mt-auto flex items-center justify-between gap-2 pt-1">
                 <span

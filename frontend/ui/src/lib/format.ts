@@ -160,7 +160,7 @@ export function statusLabel(status: string): string {
 }
 
 /**
- * Server error text in the active language.
+ * Server text in the active language.
  *
  * Failure reasons are produced by `_friendly_error` in `app/web.py`, which
  * writes Persian. The strings below are quoted character-for-character from
@@ -168,8 +168,13 @@ export function statusLabel(status: string): string {
  * backend message, English already) passes through untouched rather than
  * being guessed at. When the backend gains a message, it appears in Persian
  * until its mirror is added here -- visible, never blank.
+ *
+ * The table also holds the one success message the provider test prints, for
+ * the same reason: it is server text, and English mode must not show Persian.
  */
 const SERVER_ERROR_EN: Record<string, string> = {
+  'اتصال سرویس ترجمه برقرار است':
+    'Translation service is connected.',
   'کلید یا Base URL سرویس ترجمه تنظیم نشده است. از پنل کاربری ← تنظیمات سرویس ترجمه آن را وارد کنید.':
     'Translation service key or Base URL is not set. Enter it under Account → Translation service settings.',
   'کلید Provider پذیرفته نشد (401). این کلید با API Keyهای حساب کاربری تفاوت دارد.':

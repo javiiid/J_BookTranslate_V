@@ -941,6 +941,8 @@ export const fa = {
   'account.packs.kind.glossary': 'واژه‌نامه',
   'account.packs.kind.preset': 'سبک ترجمه',
   'account.packs.kind.style': 'شیوه‌نگارش',
+  'account.packs.kind.template': 'قالب',
+  'account.packs.kind.model': 'مدل',
   'account.theme.title': 'نمایش',
   'account.theme.legend': 'حالت رنگی',
   'account.theme.light': 'روشن',

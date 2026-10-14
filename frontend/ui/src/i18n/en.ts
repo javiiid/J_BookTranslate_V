@@ -926,6 +926,8 @@ export const en: Record<StringKey, string> = {
   'account.packs.kind.glossary': 'Glossary',
   'account.packs.kind.preset': 'Translation style',
   'account.packs.kind.style': 'Writing style',
+  'account.packs.kind.template': 'Template',
+  'account.packs.kind.model': 'Model',
   'account.theme.title': 'Appearance',
   'account.theme.legend': 'Color mode',
   'account.theme.light': 'Light',
