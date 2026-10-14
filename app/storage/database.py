@@ -34,7 +34,7 @@ def resolve_db_path() -> Path:
 DB_PATH = resolve_db_path()
 # Bump when the schema or any _migrate_* changes: a bump takes exactly one
 # timestamped backup BEFORE migrating. See backup_database().
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 BACKUP_KEEP = 5
 BACKUP_MAX_AGE_SECONDS = 86400
 
@@ -102,6 +102,7 @@ class Database:
             self._migrate_library(connection)
             self._migrate_account_portal(connection)
             self._migrate_auth(connection)
+            self._migrate_reading(connection)
             connection.execute("""CREATE TABLE IF NOT EXISTS book_glossaries (
                 book_id INTEGER NOT NULL REFERENCES library_books(id) ON DELETE CASCADE,
                 source_language TEXT NOT NULL, target_language TEXT NOT NULL,
@@ -222,6 +223,43 @@ class Database:
                 connection.execute(f"ALTER TABLE files ADD COLUMN {name} {definition}")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_files_book_id ON files(book_id)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_library_books_archived ON library_books(archived)")
+
+    @staticmethod
+    def _migrate_reading(connection):
+        """Reading shelves, custom tags and per-day page totals.
+
+        All three tables are user-scoped from day one (Phase A): every row
+        carries ``user_id`` and every query filters on it. ``user_id`` is
+        intentionally NOT a foreign key to ``users`` — local installs may
+        have zero user rows (auth is optional pre-launch), and a FK would
+        reject the single-user fallback id. Phase A makes auth mandatory and
+        may add the FK then.
+        """
+        connection.execute("""CREATE TABLE IF NOT EXISTS book_shelves (
+            user_id INTEGER NOT NULL,
+            book_id INTEGER NOT NULL REFERENCES library_books(id) ON DELETE CASCADE,
+            shelf TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY(user_id, book_id)
+        )""")
+        connection.execute("""CREATE TABLE IF NOT EXISTS book_tags (
+            user_id INTEGER NOT NULL,
+            book_id INTEGER NOT NULL REFERENCES library_books(id) ON DELETE CASCADE,
+            tag TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY(user_id, book_id, tag)
+        )""")
+        connection.execute("""CREATE TABLE IF NOT EXISTS reading_events (
+            user_id INTEGER NOT NULL,
+            book_id INTEGER NOT NULL REFERENCES library_books(id) ON DELETE CASCADE,
+            day TEXT NOT NULL,
+            pages INTEGER NOT NULL DEFAULT 0,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY(user_id, book_id, day)
+        )""")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_book_shelves_user_shelf ON book_shelves(user_id, shelf)")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_book_tags_user_tag ON book_tags(user_id, tag)")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_reading_events_user_day ON reading_events(user_id, day)")
 
     @staticmethod
     def _migrate_account_portal(connection):

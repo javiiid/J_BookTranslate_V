@@ -2,13 +2,15 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { api } from '@/lib/api'
-import type { LibraryBook, LibraryStatusFilter } from '@/lib/api'
+import type { LibraryBook, LibraryShelf, LibraryStatusFilter } from '@/lib/api'
 import { fa, faAgo, faBytes, faDate, badgeClass, statusLabel } from '@/lib/format'
 import { useLanguage } from '@/i18n/useLanguage.ts'
 import type { StringKey } from '@/i18n/fa.ts'
 import {
   LIBRARY_TABS,
   activeVariant,
+  bookShelf,
+  bookTags,
   chunkProgress,
   coverInitials,
   furthestProgress,
@@ -120,6 +122,22 @@ const kindLabel = (t: (key: StringKey) => string, kind: string): string => {
   return key ? t(key) : kind
 }
 
+/**
+ * A reading shelf, as a dictionary key. Same shape as `KIND_KEY` for the same
+ * reason: an unknown future shelf renders its raw value rather than nothing.
+ * This is reading state, not translation state — see `bookShelf`.
+ */
+const SHELF_KEY: Record<string, StringKey> = {
+  want: 'library.shelf.want',
+  reading: 'library.shelf.reading',
+  finished: 'library.shelf.finished',
+}
+
+const shelfLabel = (t: (key: StringKey) => string, shelf: string): string => {
+  const key = SHELF_KEY[shelf]
+  return key ? t(key) : shelf
+}
+
 /** A file format, as the badge on the cover and in the row's meta line. */
 function extensionOf(book: LibraryBook): string {
   const extension = activeVariant(book)?.extension
@@ -214,6 +232,17 @@ function BookMenu({ book }: { book: LibraryBook }) {
     },
   })
 
+  // Shelving is reading state, not translation state: moving a book to
+  // "finished" never touches its translation status, and the badge for it
+  // renders beside — never instead of — the translation badge in the row.
+  const shelf = bookShelf(book)
+  const moveShelf = useMutation({
+    mutationFn: (next: LibraryShelf | null) => api.setShelf(book.id, next),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: ['library'] })
+    },
+  })
+
   const canDelete = active?.status !== 'running' && active?.status !== 'queued'
 
   const runDelete = () => {
@@ -254,6 +283,22 @@ function BookMenu({ book }: { book: LibraryBook }) {
         {canDelete ? (
           <>
             <span className="lib-menu-sep" aria-hidden="true" />
+            <label className="lib-menu-shelf">
+              <span>{t('library.shelf.set')}</span>
+              <select
+                value={shelf ?? ''}
+                disabled={moveShelf.isPending}
+                onChange={(event) => {
+                  const value = event.target.value
+                  moveShelf.mutate(value === '' ? null : (value as LibraryShelf))
+                }}
+              >
+                <option value="">{t('library.shelf.none')}</option>
+                <option value="want">{t('library.shelf.want')}</option>
+                <option value="reading">{t('library.shelf.reading')}</option>
+                <option value="finished">{t('library.shelf.finished')}</option>
+              </select>
+            </label>
             <button
               type="button"
               className="lib-menu-danger"
@@ -276,6 +321,8 @@ function BookRow({ book }: { book: LibraryBook }) {
   const chunks = chunkProgress(active)
   const percent = percentOf(active)
   const status = active?.status ?? book.status
+  const shelf = bookShelf(book)
+  const tags = bookTags(book)
 
   return (
     <li className="surface-card p-4">
@@ -304,6 +351,16 @@ function BookRow({ book }: { book: LibraryBook }) {
               {book.translated ? <span className="badge badge-success">{t('library.translatedBadge')}</span> : null}
               {book.readable ? <span className="badge badge-info">{t('library.readableBadge')}</span> : null}
               <span className={badgeClass(status)}>{bookStatusLabel(t, status)}</span>
+              {shelf ? (
+                <span className={shelf === 'finished' ? 'badge badge-success' : 'badge badge-info'}>
+                  {shelfLabel(t, shelf)}
+                </span>
+              ) : null}
+              {tags.map((tag) => (
+                <span key={tag} className="badge">
+                  #{tag}
+                </span>
+              ))}
               {(book.variants ?? []).map((variant) => (
                 <span key={variant.id} className="badge">
                   {kindLabel(t, variant.kind)}
@@ -420,6 +477,12 @@ export function LibraryPage() {
   const [filter, setFilter] = useState<LibraryStatusFilter | ''>('')
   const [rawQuery, setRawQuery] = useState('')
   const [query, setQuery] = useState('')
+  // Reading shelf and tag ride the same server-side filtering as `status`:
+  // the endpoint understands `shelf` and `tag`, so these are values the list
+  // asks for rather than a client-side guess over one page.
+  const [shelfFilter, setShelfFilter] = useState<LibraryShelf | ''>('')
+  const [rawTag, setRawTag] = useState('')
+  const [tag, setTag] = useState('')
 
   // Debounce: 300ms is short enough to feel live and long enough that a fast
   // typist does not produce eight requests.
@@ -432,6 +495,16 @@ export function LibraryPage() {
     }, 300)
   }
   onQuery.timer = 0
+
+  const onTag = (value: string) => {
+    setRawTag(value)
+    window.clearTimeout(onTag.timer)
+    onTag.timer = window.setTimeout(() => {
+      setTag(value)
+      setPage(1)
+    }, 300)
+  }
+  onTag.timer = 0
 
   const counts = useQuery({
     queryKey: ['library', 'counts'],
@@ -464,9 +537,16 @@ export function LibraryPage() {
     staleTime: 30_000,
   })
   const books = useQuery({
-    queryKey: ['library', 'list', page, query, filter],
-    queryFn: () => api.library(page, PAGE_SIZE, query, filter),
+    queryKey: ['library', 'list', page, query, filter, shelfFilter, tag],
+    queryFn: () => api.library(page, PAGE_SIZE, query, filter, shelfFilter, tag),
     placeholderData: (previous) => previous,
+  })
+  // Pages per day and the reading streak. Polled on a slower cadence than the
+  // list: it moves when the reader reports progress, not when they type.
+  const reading = useQuery({
+    queryKey: ['library', 'reading-stats'],
+    queryFn: () => api.readingStats(30),
+    staleTime: 60_000,
   })
 
   const stats = libraryStats({
@@ -484,6 +564,11 @@ export function LibraryPage() {
 
   const chooseFilter = (key: LibraryStatusFilter | '') => {
     setFilter(key)
+    setPage(1)
+  }
+
+  const chooseShelf = (key: LibraryShelf | '') => {
+    setShelfFilter(key)
     setPage(1)
   }
 
@@ -602,11 +687,33 @@ export function LibraryPage() {
                 placeholder={t('library.searchPh')}
                 aria-label={t('library.searchAria')}
               />
+              <select
+                className="field"
+                value={shelfFilter}
+                onChange={(event) => chooseShelf(event.target.value as LibraryShelf | '')}
+                aria-label={t('library.shelf.label')}
+              >
+                <option value="">{t('library.shelf.all')}</option>
+                <option value="want">{t('library.shelf.want')}</option>
+                <option value="reading">{t('library.shelf.reading')}</option>
+                <option value="finished">{t('library.shelf.finished')}</option>
+              </select>
+              <input
+                type="search"
+                className="field"
+                value={rawTag}
+                onChange={(event) => onTag(event.target.value)}
+                placeholder={t('library.tagPh')}
+                aria-label={t('library.tagAria')}
+              />
               <span
                 className="text-[length:var(--text-caption)]"
                 style={{ color: 'var(--color-text-muted)' }}
               >
                 {activity ? t('library.lastActivity', { date: faDate(activity) }) : t('library.noActivity')}
+                {reading.data && reading.data.total_pages > 0
+                  ? ` · ${t('library.readingLine', { avg: fa(reading.data.avg_per_day), streak: fa(reading.data.streak_days) })}`
+                  : ''}
               </span>
             </div>
 

@@ -69,6 +69,7 @@ from app.account.service import (
 )
 from app.library.view import library_page
 from app.library import covers as book_covers
+from app.library import shelves as book_shelves
 from app.auth.service import (
     SESSION_COOKIE,
     SESSION_DAYS,
@@ -726,16 +727,43 @@ def reading_settings() -> dict:
     return values
 
 
-def library_summary(query: str = "") -> dict:
+def _library_user_id(token: str = "") -> int:
+    """User id for library reads/writes.
+
+    Authenticated callers get their own id; everyone else falls back to the
+    first user (or 1). Loopback-justified for the current local build — the
+    scoping itself is Phase-A-shaped, only the fallback dies at launch.
+    """
+    try:
+        user = user_from_token(db, token)
+    except Exception:
+        user = None
+    if user:
+        return int(user["id"])
+    return book_shelves.resolve_user_id(db)
+
+
+def library_summary(query: str = "", user_id: int | None = None) -> dict:
     params = parse_qs(query)
     search = params.get("q", [""])[0].strip().lower()
     status_filter = params.get("status", [""])[0].strip().lower()
     type_filter = params.get("type", [""])[0].strip().lower()
+    shelf_filter = params.get("shelf", [""])[0].strip().lower()
+    tag_filter = book_shelves.normalize_tag(params.get("tag", [""])[0]) if params.get("tag") else ""
+    if shelf_filter and shelf_filter not in book_shelves.SHELVES:
+        shelf_filter = ""
+    uid = user_id if user_id is not None else book_shelves.resolve_user_id(db)
     archived_mode = status_filter == "archived"
     books = db.fetch_all(f"SELECT * FROM library_books WHERE archived={1 if archived_mode else 0} ORDER BY updated_at DESC")
     items = []
     for book in books:
         if search and search not in book["title"].lower():
+            continue
+        shelf = book_shelves.get_shelf(db, uid, int(book["id"]))
+        tags = book_shelves.get_tags(db, uid, int(book["id"]))
+        if shelf_filter and shelf != shelf_filter:
+            continue
+        if tag_filter and tag_filter not in tags:
             continue
         files = db.fetch_all(f"SELECT * FROM files WHERE book_id=? AND archived={1 if archived_mode else 0} ORDER BY CASE kind WHEN 'translated' THEN 0 ELSE 1 END, id", (book["id"],))
         variants = []
@@ -770,7 +798,7 @@ def library_summary(query: str = "") -> dict:
             original = next((v for v in variants if v.get("kind") == "original" and Path(str(v.get("path", ""))).is_file()), None)
             if original is not None:
                 cover_path = _store_book_cover(int(book["id"]), Path(str(original["path"])))
-        items.append({"id": book["id"], "title": book["title"], "author": book.get("author", ""), "cover_path": cover_path, "created_at": book["created_at"], "updated_at": book["updated_at"], "status": overall, "variants": variants, "size_bytes": sum(int(item.get("size_bytes", 0)) for item in variants), "translated": any(item["kind"] == "translated" for item in variants), "readable": any(item.get("reader") for item in variants)})
+        items.append({"id": book["id"], "title": book["title"], "author": book.get("author", ""), "cover_path": cover_path, "created_at": book["created_at"], "updated_at": book["updated_at"], "status": overall, "shelf": shelf, "tags": tags, "variants": variants, "size_bytes": sum(int(item.get("size_bytes", 0)) for item in variants), "translated": any(item["kind"] == "translated" for item in variants), "readable": any(item.get("reader") for item in variants)})
     total = len(items)
     try: page, limit = max(1, int(params.get("page", [1])[0])), max(1, min(100, int(params.get("limit", [24])[0])))
     except ValueError: page, limit = 1, 24
@@ -1373,7 +1401,12 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/api/memory/export":
             self._json({"items": db.fetch_all("SELECT * FROM translation_memory ORDER BY id")}); return
         if parsed.path == "/api/library":
-            self._json(library_summary(parsed.query)); return
+            self._json(library_summary(parsed.query, _library_user_id(self._session_token()))); return
+        if parsed.path == "/api/reading/stats":
+            query = parse_qs(parsed.query)
+            try: days = int((query.get("days", ["30"])[0] or "30"))
+            except (TypeError, ValueError): days = 30
+            self._json(book_shelves.reading_stats(db, _library_user_id(self._session_token()), days)); return
         if parsed.path.startswith("/api/library/") and parsed.path.endswith("/files"):
             book_id = parsed.path.split("/")[3]
             book = db.fetch_one("SELECT * FROM library_books WHERE id=?", (book_id,))
@@ -1381,7 +1414,8 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"book": book, "items": db.fetch_all("SELECT * FROM files WHERE book_id=? ORDER BY id", (book_id,))}); return
         if parsed.path.startswith("/api/library/") and parsed.path.count("/") == 3:
             book_id = parsed.path.rsplit("/", 1)[-1]
-            result = next((item for item in library_summary()["items"] if str(item["id"]) == book_id), None)
+            uid = _library_user_id(self._session_token())
+            result = next((item for item in library_summary("", uid)["items"] if str(item["id"]) == book_id), None)
             if not result: self._json({"error": "Book not found."}, 404); return
             self._json(result); return
         if parsed.path == "/api/analytics/overview":
@@ -1747,6 +1781,15 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/api/library/") and path.endswith("/archive"):
             book_id = path.split("/")[-2]
             db.execute("UPDATE library_books SET archived=1, updated_at=? WHERE id=?", (now(), book_id)); db.execute("UPDATE files SET archived=1 WHERE book_id=?", (book_id,)); self._json({"ok": True}); return
+        if path.startswith("/api/library/") and path.endswith("/progress"):
+            try: body = self._request_json()
+            except (ValueError, json.JSONDecodeError) as exc: self._json({"error": str(exc)}, 400); return
+            try:
+                book_id = int(path.split("/")[3])
+                result = book_shelves.record_progress(db, _library_user_id(self._session_token()), book_id, body.get("pages"), body.get("location"))
+                self._json({"ok": True, **result}); return
+            except LookupError as exc: self._json({"error": str(exc)}, 404); return
+            except (ValueError, TypeError) as exc: self._json({"error": str(exc)}, 400); return
         if path.startswith("/api/jobs/") and path.endswith("/stop"):
             job=self._job(path.split("/")[-2])
             if not job or job.status!="running": self._json({"error":"این کار قابل توقف نیست."},400); return
@@ -1889,6 +1932,21 @@ class Handler(BaseHTTPRequestHandler):
             return
         try: body = self._request_json()
         except (ValueError, json.JSONDecodeError) as exc: self._json({"error": str(exc)}, 400); return
+        if path.startswith("/api/library/") and path.endswith("/shelf"):
+            try:
+                book_id = int(path.split("/")[3])
+                shelf = body.get("shelf")
+                result = book_shelves.set_shelf(db, _library_user_id(self._session_token()), book_id, shelf)
+                self._json({"ok": True, "shelf": result}); return
+            except LookupError as exc: self._json({"error": str(exc)}, 404); return
+            except (ValueError, TypeError) as exc: self._json({"error": str(exc)}, 400); return
+        if path.startswith("/api/library/") and path.endswith("/tags"):
+            try:
+                book_id = int(path.split("/")[3])
+                tags = book_shelves.set_tags(db, _library_user_id(self._session_token()), book_id, body.get("tags"))
+                self._json({"ok": True, "tags": tags}); return
+            except LookupError as exc: self._json({"error": str(exc)}, 404); return
+            except (ValueError, TypeError) as exc: self._json({"error": str(exc)}, 400); return
         if path == "/api/account":
             try: self._json(update_account(body))
             except (ValueError, TypeError) as exc: self._json({"error": str(exc)}, 400)

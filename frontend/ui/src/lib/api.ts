@@ -158,6 +158,14 @@ export interface LibraryBook {
   created_at: string
   updated_at: string
   status: string
+  /**
+   * Reading shelf, owned by `app/library/shelves.py` — never the translation
+   * `status`. Optional because an older backend predates it; absence renders
+   * as "no shelf" rather than crashing.
+   */
+  shelf?: 'want' | 'reading' | 'finished' | null
+  /** Custom tags for this user. Absent on older backends; renders as none. */
+  tags?: string[]
   variants: LibraryVariant[]
   size_bytes: number
   translated: boolean
@@ -186,6 +194,22 @@ export interface LibraryListResponse {
  * give a second, quieter way to lose one.
  */
 export type LibraryStatusFilter = 'completed' | 'running' | 'failed' | 'available' | 'archived'
+
+/**
+ * Reading shelves from `app/library/shelves.py`. Separate from
+ * `LibraryStatusFilter`, which is translation state — a book can be
+ * translation-`completed` and still sit on no shelf at all.
+ */
+export type LibraryShelf = 'want' | 'reading' | 'finished'
+
+/** Per-day page totals from `GET /api/reading/stats`. Empty library → zeros, never NaN. */
+export interface ReadingStats {
+  per_day: Array<{ day: string; pages: number }>
+  total_pages: number
+  avg_per_day: number
+  streak_days: number
+  days: number
+}
 
 export interface Model {
   id: string
@@ -649,13 +673,50 @@ export const api = {
     // omission -- so it is a value here rather than an optional parameter, and a
     // caller cannot pass `undefined` where the union would not take it.
     status: LibraryStatusFilter | '' = '',
+    // Same convention for the reading shelf and tag: omission means no filter.
+    shelf: LibraryShelf | '' = '',
+    tag = '',
   ) => {
     const params = new URLSearchParams({ page: String(page), limit: String(limit) })
     if (query.trim()) params.set('q', query.trim())
     if (status) params.set('status', status)
+    if (shelf) params.set('shelf', shelf)
+    if (tag.trim()) params.set('tag', tag.trim())
     return request<LibraryListResponse>(`/api/library?${params}`)
   },
   book: (id: number) => request<LibraryBook>(`/api/library/${id}`),
+  /**
+   * Move a book between reading shelves (`null` clears it). Unknown shelves
+   * are a 400, never a silent fallback — the reader chose a word and the
+   * server must either honour it or say so.
+   */
+  setShelf: (id: number, shelf: LibraryShelf | null) =>
+    request<{ ok: boolean; shelf: LibraryShelf | null }>(`/api/library/${id}/shelf`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ shelf }),
+    }),
+  /**
+   * Replace a book's tags. Normalisation (trim, ZWNJ kept, Latin lowered)
+   * lives server-side in `app/library/shelves.py`; this sends the raw list.
+   */
+  setTags: (id: number, tags: string[]) =>
+    request<{ ok: boolean; tags: string[] }>(`/api/library/${id}/tags`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tags }),
+    }),
+  /**
+   * Add pages to today's reading total. Fire-and-forget from the reader:
+   * a failed report must never block rendering the chapter.
+   */
+  reportProgress: (id: number, pages: number, location?: string) =>
+    request<{ ok: boolean; day: string; pages_today: number }>(`/api/library/${id}/progress`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(location === undefined ? { pages } : { pages, location }),
+    }),
+  readingStats: (days = 30) => request<ReadingStats>(`/api/reading/stats?days=${days}`),
   archiveBook: (id: number) =>
     request<{ ok: boolean }>(`/api/library/${id}`, { method: 'DELETE' }),
 

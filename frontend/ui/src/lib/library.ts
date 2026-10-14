@@ -37,7 +37,7 @@
  * count. They read a single wide page and say so below.
  */
 
-import type { LibraryBook, LibraryStatusFilter, LibraryVariant } from './api'
+import type { LibraryBook, LibraryShelf, LibraryStatusFilter, LibraryVariant } from './api'
 
 /**
  * The variant a row reports on.
@@ -336,4 +336,51 @@ export function coverInitials(book: LibraryBook): string {
 /** The status of a book's active variant, falling back to the book's own. */
 export function rowStatus(book: LibraryBook): string {
   return activeVariant(book)?.status ?? book.status
+}
+
+/* ------------------------------------------------------------------ */
+/* Reading shelves, tags and stats                                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A book's reading shelf, or `null` when it sits on none.
+ *
+ * This is reading state (`app/library/shelves.py`), not translation state:
+ * a book whose translation finished months ago can still be unshelved, and
+ * shelving it "finished" never changes its translation `status`. Unknown
+ * future shelf values fall back to `null` rather than a badge of raw Latin.
+ */
+export function bookShelf(book: LibraryBook): LibraryShelf | null {
+  const shelf = book.shelf ?? null
+  return shelf === 'want' || shelf === 'reading' || shelf === 'finished' ? shelf : null
+}
+
+/** A book's tags for this user, or an empty list on older backends. */
+export function bookTags(book: LibraryBook): string[] {
+  return Array.isArray(book.tags) ? book.tags : []
+}
+
+/**
+ * Whether a shelf value may be sent to the server.
+ *
+ * The endpoint answers 400 on anything else, so the select that offers these
+ * is built from the same union rather than from free text.
+ */
+export function isShelf(value: string): value is LibraryShelf {
+  return value === 'want' || value === 'reading' || value === 'finished'
+}
+
+/**
+ * Pages read on one day (`YYYY-MM-DD`), or 0 when the log has no such day.
+ *
+ * `today` defaults to the current UTC day, matching the server, which stamps
+ * `reading_events.day` in UTC. Injected in tests so "today" is not the day
+ * the suite happens to run.
+ */
+export function pagesOnDay(
+  stats: { per_day: ReadonlyArray<{ day: string; pages: number }> } | null | undefined,
+  today: string = new Date().toISOString().slice(0, 10),
+): number {
+  if (!stats) return 0
+  return stats.per_day.find((row) => row.day === today)?.pages ?? 0
 }

@@ -36,13 +36,17 @@ import { describe, it } from 'node:test'
 import {
   LIBRARY_TABS,
   activeVariant,
+  bookShelf,
+  bookTags,
   chunkProgress,
   coverInitials,
   furthestProgress,
+  isShelf,
   lastReadable,
   libraryStats,
   pageCount,
   pageRange,
+  pagesOnDay,
   percentOf,
   progressLadder,
   readableVariant,
@@ -431,5 +435,49 @@ describe('the cover that is not a cover', () => {
 
   it('does not throw on a book with no title and no variant', () => {
     assert.equal(typeof coverInitials(book({ title: '', variants: [] })), 'string')
+  })
+})
+
+describe('the reading shelf', () => {
+  it('is null when the backend sent nothing, and never the translation status', () => {
+    // A translation-`completed` book with no shelf is unshelved, not finished:
+    // the two describe different things and one must not imply the other.
+    assert.equal(bookShelf(book({ status: 'completed' })), null)
+    assert.equal(bookShelf(book({ shelf: 'reading' })), 'reading')
+    assert.equal(bookShelf(book({ shelf: 'finished' })), 'finished')
+  })
+
+  it('falls back to null on a shelf the client does not know yet', () => {
+    assert.equal(bookShelf(book({ shelf: 'abandoned' as never })), null)
+  })
+
+  it('knows exactly the three shelves the endpoint accepts', () => {
+    assert.ok(isShelf('want') && isShelf('reading') && isShelf('finished'))
+    assert.equal(isShelf(''), false)
+    assert.equal(isShelf('archived'), false)
+  })
+})
+
+describe('the tags', () => {
+  it('is an empty list when the backend predates tags', () => {
+    assert.deepEqual(bookTags(book()), [])
+  })
+
+  it('passes through what the server normalised', () => {
+    assert.deepEqual(bookTags(book({ tags: ['رمان', 'sci-fi'] })), ['رمان', 'sci-fi'])
+  })
+})
+
+describe('pages on a day', () => {
+  const stats = { per_day: [{ day: '2026-10-10', pages: 12 }, { day: '2026-10-11', pages: 7 }] }
+
+  it('reads the matching day', () => {
+    assert.equal(pagesOnDay(stats, '2026-10-10'), 12)
+  })
+
+  it('is zero for a day with no entry, and never NaN or undefined', () => {
+    assert.equal(pagesOnDay(stats, '2026-10-12'), 0)
+    assert.equal(pagesOnDay(null, '2026-10-10'), 0)
+    assert.equal(pagesOnDay({ per_day: [] }, '2026-10-10'), 0)
   })
 })
