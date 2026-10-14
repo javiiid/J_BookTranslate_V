@@ -876,6 +876,10 @@ export const fa = {
   'reader.prev': 'فصل قبل',
   'reader.next': 'فصل بعد',
   'reader.position': '{index} از {total}',
+  'reader.progress': '{index} از {total} • {percent}٪',
+  'reader.readTick': 'خوانده‌شده',
+  'reader.side.original': 'متن اصلی',
+  'reader.side.translation': 'ترجمه',
   'reader.loadError': 'بارگذاری این فصل ممکن نشد.',
   'reader.noBilingual': 'این فصل به‌صورت دوزبانه هم‌تراز نشده است؛ حالت «ترجمه» را امتحان کنید.',
 

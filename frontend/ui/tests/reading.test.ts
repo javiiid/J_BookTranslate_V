@@ -21,7 +21,13 @@ import {
   clampFontSize,
   clampLineHeight,
   clampWidth,
+  directionFor,
   isDirection,
+  lastLocationOf,
+  locationKey,
+  overallPercent,
+  readKey,
+  storedChapter,
   toReaderMode,
 } from '../src/lib/reading.ts'
 
@@ -91,5 +97,76 @@ describe('reading direction', () => {
     assert.ok(isDirection('auto') && isDirection('rtl') && isDirection('ltr'))
     assert.equal(isDirection(''), false)
     assert.equal(isDirection('RTL'), false)
+  })
+})
+
+describe('per-side direction', () => {
+  it('lets an explicit setting win', () => {
+    assert.equal(directionFor('سلام دنیا', 'ltr'), 'ltr')
+    assert.equal(directionFor('hello world', 'rtl'), 'rtl')
+  })
+
+  it('detects Arabic script as RTL, like the Python reader', () => {
+    assert.equal(directionFor('<p>سلام دنیا</p>', 'auto'), 'rtl')
+    assert.equal(directionFor('<p>hello world</p>', 'auto'), 'ltr')
+  })
+
+  it('falls through to detection on an unknown setting', () => {
+    assert.equal(directionFor('hello', 'sideways'), 'ltr')
+    assert.equal(directionFor('سلام', 'sideways'), 'rtl')
+  })
+
+  it('reads Latin-only markup as LTR', () => {
+    // Tags are Latin, so markup alone must not flip a side to RTL.
+    assert.equal(directionFor('<div class="x"><br></div>', 'auto'), 'ltr')
+  })
+})
+
+describe('overall progress', () => {
+  it('adds the chapter fraction to the chapters before it', () => {
+    assert.equal(overallPercent(2, 0.5, 10), 25)
+    assert.equal(overallPercent(0, 0, 4), 0)
+    assert.equal(overallPercent(3, 1, 4), 100)
+  })
+
+  it('clamps instead of running past either end', () => {
+    // `frac` is a 0..1 fraction: 9 clamps to a full chapter (10%), and a
+    // chapter past the last one clamps to the whole book (100%).
+    assert.equal(overallPercent(0, 9, 10), 10)
+    assert.equal(overallPercent(0, -0.5, 10), 0)
+    assert.equal(overallPercent(11, 0, 10), 100)
+  })
+
+  it('is zero rather than NaN when there is nothing to divide by', () => {
+    assert.equal(overallPercent(0, 0.5, 0), 0)
+    assert.equal(overallPercent(Number.NaN, 0.5, 10), 0)
+  })
+})
+
+describe('remembered location', () => {
+  it('shares the Python reader storage keys', () => {
+    assert.equal(locationKey('job-1'), 'jbook:loc:job-1')
+    assert.equal(readKey('job-1'), 'jbook:read:job-1')
+  })
+
+  it('reads the {job_id, chapter} shape both readers write', () => {
+    assert.deepEqual(lastLocationOf({ job_id: 'a', chapter: 3 }), { chapter: 3 })
+    assert.equal(lastLocationOf(null), null)
+    assert.equal(lastLocationOf('chapter 3'), null)
+    assert.equal(lastLocationOf({ chapter: -1 }), null)
+    assert.equal(lastLocationOf({ chapter: Number.NaN }), null)
+    assert.equal(lastLocationOf({}), null)
+  })
+
+  it('opens the explicit choice, then local memory, then server memory', () => {
+    const ids = [0, 1, 2]
+    assert.equal(storedChapter(ids, 2, { chapter: 1 }, { chapter: 0 }), 2)
+    assert.equal(storedChapter(ids, null, { chapter: 1 }, { chapter: 0 }), 1)
+    assert.equal(storedChapter(ids, null, { chapter: 9 }, { chapter: 0 }), 0)
+    assert.equal(storedChapter(ids, null, null, null), null)
+  })
+
+  it('ignores a remembered chapter that no longer exists', () => {
+    assert.equal(storedChapter([0, 1], null, { chapter: 7 }, { chapter: 7 }), null)
   })
 })

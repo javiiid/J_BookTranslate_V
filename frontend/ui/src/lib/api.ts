@@ -240,7 +240,13 @@ export interface ReadingSettings {
   reading_line_height: number
   reading_width: number
   reading_direction: 'auto' | 'ltr' | 'rtl'
-  reading_last_location: string | null
+  /**
+   * The chapter the server remembers, written as `{job_id, chapter}` by the
+   * Python reader and by this port — not a string. Typed as `unknown`
+   * because older rows may hold anything; narrow with `lastLocationOf`
+   * in `lib/reading.ts` rather than trusting the shape.
+   */
+  reading_last_location: unknown
   /**
    * Present on the backend (`READING_DEFAULTS` in `app/web.py`); optional
    * here so payloads built before the glossary step still typecheck.

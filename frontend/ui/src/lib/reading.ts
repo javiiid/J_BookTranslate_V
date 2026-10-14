@@ -91,3 +91,80 @@ export function isDirection(
 ): value is NonNullable<ReadingSettings['reading_direction']> {
   return value === 'auto' || value === 'rtl' || value === 'ltr'
 }
+
+/* ------------------------------------------------------------------ */
+/* Paragraph pairing and reading progress                               */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Local storage keys, shared with the Python reader (`app/reader/page.py`):
+ * a location survives switching between the two readers because both read
+ * and write the same keys.
+ */
+export function locationKey(jobId: string): string {
+  return `jbook:loc:${jobId}`
+}
+
+export function readKey(jobId: string): string {
+  return `jbook:read:${jobId}`
+}
+
+/**
+ * Content direction for one side, mirroring `directionFor()` in
+ * `app/reader/page.py`: an explicit setting wins, otherwise any Arabic-
+ * script character (U+0600–U+06FF) makes it RTL. Unknown settings fall
+ * through to detection rather than rendering nothing.
+ */
+export function directionFor(html: string, direction: string): 'rtl' | 'ltr' {
+  if (direction === 'rtl' || direction === 'ltr') return direction
+  return /[\u0600-\u06FF]/.test(html) ? 'rtl' : 'ltr'
+}
+
+/**
+ * Overall reading progress in whole percent: the fraction through the
+ * current chapter added to the chapters before it. Clamped, never NaN —
+ * an empty book reports 0 rather than dividing by zero.
+ */
+export function overallPercent(index: number, frac: number, total: number): number {
+  if (!Number.isFinite(index) || !Number.isFinite(frac) || !(total > 0)) return 0
+  const clamped = Math.min(1, Math.max(0, frac))
+  return Math.min(100, Math.max(0, Math.round(((index + clamped) / total) * 100)))
+}
+
+/**
+ * The chapter the server remembers, or `null` when it remembers nothing
+ * usable. The stored shape is `{job_id, chapter}` (written by the Python
+ * reader and by this port); anything else — the default `null`, a stray
+ * string from an older build — is "no memory", not an error.
+ */
+export function lastLocationOf(value: unknown): { chapter: number } | null {
+  if (typeof value !== 'object' || value === null) return null
+  const chapter = (value as { chapter?: unknown }).chapter
+  if (typeof chapter !== 'number' || !Number.isFinite(chapter) || chapter < 0) {
+    return null
+  }
+  return { chapter: Math.trunc(chapter) }
+}
+
+/**
+ * Which chapter to open: an explicit choice first, then the locally
+ * remembered chapter when it still exists, then the server memory, else
+ * nothing (the caller falls back to the first chapter).
+ */
+export function storedChapter(
+  validIds: ReadonlyArray<number>,
+  selected: number | null,
+  local: unknown,
+  server: unknown,
+): number | null {
+  if (selected !== null && validIds.includes(selected)) return selected
+  const localChapter = lastLocationOf(local)
+  if (localChapter !== null && validIds.includes(localChapter.chapter)) {
+    return localChapter.chapter
+  }
+  const serverChapter = lastLocationOf(server)
+  if (serverChapter !== null && validIds.includes(serverChapter.chapter)) {
+    return serverChapter.chapter
+  }
+  return null
+}
