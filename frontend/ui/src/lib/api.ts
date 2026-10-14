@@ -225,12 +225,17 @@ export interface Language {
 export interface ReadingSettings {
   study_night_mode: boolean
   reading_theme: 'light' | 'dark'
-  reading_mode: 'translation' | 'original' | 'bilingual'
+  reading_mode: 'translation' | 'original' | 'bilingual' | 'columns'
   reading_font_size: number
   reading_line_height: number
   reading_width: number
   reading_direction: 'auto' | 'ltr' | 'rtl'
   reading_last_location: string | null
+  /**
+   * Present on the backend (`READING_DEFAULTS` in `app/web.py`); optional
+   * here so payloads built before the glossary step still typecheck.
+   */
+  reading_glossary?: boolean
 }
 
 /* ------------------------------------------------------------------ */

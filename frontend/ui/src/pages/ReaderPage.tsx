@@ -4,7 +4,23 @@ import { useParams } from 'react-router-dom'
 import { api } from '@/lib/api'
 import type { Chapter, ChapterBlock, ChapterContent, ReadingSettings } from '@/lib/api'
 import { stripDuplicatedHeading, stripLeadingTitle } from '@/lib/chunks'
+import {
+  DIRECTION_OPTIONS,
+  LINE_HEIGHT_FALLBACK,
+  LINE_HEIGHT_OPTIONS,
+  READER_MODES,
+  WIDTH_FALLBACK,
+  WIDTH_OPTIONS,
+  clampFontSize,
+  clampLineHeight,
+  clampWidth,
+  isDirection,
+  toReaderMode,
+  type ReaderMode,
+} from '@/lib/reading.ts'
 import { fa } from '@/lib/format'
+import { useLanguage } from '@/i18n/useLanguage.ts'
+import type { StringKey } from '@/i18n/fa.ts'
 
 /**
  * The bilingual reader.
@@ -24,24 +40,22 @@ import { fa } from '@/lib/format'
  * injected whole: there is no remote origin in it.
  */
 
-const MODE_FA: Record<ReaderMode, string> = {
-  translation: 'ترجمه',
-  original: 'مبدأ',
-  bilingual: 'دوزبانه',
+const MODE_KEY: Record<ReaderMode, StringKey> = {
+  translation: 'reader.mode.translation',
+  original: 'reader.mode.original',
+  bilingual: 'reader.mode.bilingual',
+  columns: 'reader.mode.columns',
 }
 
-/** Display modes this port implements. The server also knows `columns`, which
- *  falls back to `bilingual` here until the port catches up. */
-type ReaderMode = 'translation' | 'original' | 'bilingual'
-
-function toReaderMode(value: string | undefined): ReaderMode {
-  return value === 'translation' || value === 'original' || value === 'bilingual'
-    ? value
-    : 'bilingual'
+const DIRECTION_KEY: Record<string, StringKey> = {
+  auto: 'reader.direction.auto',
+  rtl: 'reader.direction.rtl',
+  ltr: 'reader.direction.ltr',
 }
 
 export function ReaderPage() {
   const { id = '' } = useParams()
+  const { t, dir } = useLanguage()
   const client = useQueryClient()
   const [selectedId, setSelectedId] = useState<number | null>(null)
   // Local overrides until the next server round-trip. `null` means "follow
@@ -50,6 +64,10 @@ export function ReaderPage() {
   // overwritten by this page's hardcoded defaults.
   const [modeOverride, setModeOverride] = useState<ReaderMode | null>(null)
   const [fontOverride, setFontOverride] = useState<number | null>(null)
+  const [leadingOverride, setLeadingOverride] = useState<number | null>(null)
+  const [widthOverride, setWidthOverride] = useState<number | null>(null)
+  const [directionOverride, setDirectionOverride] = useState<string | null>(null)
+  const [glossOverride, setGlossOverride] = useState<boolean | null>(null)
   const scrollRef = useRef<HTMLDivElement | null>(null)
 
   const settings = useQuery({
@@ -61,6 +79,12 @@ export function ReaderPage() {
   const server = settings.data?.value
   const mode = modeOverride ?? toReaderMode(server?.reading_mode)
   const fontSize = fontOverride ?? server?.reading_font_size ?? 18
+  const lineHeight = leadingOverride ?? server?.reading_line_height ?? LINE_HEIGHT_FALLBACK
+  const width = widthOverride ?? server?.reading_width ?? WIDTH_FALLBACK
+  const direction = directionOverride ?? server?.reading_direction ?? 'auto'
+  // The toggle is persisted from this step on; highlighting itself lands
+  // with the glossary step, which reads this same value.
+  const glossary = glossOverride ?? server?.reading_glossary ?? true
 
   const chapters = useQuery({
     queryKey: ['reader-chapters', id],
@@ -84,7 +108,7 @@ export function ReaderPage() {
   const blocks = useQuery({
     queryKey: ['reader-blocks', id, chapterId],
     queryFn: () => api.readerBlocks(id, chapterId as number),
-    enabled: mode === 'bilingual' && Boolean(id) && chapterId !== null,
+    enabled: (mode === 'bilingual' || mode === 'columns') && Boolean(id) && chapterId !== null,
   })
 
   // A partial, FLAT patch: the backend keeps only keys in READING_DEFAULTS,
@@ -97,21 +121,21 @@ export function ReaderPage() {
   const items = chapters.data?.items ?? []
 
   return (
-    <main className="page" dir="rtl">
+    <main className="page" dir={dir}>
       <header className="mb-5">
         <h1 className="text-[length:var(--text-h1)] font-extrabold tracking-tight">
-          {chapters.data?.book ?? 'مطالعه'}
+          {chapters.data?.book ?? t('reader.read')}
         </h1>
       </header>
 
       <div className="grid gap-5 lg:grid-cols-[260px_minmax(0,1fr)]">
         {/* ---- chapter list ---- */}
-        <nav className="surface-card h-fit p-3" aria-label="فصل‌ها">
-          <h2 className="px-2 py-1 text-[length:var(--text-label)] font-bold">فصل‌ها</h2>
+        <nav className="surface-card h-fit p-3" aria-label={t('reader.chapters')}>
+          <h2 className="px-2 py-1 text-[length:var(--text-label)] font-bold">{t('reader.chapters')}</h2>
           {chapters.isPending ? (
             <div className="skeleton" style={{ height: 120 }} />
           ) : items.length === 0 ? (
-            <p className="empty">فصلی برای این کتاب یافت نشد.</p>
+            <p className="empty">{t('reader.noChapters')}</p>
           ) : (
             <ul className="grid gap-0.5" style={{ maxHeight: '65vh', overflow: 'auto' }}>
               {items.map((chapter: Chapter) => (
@@ -142,8 +166,8 @@ export function ReaderPage() {
         {/* ---- reader ---- */}
         <section className="grid gap-3">
           <div className="surface-card flex flex-wrap items-center gap-3 p-3">
-            <div className="flex gap-1" role="group" aria-label="حالت نمایش">
-              {(Object.keys(MODE_FA) as ReaderMode[]).map((value) => (
+            <div className="flex gap-1" role="group" aria-label={t('reader.mode.label')}>
+              {READER_MODES.map((value) => (
                 <button
                   key={value}
                   type="button"
@@ -159,38 +183,111 @@ export function ReaderPage() {
                     void save.mutate({ reading_mode: value })
                   }}
                 >
-                  {MODE_FA[value]}
+                  {t(MODE_KEY[value])}
                 </button>
               ))}
             </div>
 
             <label className="ms-auto flex items-center gap-2">
-              <span className="label">اندازهٔ متن</span>
+              <span className="label">{t('reader.fontSize')}</span>
               <input
                 type="range"
                 min={13}
                 max={26}
                 value={fontSize}
                 onChange={(event) => {
-                  const value = Number(event.target.value)
+                  const value = clampFontSize(Number(event.target.value))
                   setFontOverride(value)
                   void save.mutate({ reading_font_size: value })
                 }}
-                aria-label="اندازهٔ متن"
+                aria-label={t('reader.fontSize')}
               />
             </label>
+
+            <label className="flex items-center gap-2">
+              <span className="label">{t('reader.lineHeight')}</span>
+              <select
+                className="field"
+                value={lineHeight}
+                onChange={(event) => {
+                  const value = clampLineHeight(Number(event.target.value))
+                  setLeadingOverride(value)
+                  void save.mutate({ reading_line_height: value })
+                }}
+                aria-label={t('reader.lineHeight')}
+              >
+                {LINE_HEIGHT_OPTIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="flex items-center gap-2">
+              <span className="label">{t('reader.width')}</span>
+              <select
+                className="field"
+                value={width}
+                onChange={(event) => {
+                  const value = clampWidth(Number(event.target.value))
+                  setWidthOverride(value)
+                  void save.mutate({ reading_width: value })
+                }}
+                aria-label={t('reader.width')}
+              >
+                {WIDTH_OPTIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="flex items-center gap-2">
+              <span className="label">{t('reader.direction')}</span>
+              <select
+                className="field"
+                value={direction}
+                onChange={(event) => {
+                  const value = event.target.value
+                  if (!isDirection(value)) return
+                  setDirectionOverride(value)
+                  void save.mutate({ reading_direction: value })
+                }}
+                aria-label={t('reader.direction')}
+              >
+                {DIRECTION_OPTIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {t(DIRECTION_KEY[option] ?? 'reader.direction.auto')}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <button
+              type="button"
+              className="btn btn-ghost"
+              aria-pressed={glossary}
+              onClick={() => {
+                setGlossOverride(!glossary)
+                void save.mutate({ reading_glossary: !glossary })
+              }}
+            >
+              {t('reader.glossary')}: {glossary ? t('reader.glossary.on') : t('reader.glossary.off')}
+            </button>
           </div>
 
           <article
             ref={scrollRef}
-            className="surface-card p-6"
-            style={{ maxHeight: '70vh', overflow: 'auto', fontSize }}
+            className="surface-card mx-auto w-full p-6"
+            style={{ maxHeight: '70vh', overflow: 'auto', fontSize, lineHeight, maxWidth: width }}
           >
             {content.isPending ? (
               <div className="skeleton" style={{ height: 320 }} />
             ) : content.isError ? (
               <p role="alert" className="alert alert-error">
-                بارگذاری این فصل ممکن نشد.
+                {t('reader.loadError')}
               </p>
             ) : (
               <ChapterBody
@@ -214,13 +311,16 @@ export function ReaderPage() {
                   if (previous) setSelectedId(previous.id)
                 }}
               >
-                فصل قبل
+                {t('reader.prev')}
               </button>
               <span
                 className="text-[length:var(--text-label)] tabular-nums"
                 style={{ color: 'var(--color-text-muted)' }}
               >
-                {fa(items.findIndex((item) => item.id === chapterId) + 1)} از {fa(items.length)}
+                {t('reader.position', {
+                  index: fa(items.findIndex((item) => item.id === chapterId) + 1),
+                  total: fa(items.length),
+                })}
               </span>
               <button
                 type="button"
@@ -232,7 +332,7 @@ export function ReaderPage() {
                   if (next) setSelectedId(next.id)
                 }}
               >
-                فصل بعد
+                {t('reader.next')}
               </button>
             </div>
           ) : null}
@@ -253,15 +353,17 @@ function ChapterBody({
   blocks: ChapterBlock[]
   blocksPending: boolean
 }) {
+  const { t } = useLanguage()
   // Bilingual uses the block list so source and translation sit side by side.
   // The single-language modes use the chapter HTML directly, which is already
-  // sanitised on the Python side.
-  if (mode === 'bilingual') {
+  // sanitised on the Python side. `columns` renders as bilingual until the
+  // columns step lands its own paired layout.
+  if (mode === 'bilingual' || mode === 'columns') {
     if (blocksPending) return <div className="skeleton" style={{ height: 320 }} />
     if (blocks.length === 0) {
       return (
         <p className="empty">
-          این فصل به‌صورت دوزبانه هم‌تراز نشده است؛ حالت «ترجمه» را امتحان کنید.
+          {t('reader.noBilingual')}
         </p>
       )
     }
