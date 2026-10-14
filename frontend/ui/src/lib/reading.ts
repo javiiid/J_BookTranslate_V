@@ -168,3 +168,31 @@ export function storedChapter(
   }
   return null
 }
+
+/* ------------------------------------------------------------------ */
+/* Columns mode                                                         */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Blocks with a translation to show. Mirrors the columns filter in
+ * `app/reader/page.py` (`renderColumns` drops blocks whose translation is
+ * empty): an untranslated block has no pair, so the columns would lay a
+ * source beside a gap.
+ */
+export function pairedBlocks<T extends { translation_html: string }>(
+  blocks: ReadonlyArray<T>,
+): T[] {
+  return blocks.filter((block) => Boolean(block.translation_html))
+}
+
+/**
+ * Proportional scroll position for the other column, mirroring the Python
+ * sync script: `other.scrollTop = (scrollTop / max) * otherMax`. Clamped
+ * and zero-safe — an unmeasured column (max 0) holds still instead of
+ * producing NaN and flinging the view.
+ */
+export function syncTop(sourceTop: number, sourceMax: number, targetMax: number): number {
+  if (!Number.isFinite(sourceTop) || !(sourceMax > 0) || !(targetMax > 0)) return 0
+  const ratio = Math.min(1, Math.max(0, sourceTop / sourceMax))
+  return ratio * targetMax
+}

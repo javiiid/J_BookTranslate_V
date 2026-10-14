@@ -32,3 +32,59 @@
   line-height: var(--text-caption--line-height);
   white-space: normal;
 }
+
+/* --------------------------------------------------------------------------
+   Columns mode
+
+   Ports `.columns2` in `app/reader/page.py`: two continuous, independently
+   scrolling columns (all originals left, all translations right) with
+   sticky heads. Token-only colors. Grid items carry user text, so the
+   tracks are `minmax(0, 1fr)` and the columns `min-width: 0` — a grid item
+   defaults to never shrinking past its widest word, which widened the page
+   on narrow phones. Below 760px the columns stack and the heights release,
+   mirroring the Python `height: auto; overflow: visible` fallback (and
+   disabling scroll sync, which only makes sense side by side).
+   -------------------------------------------------------------------------- */
+
+.reader-columns-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: var(--spacing-2);
+}
+
+.reader-columns-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--spacing-4);
+}
+
+.reader-col {
+  min-width: 0;
+  overflow: auto;
+  height: clamp(340px, calc(100vh - 300px), 860px);
+}
+
+.reader-col-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--color-surface);
+  padding-bottom: var(--spacing-2);
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+}
+
+.reader-col-block {
+  overflow-wrap: break-word;
+}
+
+@media (max-width: 759px) {
+  .reader-columns-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .reader-col {
+    height: auto;
+    overflow: visible;
+  }
+}

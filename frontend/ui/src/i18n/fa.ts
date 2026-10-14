@@ -878,6 +878,7 @@ export const fa = {
   'reader.position': '{index} از {total}',
   'reader.progress': '{index} از {total} • {percent}٪',
   'reader.readTick': 'خوانده‌شده',
+  'reader.columns.swap': 'جابه‌جایی ستون‌ها',
   'reader.side.original': 'متن اصلی',
   'reader.side.translation': 'ترجمه',
   'reader.loadError': 'بارگذاری این فصل ممکن نشد.',

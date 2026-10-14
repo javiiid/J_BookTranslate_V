@@ -27,8 +27,10 @@ import {
   isDirection,
   locationKey,
   overallPercent,
+  pairedBlocks,
   readKey,
   storedChapter,
+  syncTop,
   toReaderMode,
   type ReaderMode,
 } from '@/lib/reading.ts'
@@ -599,6 +601,157 @@ export function ReaderPage() {
   )
 }
 
+function ColumnSide({
+  label,
+  glossSide,
+  tone,
+  htmlOf,
+  blocks,
+  direction,
+  setRef,
+}: {
+  label: string
+  glossSide: GlossSide
+  tone: string
+  htmlOf: (block: ChapterBlock) => string
+  blocks: ChapterBlock[]
+  direction: string
+  setRef: (element: HTMLElement | null) => void
+}) {
+  return (
+    <section ref={setRef} className="reader-col" aria-label={label}>
+      <h3 className="reader-col-head">{label}</h3>
+      {blocks.map((block) => {
+        const html = htmlOf(block)
+        return (
+          <div
+            key={block.id}
+            dir={directionFor(html, direction)}
+            data-gloss-side={glossSide}
+            className="reader-col-block leading-8"
+            style={{ color: tone }}
+            dangerouslySetInnerHTML={{ __html: stripDuplicatedHeading(html) }}
+          />
+        )
+      })}
+    </section>
+  )
+}
+
+/**
+ * Two continuous, independently scrolling columns with proportional scroll
+ * sync and a swap control. Ports `renderColumns` plus the sync script in
+ * `app/reader/page.py`: sync is proportional because the columns differ in
+ * height, feedback-guarded by a lock, and disabled on narrow screens where
+ * the CSS stacks the columns instead.
+ */
+function ColumnsView({
+  blocks,
+  direction,
+  pending,
+}: {
+  blocks: ChapterBlock[]
+  direction: string
+  pending: boolean
+}) {
+  const { t } = useLanguage()
+  const [swapped, setSwapped] = useState(false)
+  const firstRef = useRef<HTMLElement | null>(null)
+  const secondRef = useRef<HTMLElement | null>(null)
+  const lock = useRef(false)
+
+  useEffect(() => {
+    const first = firstRef.current
+    const second = secondRef.current
+    if (!first || !second) return
+    const narrow = () => window.matchMedia('(max-width: 759px)').matches
+    const link = (from: HTMLElement, to: HTMLElement) => {
+      const onScroll = () => {
+        if (lock.current || narrow()) return
+        lock.current = true
+        to.scrollTop = syncTop(
+          from.scrollTop,
+          from.scrollHeight - from.clientHeight,
+          to.scrollHeight - to.clientHeight,
+        )
+        requestAnimationFrame(() => {
+          lock.current = false
+        })
+      }
+      from.addEventListener('scroll', onScroll, { passive: true })
+      return () => from.removeEventListener('scroll', onScroll)
+    }
+    const unlinkFirst = link(first, second)
+    const unlinkSecond = link(second, first)
+    return () => {
+      unlinkFirst()
+      unlinkSecond()
+    }
+  }, [blocks])
+
+  if (pending) return <div className="skeleton" style={{ height: 320 }} />
+  if (blocks.length === 0) {
+    return (
+      <p className="empty">
+        {t('reader.noBilingual')}
+      </p>
+    )
+  }
+
+  const original = {
+    label: t('reader.side.original'),
+    glossSide: 'source' as const,
+    tone: 'var(--color-text-secondary)',
+    htmlOf: (block: ChapterBlock) => block.original_html,
+  }
+  const translation = {
+    label: t('reader.side.translation'),
+    glossSide: 'target' as const,
+    tone: 'var(--color-text-primary)',
+    htmlOf: (block: ChapterBlock) => block.translation_html,
+  }
+  const [first, second] = swapped ? [translation, original] : [original, translation]
+
+  return (
+    <div className="reader-columns">
+      <div className="reader-columns-toolbar">
+        <button
+          type="button"
+          className="btn btn-ghost"
+          aria-pressed={swapped}
+          onClick={() => setSwapped((value) => !value)}
+        >
+          {t('reader.columns.swap')}
+        </button>
+      </div>
+      <div className="reader-columns-grid">
+        <ColumnSide
+          label={first.label}
+          glossSide={first.glossSide}
+          tone={first.tone}
+          htmlOf={first.htmlOf}
+          blocks={blocks}
+          direction={direction}
+          setRef={(element) => {
+            firstRef.current = element
+          }}
+        />
+        <ColumnSide
+          label={second.label}
+          glossSide={second.glossSide}
+          tone={second.tone}
+          htmlOf={second.htmlOf}
+          blocks={blocks}
+          direction={direction}
+          setRef={(element) => {
+            secondRef.current = element
+          }}
+        />
+      </div>
+    </div>
+  )
+}
+
 function ChapterBody({
   content,
   mode,
@@ -615,9 +768,11 @@ function ChapterBody({
   const { t } = useLanguage()
   // Bilingual uses the block list so source and translation sit side by side.
   // The single-language modes use the chapter HTML directly, which is already
-  // sanitised on the Python side. `columns` renders as bilingual until the
-  // columns step lands its own paired layout.
-  if (mode === 'bilingual' || mode === 'columns') {
+  // sanitised on the Python side.
+  if (mode === 'columns') {
+    return <ColumnsView blocks={pairedBlocks(blocks)} direction={direction} pending={blocksPending} />
+  }
+  if (mode === 'bilingual') {
     if (blocksPending) return <div className="skeleton" style={{ height: 320 }} />
     if (blocks.length === 0) {
       return (

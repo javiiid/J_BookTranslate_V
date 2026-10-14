@@ -26,8 +26,10 @@ import {
   lastLocationOf,
   locationKey,
   overallPercent,
+  pairedBlocks,
   readKey,
   storedChapter,
+  syncTop,
   toReaderMode,
 } from '../src/lib/reading.ts'
 
@@ -97,6 +99,46 @@ describe('reading direction', () => {
     assert.ok(isDirection('auto') && isDirection('rtl') && isDirection('ltr'))
     assert.equal(isDirection(''), false)
     assert.equal(isDirection('RTL'), false)
+  })
+})
+
+describe('columns pairing', () => {
+  const block = (id: string, translation_html: string) => ({
+    id,
+    position: 0,
+    original: 'x',
+    translation: 'y',
+    original_html: 'x',
+    translation_html,
+  })
+
+  it('drops blocks with no translation, which would pair a side with a gap', () => {
+    const pairs = pairedBlocks([block('a', '<p>y</p>'), block('b', ''), block('c', '<p>z</p>')])
+    assert.deepEqual(pairs.map((entry) => entry.id), ['a', 'c'])
+  })
+
+  it('keeps every block when all are translated', () => {
+    assert.equal(pairedBlocks([block('a', 'y')]).length, 1)
+    assert.deepEqual(pairedBlocks([]), [])
+  })
+})
+
+describe('synced scroll math', () => {
+  it('moves the other column proportionally', () => {
+    assert.equal(syncTop(50, 100, 200), 100)
+    assert.equal(syncTop(0, 100, 200), 0)
+    assert.equal(syncTop(100, 100, 200), 200)
+  })
+
+  it('clamps overscroll instead of flinging the view', () => {
+    assert.equal(syncTop(150, 100, 200), 200)
+    assert.equal(syncTop(-20, 100, 200), 0)
+  })
+
+  it('holds still rather than dividing by an unmeasured column', () => {
+    assert.equal(syncTop(50, 0, 200), 0)
+    assert.equal(syncTop(50, 100, 0), 0)
+    assert.equal(syncTop(Number.NaN, 100, 200), 0)
   })
 })
 

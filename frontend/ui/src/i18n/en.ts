@@ -863,6 +863,7 @@ export const en: Record<StringKey, string> = {
   'reader.position': '{index} of {total}',
   'reader.progress': '{index} of {total} • {percent}%',
   'reader.readTick': 'Read',
+  'reader.columns.swap': 'Swap columns',
   'reader.side.original': 'Source text',
   'reader.side.translation': 'Translation',
   'reader.loadError': 'Could not load this chapter.',
