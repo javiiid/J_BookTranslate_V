@@ -13,6 +13,8 @@ import {
 import { validPassword, type AuthEvent, type AuthSession } from '@/lib/auth.ts'
 import { fa, faAgo, faDate, maskSecretLike } from '@/lib/format'
 import { useTheme } from '@/hooks/useTheme'
+import { useLanguage } from '@/i18n/useLanguage.ts'
+import type { StringKey } from '@/i18n/fa.ts'
 
 /**
  * Account and settings.
@@ -62,15 +64,66 @@ import { useTheme } from '@/hooks/useTheme'
  *   recovery path, surfaced here instead of only on /auth.
  */
 
-const KIND_FA: Record<string, string> = {
-  glossary: 'واژه‌نامه',
-  preset: 'سبک ترجمه',
-  style: 'شیوه‌نگارش',
+/**
+ * Dictionary keys for values the backend names in Latin. Unknown future
+ * values render raw rather than blank — the same rule as `KIND_KEY` on the
+ * library page, so the two cannot drift apart in behaviour.
+ */
+const KIND_KEY: Record<string, StringKey> = {
+  glossary: 'account.packs.kind.glossary',
+  preset: 'account.packs.kind.preset',
+  style: 'account.packs.kind.style',
 }
 
-const SCOPE_FA: Record<string, string> = {
-  'translate:write': 'نوشتن ترجمه',
-  'jobs:read': 'خواندن کارها',
+const kindLabel = (t: (key: StringKey) => string, kind: string): string => {
+  const key = KIND_KEY[kind]
+  return key ? t(key) : kind
+}
+
+const SCOPE_KEY: Record<string, StringKey> = {
+  'translate:write': 'account.keys.scope.translate_write',
+  'jobs:read': 'account.keys.scope.jobs_read',
+}
+
+const scopeLabel = (t: (key: StringKey) => string, scope: string): string => {
+  const key = SCOPE_KEY[scope]
+  return key ? t(key) : scope
+}
+
+const EVENT_KEY: Record<string, StringKey> = {
+  login: 'account.security.event.login',
+  logout: 'account.security.event.logout',
+  login_failed: 'account.security.event.login_failed',
+  password_changed: 'account.security.event.password_changed',
+  session_revoked: 'account.security.event.session_revoked',
+  sessions_revoked: 'account.security.event.sessions_revoked',
+}
+
+const METHOD_KEY: Record<string, StringKey> = {
+  password: 'account.security.method.password',
+  'email-code': 'account.security.method.email-code',
+  google: 'account.security.method.google',
+  apple: 'account.security.method.apple',
+}
+
+const eventLabel = (t: (key: StringKey) => string, event: string): string => {
+  const key = EVENT_KEY[event]
+  return key ? t(key) : event
+}
+
+/** Human line for the audit detail: a method, a closed-session count, or raw. */
+function eventDetail(
+  t: (key: StringKey, vars?: Record<string, string | number>) => string,
+  entry: AuthEvent,
+): string {
+  if (entry.event === 'login' || entry.event === 'login_failed') {
+    const key = METHOD_KEY[entry.detail]
+    return key ? t(key) : entry.detail
+  }
+  if (entry.event === 'sessions_revoked' && /^\d+$/.test(entry.detail)) {
+    return t('account.security.sessionsCount', { count: fa(Number(entry.detail)) })
+  }
+  return entry.detail
 }
 
 /* ------------------------------------------------------------------ */
@@ -148,6 +201,7 @@ function Count({ label, value }: { label: string; value: number }) {
 /* ------------------------------------------------------------------ */
 
 function ProviderTest({ config }: { config: ProviderConfig | undefined }) {
+  const { t } = useLanguage()
   const test = useMutation<ProviderTestResult>({
     mutationFn: () => api.testProvider(),
   })
@@ -164,7 +218,7 @@ function ProviderTest({ config }: { config: ProviderConfig | undefined }) {
         disabled={test.isPending || !config?.has_api_key}
         aria-describedby="provider-test-result"
       >
-        {test.isPending ? 'در حال آزمودن…' : 'آزمون اتصال'}
+        {test.isPending ? t('account.test.running') : t('account.test.run')}
       </button>
 
       {test.isPending ? (
@@ -179,14 +233,14 @@ function ProviderTest({ config }: { config: ProviderConfig | undefined }) {
         >
           {result.message}
           {result.model_available === false
-            ? ` مدل «${result.selected_model}» در فهرست ارائه‌دهنده نیست.`
+            ? t('account.test.modelMissing', { model: result.selected_model })
             : ''}
         </p>
       ) : null}
 
       {failed ? (
         <p id="provider-test-result" role="alert" className="alert alert-error">
-          {test.error instanceof Error ? test.error.message : 'آزمون ناموفق بود.'}
+          {test.error instanceof Error ? test.error.message : t('account.test.failed')}
         </p>
       ) : null}
     </div>
@@ -194,27 +248,28 @@ function ProviderTest({ config }: { config: ProviderConfig | undefined }) {
 }
 
 function SetupPanel({ config }: { config: ProviderConfig | undefined }) {
+  const { t } = useLanguage()
   const hasKey = config?.has_api_key ?? false
 
   return (
     <Panel
-      title="راه‌اندازی"
+      title={t('account.setup.title')}
       id="setup-heading"
       note={
         hasKey
-          ? 'این مقادیر از config/config.yaml خوانده می‌شوند. برای تغییرشان همان فایل را ویرایش کنید.'
+          ? t('account.setup.note')
           : undefined
       }
     >
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Readout label="آدرس سرویس" value={config?.base_url ?? '—'} />
-        <Readout label="مدل پیش‌فرض" value={config?.default_model ?? '—'} />
+        <Readout label={t('account.setup.baseUrl')} value={config?.base_url ?? '—'} />
+        <Readout label={t('account.setup.model')} value={config?.default_model ?? '—'} />
         <Readout
-          label="کلید API"
-          value={hasKey ? 'ثبت شده' : 'ثبت نشده'}
+          label={t('account.setup.apiKey')}
+          value={hasKey ? t('account.setup.keySet') : t('account.setup.keyUnset')}
         />
         <Readout
-          label="هم‌روندی"
+          label={t('account.setup.concurrency')}
           value={config ? fa(config.max_concurrency) : '—'}
         />
       </div>
@@ -223,8 +278,7 @@ function SetupPanel({ config }: { config: ProviderConfig | undefined }) {
         <ProviderTest config={config} />
       ) : (
         <p className="alert alert-warning mt-4">
-          کلید API ثبت نشده است. ترجمه کار نخواهد کرد تا در{' '}
-          <code>config/config.yaml</code> تنظیم شود.
+          {t('account.setup.noKey', { file: 'config/config.yaml' })}
         </p>
       )}
     </Panel>
@@ -236,18 +290,19 @@ function SetupPanel({ config }: { config: ProviderConfig | undefined }) {
 /* ------------------------------------------------------------------ */
 
 function WorkPanel({ portal }: { portal: AccountPortal }) {
+  const { t } = useLanguage()
   const { counts, account, plan } = portal.overview
   const done = counts.completed_jobs
   const total = counts.jobs
   const ratio = total > 0 ? Math.round((done / total) * 100) : 0
 
   return (
-    <Panel title="کار شما" id="work-heading">
+    <Panel title={t('account.work.title')} id="work-heading">
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Count label="کتاب‌ها" value={counts.books} />
-        <Count label="کارها" value={total} />
-        <Count label="تکمیل‌شده" value={done} />
-        <Count label="واژه‌نامه‌ها" value={counts.glossaries} />
+        <Count label={t('account.work.books')} value={counts.books} />
+        <Count label={t('account.work.jobs')} value={total} />
+        <Count label={t('account.work.done')} value={done} />
+        <Count label={t('account.work.glossaries')} value={counts.glossaries} />
       </div>
 
       {/* Progress as a proportion, because "11 of 23" and "11 of 500" mean very
@@ -255,12 +310,12 @@ function WorkPanel({ portal }: { portal: AccountPortal }) {
       {total > 0 ? (
         <div className="mt-4">
           <div className="mb-1 flex items-baseline justify-between gap-2">
-            <span className="data-label">پیشرفت</span>
+            <span className="data-label">{t('account.work.progress')}</span>
             <span
               className="text-[length:var(--text-small)] tabular-nums"
               style={{ color: 'var(--color-text-muted)' }}
             >
-              {fa(done)} از {fa(total)} · {fa(ratio)}٪
+              {t('account.work.progressLine', { done: fa(done), total: fa(total), ratio: fa(ratio) })}
             </span>
           </div>
           <div
@@ -268,7 +323,7 @@ function WorkPanel({ portal }: { portal: AccountPortal }) {
             aria-valuenow={ratio}
             aria-valuemin={0}
             aria-valuemax={100}
-            aria-label="پیشرفت ترجمه"
+            aria-label={t('account.work.progressAria')}
             className="h-1.5 w-full overflow-hidden rounded-full"
             style={{ background: 'var(--color-surface-sunken)' }}
           >
@@ -285,17 +340,17 @@ function WorkPanel({ portal }: { portal: AccountPortal }) {
 
       <dl className="mt-4 grid gap-2 sm:grid-cols-3">
         <div>
-          <dt className="data-label">نام نمایشی</dt>
+          <dt className="data-label">{t('account.work.displayName')}</dt>
           <dd className="text-[length:var(--text-body)]">
-            {account.display_name || 'کاربر محلی'}
+            {account.display_name || t('account.work.localUser')}
           </dd>
         </div>
         <div>
-          <dt className="data-label">طرح</dt>
+          <dt className="data-label">{t('account.work.plan')}</dt>
           <dd className="text-[length:var(--text-body)]">{plan.name_fa}</dd>
         </div>
         <div>
-          <dt className="data-label">ساخته‌شده</dt>
+          <dt className="data-label">{t('account.work.created')}</dt>
           <dd className="text-[length:var(--text-body)]">{faDate(account.created_at)}</dd>
         </div>
       </dl>
@@ -308,6 +363,7 @@ function WorkPanel({ portal }: { portal: AccountPortal }) {
 /* ------------------------------------------------------------------ */
 
 function UsagePanel() {
+  const { t } = useLanguage()
   const analytics = useQuery({
     queryKey: ['analytics'],
     queryFn: api.analytics,
@@ -318,7 +374,7 @@ function UsagePanel() {
   // "there is no usage section", not as "it is still coming".
   if (analytics.isPending) {
     return (
-      <Panel title="مصرف" id="usage-heading">
+      <Panel title={t('account.usage.title')} id="usage-heading">
         <div className="skeleton" style={{ height: 72 }} />
       </Panel>
     )
@@ -326,9 +382,9 @@ function UsagePanel() {
 
   if (analytics.isError) {
     return (
-      <Panel title="مصرف" id="usage-heading">
+      <Panel title={t('account.usage.title')} id="usage-heading">
         <p role="alert" className="alert alert-error">
-          {analytics.error instanceof Error ? analytics.error.message : 'دریافت آمار مصرف ممکن نشد.'}
+          {analytics.error instanceof Error ? analytics.error.message : t('account.usage.failed')}
         </p>
       </Panel>
     )
@@ -340,18 +396,16 @@ function UsagePanel() {
   if (!data) return null
 
   return (
-    <Panel title="مصرف" id="usage-heading">
+    <Panel title={t('account.usage.title')} id="usage-heading">
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Readout label="بخش‌های ترجمه‌شده" value={fa(data.completed_chunks)} />
-        <Readout label="تلاش مجدد" value={fa(data.retries)} />
+        <Readout label={t('account.usage.chunks')} value={fa(data.completed_chunks)} />
+        <Readout label={t('account.usage.retries')} value={fa(data.retries)} />
       </div>
       <p
         className="mt-3 text-[length:var(--text-caption)]"
         style={{ color: 'var(--color-text-muted)' }}
       >
-        توکن ورودی و خروجی و هزینهٔ تخمینی نمایش داده نمی‌شوند: لایهٔ ارائه‌دهنده
-        هنوز مصرف توکن را ثبت نمی‌کند. نشان‌دادن صفر به‌جای این‌ها یعنی «رایگان
-        بود»، که درست نیست؛ پس اصلاً نشان داده نمی‌شوند.
+        {t('account.usage.note')}
       </p>
     </Panel>
   )
@@ -371,6 +425,7 @@ function UsagePanel() {
  * too: change the password, see the signed-in devices, leave them all.
  */
 function SecurityPanel() {
+  const { t } = useLanguage()
   const cache = useQueryClient()
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
@@ -419,10 +474,10 @@ function SecurityPanel() {
      logged out: offer the login, not an error box. */
   if (sessions.error instanceof ApiError && sessions.error.status === 401) {
     return (
-      <Panel title="امنیت" id="security-heading">
+      <Panel title={t('account.security.title')} id="security-heading">
         <p className="empty">
-          برای تغییر گذرواژه و مدیریت دستگاه‌ها اول{' '}
-          <Link to="/login">وارد شوید</Link>.
+          {t('account.security.loginPrompt')}{' '}
+          <Link to="/login">{t('account.security.login')}</Link>.
         </p>
       </Panel>
     )
@@ -436,7 +491,7 @@ function SecurityPanel() {
     event.preventDefault()
     if (change.isPending) return
     if (!validPassword(currentPassword) || !validPassword(newPassword)) {
-      setFormError('گذرواژه باید حداقل ۸ نویسه باشد.')
+      setFormError(t('account.security.weak'))
       return
     }
     setFormError(null)
@@ -448,16 +503,16 @@ function SecurityPanel() {
 
   return (
     <Panel
-      title="امنیت"
+      title={t('account.security.title')}
       id="security-heading"
-      note="اگر کوکی‌تان لو رفته باشد، با عوض‌کردن گذرواژه یا خروج از همه دستگاه‌ها، نشست‌های دزدیده‌شده بلافاصله از کار می‌افتند."
+      note={t('account.security.note')}
     >
       <form
         className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end"
         onSubmit={submitPassword}
       >
         <label className="grid min-w-0 gap-1 text-[length:var(--text-label)]">
-          گذرواژه فعلی
+          {t('account.security.current')}
           <input
             type="password"
             autoComplete="current-password"
@@ -467,7 +522,7 @@ function SecurityPanel() {
           />
         </label>
         <label className="grid min-w-0 gap-1 text-[length:var(--text-label)]">
-          گذرواژه جدید
+          {t('account.security.new')}
           <input
             type="password"
             autoComplete="new-password"
@@ -481,7 +536,7 @@ function SecurityPanel() {
           className="btn btn-secondary"
           disabled={change.isPending}
         >
-          {change.isPending ? 'در حال تغییر…' : 'تغییر گذرواژه'}
+          {change.isPending ? t('account.security.changing') : t('account.security.change')}
         </button>
       </form>
 
@@ -494,26 +549,26 @@ function SecurityPanel() {
         <p role="alert" className="alert alert-error mt-3">
           {change.error instanceof Error
             ? change.error.message
-            : 'تغییر گذرواژه ممکن نشد.'}
+            : t('account.security.changeFailed')}
         </p>
       ) : null}
       {change.isSuccess ? (
         <p role="status" className="alert alert-success mt-3">
-          گذرواژه عوض شد؛ همه دستگاه‌های دیگر خارج شدند.
+          {t('account.security.changed')}
         </p>
       ) : null}
 
       <h3 className="mt-5 text-[length:var(--text-small)] font-extrabold">
-        دستگاه‌های واردشده
+        {t('account.security.devices')}
       </h3>
       {sessions.isPending ? (
         <div className="skeleton mt-2" style={{ height: 64 }} />
       ) : sessions.isError ? (
         <p role="alert" className="alert alert-error mt-2">
-          دریافت فهرست دستگاه‌ها ممکن نشد.
+          {t('account.security.sessionsFailed')}
         </p>
       ) : items.length === 0 ? (
-        <p className="empty mt-2">نشستی ثبت نشده است.</p>
+        <p className="empty mt-2">{t('account.security.noSessions')}</p>
       ) : (
         <ul className="mt-2 grid gap-2">
           {items.map((item) => (
@@ -534,12 +589,14 @@ function SecurityPanel() {
                   className="block text-[length:var(--text-caption)]"
                   style={{ color: 'var(--color-text-muted)' }}
                 >
-                  ساخته‌شده {faDate(item.created_at)} · آخرین فعالیت{' '}
-                  {faAgo(item.last_seen_at) || faDate(item.last_seen_at)}
+                  {t('account.security.sessionLine', {
+                    created: faDate(item.created_at),
+                    seen: faAgo(item.last_seen_at) || faDate(item.last_seen_at),
+                  })}
                 </span>
               </div>
               {item.current ? (
-                <span className="badge badge-success">این دستگاه</span>
+                <span className="badge badge-success">{t('account.security.thisDevice')}</span>
               ) : (
                 <button
                   type="button"
@@ -547,7 +604,7 @@ function SecurityPanel() {
                   onClick={() => revokeOne.mutate(item.id)}
                   disabled={busy}
                 >
-                  باطل کردن
+                  {t('account.security.revoke')}
                 </button>
               )}
             </li>
@@ -563,32 +620,32 @@ function SecurityPanel() {
           disabled={busy || items.filter((item) => !item.current).length === 0}
         >
           {revokeAll.isPending
-            ? 'در حال خروج…'
-            : 'خروج از همه دستگاه‌های دیگر'}
+            ? t('account.security.revoking')
+            : t('account.security.revokeAll')}
         </button>
         {revokeAll.isSuccess ? (
           <p role="status" className="alert alert-success">
-            {fa(revokeAll.data.closed)} دستگاه دیگر خارج شد.
+            {t('account.security.revokedAll', { count: fa(revokeAll.data.closed) })}
           </p>
         ) : null}
         {revokeAll.isError ? (
           <p role="alert" className="alert alert-error">
-            خروج از دستگاه‌ها ممکن نشد.
+            {t('account.security.revokeFailed')}
           </p>
         ) : null}
       </div>
 
       <h3 className="mt-5 text-[length:var(--text-small)] font-extrabold">
-        رویدادهای ورود و خروج
+        {t('account.security.events')}
       </h3>
       {events.isPending ? (
         <div className="skeleton mt-2" style={{ height: 64 }} />
       ) : events.isError ? (
         <p role="alert" className="alert alert-error mt-2">
-          دریافت رویدادها ممکن نشد.
+          {t('account.security.eventsFailed')}
         </p>
       ) : log.length === 0 ? (
-        <p className="empty mt-2">رویدادی ثبت نشده است.</p>
+        <p className="empty mt-2">{t('account.security.noEvents')}</p>
       ) : (
         <ul className="mt-2 grid gap-2">
           {log.slice(0, 20).map((entry) => (
@@ -598,13 +655,13 @@ function SecurityPanel() {
             >
               <div className="min-w-0">
                 <strong className="block text-[length:var(--text-body)]">
-                  {EVENT_FA[entry.event] ?? entry.event}
+                  {eventLabel(t, entry.event)}
                 </strong>
                 <span
                   className="block text-[length:var(--text-caption)]"
                   style={{ color: 'var(--color-text-muted)' }}
                 >
-                  {eventDetail(entry)}
+                  {eventDetail(t, entry)}
                   {entry.ip ? ` · ${entry.ip}` : ''}
                   {' · '}
                   {faAgo(entry.created_at) || faDate(entry.created_at)}
@@ -618,38 +675,12 @@ function SecurityPanel() {
   )
 }
 
-const EVENT_FA: Record<string, string> = {
-  login: 'ورود',
-  logout: 'خروج',
-  login_failed: 'ورود ناموفق',
-  password_changed: 'تغییر گذرواژه',
-  session_revoked: 'باطل‌کردن یک نشست',
-  sessions_revoked: 'خروج از دستگاه‌های دیگر',
-}
-
-const METHOD_FA: Record<string, string> = {
-  password: 'گذرواژه',
-  'email-code': 'کد ایمیل',
-  google: 'گوگل',
-  apple: 'اپل',
-}
-
-/** Human line for the audit detail: a method, a closed-session count, or raw. */
-function eventDetail(entry: AuthEvent): string {
-  if (entry.event === 'login' || entry.event === 'login_failed') {
-    return METHOD_FA[entry.detail] ?? entry.detail
-  }
-  if (entry.event === 'sessions_revoked' && /^\d+$/.test(entry.detail)) {
-    return `${fa(Number(entry.detail))} نشست`
-  }
-  return entry.detail
-}
-
 /* ------------------------------------------------------------------ */
 /* API keys                                                            */
 /* ------------------------------------------------------------------ */
 
 function KeysPanel({ keys }: { keys: PortalApiKey[] }) {
+  const { t } = useLanguage()
   const cache = useQueryClient()
   const revoke = useMutation({
     mutationFn: (id: number) => api.revokeApiKey(id),
@@ -658,7 +689,7 @@ function KeysPanel({ keys }: { keys: PortalApiKey[] }) {
 
   return (
     <Panel
-      title="کلیدهای API"
+      title={t('account.keys.title')}
       id="keys-heading"
       action={
         <span
@@ -670,7 +701,7 @@ function KeysPanel({ keys }: { keys: PortalApiKey[] }) {
       }
     >
       {keys.length === 0 ? (
-        <p className="empty">کلیدی ساخته نشده است.</p>
+        <p className="empty">{t('account.keys.empty')}</p>
       ) : (
         <ul className="grid gap-2">
           {keys.map((key) => {
@@ -700,15 +731,15 @@ function KeysPanel({ keys }: { keys: PortalApiKey[] }) {
                     {key.scopes
                       .split(/\s+/)
                       .filter(Boolean)
-                      .map((scope) => SCOPE_FA[scope] ?? scope)
-                      .join('، ')}
+                      .map((scope) => scopeLabel(t, scope))
+                      .join(t('account.listSep'))}
                     {key.last_used_at
-                      ? ` · آخرین استفاده ${faDate(key.last_used_at)}`
-                      : ' · هنوز استفاده نشده'}
+                      ? t('account.keys.lastUsed', { date: faDate(key.last_used_at) })
+                      : t('account.keys.neverUsed')}
                   </span>
                 </div>
                 {revoked ? (
-                  <span className="badge badge-neutral">باطل‌شده</span>
+                  <span className="badge badge-neutral">{t('account.keys.revoked')}</span>
                 ) : (
                   <button
                     type="button"
@@ -716,7 +747,7 @@ function KeysPanel({ keys }: { keys: PortalApiKey[] }) {
                     onClick={() => revoke.mutate(key.id)}
                     disabled={revoke.isPending}
                   >
-                    باطل کردن
+                    {t('account.keys.revoke')}
                   </button>
                 )}
               </li>
@@ -733,6 +764,7 @@ function KeysPanel({ keys }: { keys: PortalApiKey[] }) {
 /* ------------------------------------------------------------------ */
 
 function PacksPanel({ items }: { items: MarketplaceItem[] }) {
+  const { t } = useLanguage()
   const cache = useQueryClient()
   const install = useMutation({
     mutationFn: (id: string) => api.installMarketplaceItem(id),
@@ -743,9 +775,9 @@ function PacksPanel({ items }: { items: MarketplaceItem[] }) {
 
   return (
     <Panel
-      title="بسته‌های واژه‌نامه"
+      title={t('account.packs.title')}
       id="packs-heading"
-      note="نصب یک بسته، پروندهٔ آن را در همین نصب کپی می‌کند. چیزی خریده نمی‌شود؛ قیمت فقط واقعیتِ فهرست است و این محصول محلی خرید ندارد."
+      note={t('account.packs.note')}
     >
       <ul className="grid gap-2 md:grid-cols-2">
         {items.map((item) => {
@@ -760,7 +792,7 @@ function PacksPanel({ items }: { items: MarketplaceItem[] }) {
                   className="text-[length:var(--text-caption)] tabular-nums"
                   style={{ color: 'var(--color-text-muted)' }}
                 >
-                  ★ {item.rating.toFixed(1)} · {fa(item.installs)} نصب
+                  ★ {item.rating.toFixed(1)} · {t('account.packs.installs', { count: fa(item.installs) })}
                 </span>
               </div>
               <p
@@ -774,11 +806,11 @@ function PacksPanel({ items }: { items: MarketplaceItem[] }) {
                   className="text-[length:var(--text-caption)]"
                   style={{ color: 'var(--color-text-muted)' }}
                 >
-                  {KIND_FA[item.kind] ?? item.kind} · {item.language_pair} · $
+                  {kindLabel(t, item.kind)} · {item.language_pair} · $
                   {item.price_usd.toFixed(0)}
                 </span>
                 {done ? (
-                  <span className="badge badge-success">نصب‌شده</span>
+                  <span className="badge badge-success">{t('account.packs.installed')}</span>
                 ) : (
                   <button
                     type="button"
@@ -786,7 +818,7 @@ function PacksPanel({ items }: { items: MarketplaceItem[] }) {
                     onClick={() => install.mutate(item.id)}
                     disabled={install.isPending}
                   >
-                    نصب
+                    {t('account.packs.install')}
                   </button>
                 )}
               </div>
@@ -798,7 +830,7 @@ function PacksPanel({ items }: { items: MarketplaceItem[] }) {
         <p role="alert" className="alert alert-error mt-3">
           {install.error instanceof Error
             ? install.error.message
-            : 'نصب انجام نشد.'}
+            : t('account.packs.failed')}
         </p>
       ) : null}
     </Panel>
@@ -818,15 +850,16 @@ function PacksPanel({ items }: { items: MarketplaceItem[] }) {
  * and what will happen if the phone's system setting changes.
  */
 function AppearancePanel() {
+  const { t } = useLanguage()
   const { theme, setTheme, followsSystem } = useTheme()
   return (
-    <Panel title="نمایش" id="appearance-heading">
+    <Panel title={t('account.theme.title')} id="appearance-heading">
       <fieldset className="grid gap-2 sm:grid-cols-2">
-        <legend className="sr-only">حالت رنگی</legend>
+        <legend className="sr-only">{t('account.theme.legend')}</legend>
         {(
           [
-            ['light', 'روشن'],
-            ['dark', 'تیره'],
+            ['light', t('account.theme.light')],
+            ['dark', t('account.theme.dark')],
           ] as const
         ).map(([value, label]) => (
           <label
@@ -846,7 +879,7 @@ function AppearancePanel() {
               />
               {label}
             </span>
-            {theme === value ? <span className="text-[length:var(--text-caption)]">انتخاب‌شده</span> : null}
+            {theme === value ? <span className="text-[length:var(--text-caption)]">{t('account.theme.selected')}</span> : null}
           </label>
         ))}
       </fieldset>
@@ -855,8 +888,8 @@ function AppearancePanel() {
         style={{ color: 'var(--color-text-muted)' }}
       >
         {followsSystem
-          ? 'فعلاً از تنظیم روشن/تاریک گوشی پیروی می‌کند. با انتخاب بالا، انتخاب خودتان ثبت می‌شود و دیگر با تغییر تنظیم گوشی عوض نمی‌شود.'
-          : 'انتخاب شما ثبت شده و با تغییر تنظیم گوشی عوض نمی‌شود. برای بازگشت به حالت خودکار، در یکی از دو حالت بالا کلیک کنید و دوباره انتخاب کنید.'}
+          ? t('account.theme.auto')
+          : t('account.theme.manual')}
       </p>
     </Panel>
   )
@@ -867,6 +900,7 @@ function AppearancePanel() {
 /* ------------------------------------------------------------------ */
 
 export function AccountPage() {
+  const { t, dir } = useLanguage()
   const portal = useQuery({ queryKey: ['portal'], queryFn: api.accountPortal })
   const config = useQuery({
     queryKey: ['provider-config'],
@@ -876,7 +910,7 @@ export function AccountPage() {
 
   if (portal.isPending) {
     return (
-      <main className="page" dir="rtl">
+      <main className="page" dir={dir}>
         <div className="grid gap-4">
           <div className="skeleton" style={{ height: 96 }} />
           <div className="skeleton" style={{ height: 220 }} />
@@ -887,9 +921,9 @@ export function AccountPage() {
 
   if (portal.isError) {
     return (
-      <main className="page" dir="rtl">
+      <main className="page" dir={dir}>
         <p role="alert" className="alert alert-error">
-          دریافت اطلاعات حساب ممکن نشد.
+          {t('account.loadFailed')}
         </p>
       </main>
     )
@@ -900,16 +934,16 @@ export function AccountPage() {
   const packs = (data.marketplace ?? []) as MarketplaceItem[]
 
   return (
-    <main className="page" dir="rtl">
+    <main className="page" dir={dir}>
       <header className="mb-6">
         <h1 className="text-[length:var(--text-h1)] font-extrabold tracking-tight">
-          پنل کاربری
+          {t('account.title')}
         </h1>
         <p
           className="mt-1 text-[length:var(--text-small)]"
           style={{ color: 'var(--color-text-muted)' }}
         >
-          وضعیت نصب محلی، کارهای انجام‌شده و پیکربندی.
+          {t('account.subtitle')}
         </p>
       </header>
 
