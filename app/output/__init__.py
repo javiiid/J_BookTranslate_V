@@ -6,7 +6,7 @@ Output format generation for J Book Translate.
 
 Runs after translation and before final storage; produces every
 requested OUTPUT format (JSON_SEGMENTS, TXT_BILINGUAL, MARKDOWN,
-DOCX, TRANSLATED_PDF, BILINGUAL_PDF, SRT) plus QA_REPORT data.
+DOCX, TRANSLATED_PDF, MOBILE_PDF, BILINGUAL_PDF, SRT) plus QA_REPORT data.
 """
 
 from app.output.formats import (

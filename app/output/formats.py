@@ -28,8 +28,9 @@ OUTPUT_FORMATS = {
     ),
     "markdown": "translated Markdown preserving structure",
     "docx": "translated Word document with RTL support",
-    "translated_pdf": "translation-only PDF",
-    "bilingual_pdf": "original + translation PDF",
+    "translated_pdf": "translation-only PDF (A4)",
+    "mobile_pdf": "translation-only PDF on a phone-width page",
+    "bilingual_pdf": "original + translation PDF (A4, stacked pairs)",
     "translated_epub": (
         "translated EPUB (the primary EPUB output)"
     ),
@@ -58,6 +59,7 @@ TRANSLATION_OUTPUTS = frozenset({
     "markdown",
     "docx",
     "translated_pdf",
+    "mobile_pdf",
     "bilingual_pdf",
     "srt",
     "quality_report",
@@ -73,6 +75,7 @@ CALIBRATION_OUTPUTS = frozenset({
     "markdown",
     "docx",
     "translated_pdf",
+    "mobile_pdf",
     "bilingual_pdf",
 })
 
@@ -92,6 +95,7 @@ SUFFIXES = {
     "markdown": ".md",
     "docx": ".docx",
     "translated_pdf": ".pdf",
+    "mobile_pdf": ".mobile.pdf",
     "bilingual_pdf": ".bilingual.pdf",
     "quality_report": ".quality.json",
     "srt": ".srt",
@@ -347,6 +351,17 @@ def generate_outputs(
                     target,
                     title=title,
                     to_lang=to_lang,
+                    filetype=filetype,
+                )
+
+            elif name == "mobile_pdf":
+
+                pdf.write_mobile_pdf(
+                    segments,
+                    target,
+                    title=title,
+                    to_lang=to_lang,
+                    filetype=filetype,
                 )
 
             elif name == "bilingual_pdf":
@@ -356,6 +371,7 @@ def generate_outputs(
                     target,
                     title=title,
                     to_lang=to_lang,
+                    filetype=filetype,
                 )
 
             elif name == "quality_report":

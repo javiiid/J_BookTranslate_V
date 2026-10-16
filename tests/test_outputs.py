@@ -246,6 +246,9 @@ def test_bilingual_pdf_writer_shows_both_columns():
             assert "Book" in text
             assert "The first original sentence." in text
             assert "The first translated sentence." in text
+            assert _last_lines(document) == [
+                str(n) for n in range(1, len(document) + 1)
+            ]
         finally:
             document.close()
 
@@ -354,11 +357,39 @@ def test_pdf_leaves_no_temp_files_behind(tmp_path):
     pdf_module.write_bilingual_pdf(
         segments, tmp_path / "b.pdf", title="Book", to_lang="FA",
     )
+    pdf_module.write_mobile_pdf(
+        segments, tmp_path / "c.mobile.pdf", title="Book", to_lang="FA",
+    )
     leftovers = [
         p for p in tmp_path.iterdir()
         if p.suffixes[-2:] == [".story", ".pdf"] or p.suffix == ".story.pdf"
     ]
     assert leftovers == []
+
+
+def test_mobile_pdf_uses_phone_width_page():
+    segments = _long_segments(60)
+    with TemporaryDirectory() as tmp:
+        path = pdf_module.write_mobile_pdf(
+            segments, Path(tmp) / "book.mobile.pdf", title="Book", to_lang="FA",
+        )
+        document = fitz.open(stream=path.read_bytes(), filetype="pdf")
+        try:
+            assert 1 < len(document) < len(segments)
+            for page in document:
+                assert page.rect.width == 360
+            text = _pdf_text(document)
+            assert "Book" in text
+            for i in (0, 30, 59):
+                assert f"شماره {i}" in text
+            assert document.metadata.get("title") == "Book"
+            fonts = {font[3] for page in document for font in page.get_fonts()}
+            assert any("Naskh" in name for name in fonts)
+            assert _last_lines(document) == [
+                str(n) for n in range(1, len(document) + 1)
+            ]
+        finally:
+            document.close()
 
 
 def test_pdf_direction_detected_per_paragraph():
@@ -367,6 +398,199 @@ def test_pdf_direction_detected_per_paragraph():
     assert pdf_module._direction("An English sentence.", "rtl") == "ltr"
     assert pdf_module._direction("", "rtl") == "rtl"
     assert pdf_module._direction("", "ltr") == "ltr"
+
+
+def _seg(chapter, target, pos=0):
+    return {
+        "id": f"chunk-{pos}", "position": pos,
+        "source": "source", "target": target,
+        "format": "epub", "chapter": chapter,
+        "flagged": False, "notes": [],
+    }
+
+
+def test_body_start_index_skips_front_matter():
+    assert pdf_module._body_start_index([
+        _seg("toc.xhtml", "فهرست مطالب", 0),
+        _seg("ch1.xhtml", "متن پژوهش", 1),
+    ]) == 1
+    assert pdf_module._body_start_index([
+        _seg("ch0.xhtml", "فهرست مطالب\nفصل نمونه", 0),
+        _seg("ch1.xhtml", "متن پژوهش", 1),
+    ]) == 1
+    assert pdf_module._body_start_index([
+        _seg("cover.xhtml", "Demo Book", 0),
+        _seg("dedication.xhtml", "تقدیم به خواننده", 1),
+        _seg("ch1.xhtml", "متن پژوهش", 2),
+    ]) == 2
+    assert pdf_module._body_start_index([
+        _seg("ch0.xhtml", "Table of Contents", 0),
+        _seg("ch1.xhtml", "First chapter text.", 1),
+    ]) == 1
+
+
+def test_body_start_index_treats_preface_as_body():
+    # Numbering starts AT the preface/introduction/chapter one --
+    # these are body, never front matter.
+    assert pdf_module._body_start_index([
+        _seg("ch0.xhtml", "مقدمه", 0),
+    ]) == 0
+    assert pdf_module._body_start_index([
+        _seg("ch0.xhtml", "پیش‌گفتار ناشر", 0),
+    ]) == 0
+    assert pdf_module._body_start_index([
+        _seg("ch0.xhtml", "Chapter 1. The beginning.", 0),
+    ]) == 0
+    assert pdf_module._body_start_index([
+        _seg("ch0.xhtml", "Preface", 0),
+    ]) == 0
+
+
+def test_body_start_index_falls_back_to_zero():
+    assert pdf_module._body_start_index([
+        _seg("ch0.xhtml", "متن پژوهش", 0),
+    ]) == 0
+    assert pdf_module._body_start_index([]) == 0
+    assert pdf_module._body_start_index([
+        _seg("toc.xhtml", "فهرست", 0),
+    ]) == 0
+
+
+def test_chapter_breaks_only_between_named_epub_chapters():
+    a = _seg("ch1.xhtml", "one", 0)
+    b = _seg("ch1.xhtml", "two", 1)
+    c = _seg("ch2.xhtml", "three", 2)
+    assert pdf_module._chapter_breaks([a, b, c], "epub") == {2}
+    assert pdf_module._chapter_breaks([a, b], "epub") == set()
+    # PDF page files and SRT blocks are not chapters: never break.
+    assert pdf_module._chapter_breaks([a, b, c], "pdf") == set()
+    assert pdf_module._chapter_breaks([a, b, c], "srt") == set()
+    assert pdf_module._chapter_breaks([], "epub") == set()
+    unnamed = _seg("", "one", 0)
+    unnamed2 = _seg("", "two", 1)
+    assert pdf_module._chapter_breaks([unnamed, unnamed2], "epub") == set()
+
+
+def _chapter_segments():
+    filler = " ".join(
+        f"Filler sentence {i} with some words." for i in range(60)
+    )
+    return [
+        {
+            "id": "chunk-0", "position": 0,
+            "source": "first", "target": f"CHAPTER-A-TEXT {filler}",
+            "format": "epub", "chapter": "ch1.xhtml",
+            "flagged": False, "notes": [],
+        },
+        {
+            "id": "chunk-1", "position": 1,
+            "source": "second", "target": f"CHAPTER-B-START {filler}",
+            "format": "epub", "chapter": "ch2.xhtml",
+            "flagged": False, "notes": [],
+        },
+    ]
+
+
+def _first_lines(document):
+    return [
+        unicodedata.normalize("NFKC", document[i].get_text()).splitlines()[0].strip()
+        for i in range(len(document))
+    ]
+
+
+def test_translated_pdf_starts_each_chapter_on_fresh_page():
+    with TemporaryDirectory() as tmp:
+        path = pdf_module.write_translated_pdf(
+            _chapter_segments(), Path(tmp) / "ch.pdf",
+            title="Book", to_lang="EN",
+        )
+        document = fitz.open(stream=path.read_bytes(), filetype="pdf")
+        try:
+            assert len(document) >= 2
+            starts = [
+                i for i, line in enumerate(_first_lines(document))
+                if "CHAPTER-B-START" in line
+            ]
+            assert len(starts) == 1
+            assert starts[0] >= 1
+            # ...and the chapter-A page(s) carry no chapter-B text.
+            text_a = unicodedata.normalize(
+                "NFKC", document[0].get_text()
+            )
+            assert "CHAPTER-B-START" not in text_a
+            # Footers stay contiguous across the forced break.
+            assert _last_lines(document) == [
+                str(n) for n in range(1, len(document) + 1)
+            ]
+        finally:
+            document.close()
+
+
+def test_bilingual_pdf_starts_each_chapter_on_fresh_page():
+    with TemporaryDirectory() as tmp:
+        path = pdf_module.write_bilingual_pdf(
+            _chapter_segments(), Path(tmp) / "ch.bilingual.pdf",
+            title="Book", to_lang="EN",
+        )
+        document = fitz.open(stream=path.read_bytes(), filetype="pdf")
+        try:
+            assert len(document) >= 2
+            texts = [
+                unicodedata.normalize("NFKC", document[i].get_text())
+                for i in range(len(document))
+            ]
+            first_b = next(
+                i for i, text in enumerate(texts) if "CHAPTER-B-START" in text
+            )
+            # A fresh page: no chapter-A text shares B's first page,
+            # and B never appears on the opening page.
+            assert first_b >= 1
+            assert "CHAPTER-A-TEXT" not in texts[first_b]
+            assert "CHAPTER-B-START" not in texts[0]
+        finally:
+            document.close()
+
+
+def _last_lines(document):
+    return [
+        unicodedata.normalize("NFKC", document[i].get_text()).splitlines()[-1].strip()
+        for i in range(len(document))
+    ]
+
+
+def test_translated_pdf_numbers_body_from_one():
+    # One paragraph: newlines collapse inside <p>, so front matter
+    # fills its pages with sheer word count here.
+    front = "فهرست مطالب. " + (
+        "نام فصل نمونه با چند کلمه اضافه برای پر کردن صفحه. " * 150
+    )
+    segments = [_seg("toc.xhtml", front, 0)]
+    for i in range(1, 9):
+        segments.append(_seg(
+            "ch1.xhtml", f"متن پژوهش شماره {i} پایان.", i,
+        ))
+    with TemporaryDirectory() as tmp:
+        path = pdf_module.write_translated_pdf(
+            segments, Path(tmp) / "numbered.pdf", title="Book", to_lang="FA",
+        )
+        document = fitz.open(stream=path.read_bytes(), filetype="pdf")
+        try:
+            assert len(document) >= 2
+            tails = _last_lines(document)
+            first_numbered = next(
+                i for i, tail in enumerate(tails) if tail == "1"
+            )
+            # The TOC-filled front page(s) carry no footer number.
+            assert first_numbered >= 1
+            assert all(tail != "1" for tail in tails[:first_numbered])
+            assert tails[first_numbered:] == [
+                str(n) for n in range(1, len(document) - first_numbered + 1)
+            ]
+            text = _pdf_text(document)
+            for i in range(1, 9):
+                assert f"شماره {i}" in text
+        finally:
+            document.close()
 
 
 def test_translated_pdf_persian_stays_searchable():
@@ -569,7 +793,8 @@ def test_generate_outputs_writes_requested_formats():
         result = generate_outputs(
             SAMPLE,
             requested=["json_segments", "txt_bilingual", "markdown", "docx",
-                       "translated_pdf", "bilingual_pdf", "translated_epub", "srt"],
+                       "translated_pdf", "mobile_pdf", "bilingual_pdf",
+                       "translated_epub", "srt"],
             output_dir=tmp,
             base_name="book",
             filetype="epub",
@@ -578,7 +803,8 @@ def test_generate_outputs_writes_requested_formats():
         )
         generated = result["generated"]
         for name in ("json_segments", "txt_bilingual", "markdown",
-                     "docx", "translated_pdf", "bilingual_pdf", "srt"):
+                     "docx", "translated_pdf", "mobile_pdf",
+                     "bilingual_pdf", "srt"):
             assert Path(generated[name]).is_file(), name
         assert "translated_epub" in result["skipped"]
         assert "srt" not in result["skipped"]
@@ -587,6 +813,7 @@ def test_generate_outputs_writes_requested_formats():
         assert (tmp / "book.segments.json").exists()
         assert (tmp / "book.bilingual.txt").exists()
         assert (tmp / "book.bilingual.pdf").exists()
+        assert (tmp / "book.mobile.pdf").exists()
         srt_text = (tmp / "book.srt").read_text(encoding="utf-8")
         flat = " ".join(srt_text.split())
         assert "translated sentence" in flat

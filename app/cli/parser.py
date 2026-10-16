@@ -127,8 +127,9 @@ def parse_args():
             "Additional output formats to generate after translation, "
             "comma-separated (e.g. json_segments,txt_bilingual,docx) "
             "or 'all'. Supported: json_segments, txt_bilingual, "
-            "markdown, docx, translated_pdf, bilingual_pdf, "
-            "srt (book sources: estimated timing), quality_report. "
+            "markdown, docx, translated_pdf, mobile_pdf (phone-width), "
+            "bilingual_pdf, srt (book sources: estimated timing), "
+            "quality_report. "
             "Note: translated_epub is the job's primary output for EPUB "
             "sources and is never an extra format."
         )

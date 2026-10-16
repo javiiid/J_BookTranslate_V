@@ -24,7 +24,8 @@ def test_translation_outputs_excludes_primary_epub():
     assert "translated_epub" not in TRANSLATION_OUTPUTS
     assert TRANSLATION_OUTPUTS == {
         "json_segments", "txt_bilingual", "markdown", "docx",
-        "translated_pdf", "bilingual_pdf", "srt", "quality_report",
+        "translated_pdf", "mobile_pdf", "bilingual_pdf",
+        "srt", "quality_report",
     }
     # normalize still accepts the primary name (maps to skipped)
     assert "translated_epub" in normalize_outputs(["translated_epub"])
@@ -45,7 +46,7 @@ def test_convert_outputs_subset_and_normalizer():
     assert normalize_convert_formats(["docx", "pdf"]) == ["docx", "translated_pdf"]
     # bilingual has no meaning without a translation: same engine
     assert normalize_convert_formats("bilingual_pdf") == ["translated_pdf"]
-    for bad in ("srt", "quality_report", "translated_epub", "bilingual"):
+    for bad in ("srt", "quality_report", "translated_epub", "bilingual", "mobile_pdf"):
         with pytest.raises(ValueError):
             normalize_convert_formats(bad)
 
@@ -61,6 +62,7 @@ def test_react_surfaces_match_python_registry():
     workspace = (REPO / "frontend/ui/src/pages/WorkspacePage.tsx").read_text(encoding="utf-8")
     offered_ws = set(re.findall(r"\['(\w+)'", workspace))
     assert CALIBRATION_OUTPUTS <= offered_ws, CALIBRATION_OUTPUTS - offered_ws
+    assert "mobile_pdf" in offered_ws  # 7th workshop row
     assert not (offered_ws & {"srt", "quality_report"})
 
     conversion = (REPO / "frontend/ui/src/lib/conversion.ts").read_text(encoding="utf-8")

@@ -333,7 +333,7 @@ const STATUS_FA = {queued:'در صف',running:'در حال ترجمه',stopping:
 const MODE_FA = {fast:'سریع',batch:'Batch',batchcheck:'Batch + بازبینی',resumebatch:'ادامهٔ Batch',pdfbilingual:'PDF دوزبانه'};
 const STYLE_FA = {literary:'ادبی',technical:'فنی',conversational:'محادثه‌ای',formal:'رسمی'};
 const ASSET_FA = {main:'فایل اصلی',json_segments:'حافظهٔ ترجمه (JSON)',txt_bilingual:'متن دوزبانه',markdown:'مارک‌داون',
-  docx:'ورد (DOCX)',translated_pdf:'PDF ترجمه‌شده',bilingual_pdf:'PDF دوزبانه',translated_epub:'EPUB ترجمه‌شده',
+  docx:'ورد (DOCX)',translated_pdf:'PDF ترجمه‌شده',mobile_pdf:'PDF موبایل',bilingual_pdf:'PDF دوزبانه',translated_epub:'EPUB ترجمه‌شده',
   srt:'زیرنویس (SRT، زمان‌بندی تخمینی)',quality_report:'گزارش کیفیت',qa_report:'گزارش کیفیت'};
 const NOTE_RE = /\{(NOTE|BOUNDARY_WARNING|WARNING)[:\s][^}]*\}/g;
 const isFlagged = t => NOTE_RE.test(String(t || ''));

@@ -240,6 +240,7 @@ export function WorkspacePage() {
     ['markdown', t('workspace.outMarkdown')],
     ['docx', t('workspace.outDocx')],
     ['translated_pdf', t('workspace.outPdf')],
+    ['mobile_pdf', t('workspace.outMobilePdf')],
     ['bilingual_pdf', t('workspace.outBilingualPdf')],
   ] as const
 

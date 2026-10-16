@@ -113,7 +113,7 @@ crash means "resume from the last healthy spot", not "start from zero".
 | 🖥️ | **React frontend** | Strict-TypeScript UI served locally on :5173 |
 | 🌙 | **Night reading mode** | OLED theme for long sessions |
 | 🇮🇷 | **Persian RTL interface** | Local fonts, no CDN dependency |
-| 📤 | **9 output formats** | From DOCX to SRT and QA reports, with embedded Vazirmatn + RTL |
+| 📤 | **10 output formats** | From DOCX to SRT and QA reports, with embedded Vazirmatn + RTL |
 | 🔒 | **CSRF protection** | Rejects requests from foreign pages |
 
 ---
@@ -591,12 +591,13 @@ python -m app.main --input PATH [options]
 
 ## 📤 Output formats
 
-9 formats, via `--outputs` or web checkboxes:
+10 formats, via `--outputs` or web checkboxes:
 
 | Format | Notes |
 | --- | --- |
 | `translated_epub` | Translated EPUB (conversion pipeline) |
-| `translated_pdf` | Translated PDF |
+| `translated_pdf` | Translated PDF (A4) |
+| `mobile_pdf` | Translated PDF on a phone-width page |
 | `bilingual_pdf` | Bilingual PDF |
 | `docx` | Word, with RTL support |
 | `markdown` | Markdown |

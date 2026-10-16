@@ -495,12 +495,13 @@ python -m app.main --input PATH [options]
 
 ## 📤 قالب‌های خروجی
 
-۹ قالب، با `--outputs` یا چک‌باکس در رابط وب:
+۱۰ قالب، با `--outputs` یا چک‌باکس در رابط وب:
 
 | قالب | توضیح |
 | --- | --- |
 | `translated_epub` | EPUB ترجمه‌شده |
-| `translated_pdf` | PDF ترجمه‌شده |
+| `translated_pdf` | PDF ترجمه‌شده (A4) |
+| `mobile_pdf` | PDF ترجمه‌شده در صفحهٔ هم‌عرض موبایل |
 | `bilingual_pdf` | PDF دوزبانه |
 | `docx` | Word |
 | `markdown` | Markdown |

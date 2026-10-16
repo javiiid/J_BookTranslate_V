@@ -12,7 +12,7 @@
  *   12 workers / 10.9x ............ readme.md benchmark table (72.2s -> 6.6s)
  *   12 samples -> 1 call ........... app/glossary/proposal.py + readme.md
  *   5 monitor tabs .................. app/jobs/detail_page.py
- *   9 output formats ................ app/output/formats.py registry
+ *   10 output formats ............... app/output/formats.py registry
  *   6 quality dimensions ............ app/pipeline/quality_scorer.py
  *   4 account plans ................. app/account/service.py PLANS
  *   11 languages .................... the language selects in app/web.py
@@ -46,8 +46,8 @@ function useLandingSeo(lang: Language): void {
       ? 'KALIMA | AI book translation that keeps the meaning'
       : 'کالیما | ترجمهٔ کتاب با هوش مصنوعی، بدون از دست رفتن معنا'
     const description = english
-      ? 'KALIMA translates long EPUB and PDF books chunk by chunk: uniform project memory, a glossary you approve, safe stop and resume, and 9 output formats.'
-      : 'کالیما کتاب‌های بلند EPUB و PDF را بخش‌به‌بخش ترجمه می‌کند: حافظهٔ یکدست پروژه، واژه‌نامه‌ای که خودتان تأیید می‌کنید، توقف و ادامهٔ امن، و ۹ قالب خروجی.'
+      ? 'KALIMA translates long EPUB and PDF books chunk by chunk: uniform project memory, a glossary you approve, safe stop and resume, and 10 output formats.'
+      : 'کالیما کتاب‌های بلند EPUB و PDF را بخش‌به‌بخش ترجمه می‌کند: حافظهٔ یکدست پروژه، واژه‌نامه‌ای که خودتان تأیید می‌کنید، توقف و ادامهٔ امن، و ۱۰ قالب خروجی.'
     const setMeta = (selector: string, field: 'name' | 'property', name: string, content: string): void => {
       let tag = document.head.querySelector(selector)
       if (tag === null) {
@@ -534,6 +534,7 @@ export function LandingPage(): React.JSX.Element {
     { name: t('landing.formats.m7n'), hint: t('landing.formats.m7h') },
     { name: t('landing.formats.m8n'), hint: t('landing.formats.m8h') },
     { name: t('landing.formats.m9n'), hint: t('landing.formats.m9h') },
+    { name: t('landing.formats.m10n'), hint: t('landing.formats.m10h') },
   ]
 
   const security = [

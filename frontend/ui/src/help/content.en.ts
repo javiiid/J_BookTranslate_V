@@ -357,7 +357,7 @@ export const helpArticlesEn: HelpArticle[] = [
     id: 'convert-export',
     slug: 'convert-export',
     title: 'Converting files and getting outputs',
-    summary: '9 output formats, translation-free conversion, and what this version lacks.',
+    summary: '10 output formats, translation-free conversion, and what this version lacks.',
     category: 'convert-export',
     keywords: ['convert', 'output', 'download', 'docx', 'srt', 'markdown'],
     sections: [
@@ -367,7 +367,7 @@ export const helpArticlesEn: HelpArticle[] = [
         blocks: [
           {
             kind: 'paragraph',
-            text: 'Translated EPUB, translated PDF, bilingual PDF, Word, Markdown, bilingual text, JSON chunks, SRT subtitles and the quality report. The "Convert file" page builds these with no model usage; keep the tab open until the result arrives.',
+            text: 'Translated EPUB, translated PDF, mobile PDF, bilingual PDF, Word, Markdown, bilingual text, JSON chunks, SRT subtitles and the quality report. The "Convert file" page builds these with no model usage; keep the tab open until the result arrives.',
           },
         ],
       },

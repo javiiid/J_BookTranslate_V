@@ -362,7 +362,7 @@ export const helpArticlesFa: HelpArticle[] = [
     id: 'convert-export',
     slug: 'convert-export',
     title: 'تبدیل فایل و دریافت خروجی‌ها',
-    summary: '۹ قالب خروجی، تبدیل بدون ترجمه و چیزهایی که این نسخه ندارد.',
+    summary: '۱۰ قالب خروجی، تبدیل بدون ترجمه و چیزهایی که این نسخه ندارد.',
     category: 'convert-export',
     keywords: ['تبدیل', 'convert', 'خروجی', 'output', 'دانلود', 'download', 'docx', 'srt', 'markdown'],
     sections: [
@@ -372,7 +372,7 @@ export const helpArticlesFa: HelpArticle[] = [
         blocks: [
           {
             kind: 'paragraph',
-            text: 'EPUB ترجمه‌شده، PDF ترجمه‌شده، PDF دوزبانه، Word، Markdown، متن دوزبانه، قطعات JSON، زیرنویس SRT و گزارش کیفیت. صفحهٔ «تبدیل فایل» همین‌ها را بدون مصرف مدل ترجمه می‌سازد؛ تا رسیدن نتیجه زبانه را نبندید.',
+            text: 'EPUB ترجمه‌شده، PDF ترجمه‌شده، PDF موبایل، PDF دوزبانه، Word، Markdown، متن دوزبانه، قطعات JSON، زیرنویس SRT و گزارش کیفیت. صفحهٔ «تبدیل فایل» همین‌ها را بدون مصرف مدل ترجمه می‌سازد؛ تا رسیدن نتیجه زبانه را نبندید.',
           },
         ],
       },
