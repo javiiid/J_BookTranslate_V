@@ -22,7 +22,7 @@ import re
 from html import escape
 from pathlib import Path
 
-from app.output.formats import SUFFIXES, generate_outputs
+from app.output.formats import CONVERT_OUTPUTS, SUFFIXES, generate_outputs
 from app.output.typography import has_rtl, html_text
 
 # ------------------------------------------------------------------
@@ -102,13 +102,7 @@ def _extract_txt(input_path: Path):
 # Public API
 # ------------------------------------------------------------------
 
-_CONVERT_FORMATS = {
-    "json_segments",
-    "txt_bilingual",
-    "markdown",
-    "docx",
-    "translated_pdf",
-}
+_CONVERT_FORMATS = set(CONVERT_OUTPUTS)
 
 _CONVERT_ALIASES = {
     "txt": "txt_bilingual",
@@ -133,22 +127,21 @@ def normalize_convert_formats(value) -> list[str]:
     for name in parts:
         key = str(name).strip().lower()
         key = _CONVERT_ALIASES.get(key, key)
-        # map bilingual_pdf -> translated_pdf for convert
+        # bilingual_pdf has no meaning without a translation, so the
+        # convert path renders it as the same translated_pdf engine.
         if key == "bilingual_pdf":
             key = "translated_pdf"
         if key not in _CONVERT_FORMATS:
-            # also allow the canonical set from formats.py — silently map
-            # unknown convert requests to the closest real format
-            # but raise for truly unknown
             from app.output.formats import OUTPUT_FORMATS
             if key not in OUTPUT_FORMATS:
                 raise ValueError(f"Unknown convert format '{name}'. Supported: {', '.join(sorted(_CONVERT_FORMATS))}.")
-            # translated_epub / srt are source formats, not convert targets
-            if key in {"translated_epub", "srt"}:
-                continue
-            key = {"bilingual_pdf": "translated_pdf"}.get(key, key)
-            if key not in _CONVERT_FORMATS:
-                continue
+            # Fail loudly instead of silently producing fewer files than
+            # asked: these are real translation outputs with no
+            # no-LLM equivalent on the convert path.
+            raise ValueError(
+                f"Convert format '{name}' needs a translation run. "
+                f"Supported here: {', '.join(sorted(_CONVERT_FORMATS))}."
+            )
         if key not in normalized:
             normalized.append(key)
     return normalized

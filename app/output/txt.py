@@ -29,7 +29,7 @@ def render_bilingual_txt(
     flagged_count = sum(
         1
         for segment in segments
-        if segment["flagged"]
+        if (segment or {}).get("flagged")
     )
 
     lines = []
@@ -49,7 +49,8 @@ def render_bilingual_txt(
 
     for segment in segments:
 
-        chapter = segment["chapter"]
+        segment = segment or {}
+        chapter = segment.get("chapter", "")
 
         lines.append("[ORIGINAL]")
 
@@ -57,7 +58,7 @@ def render_bilingual_txt(
 
             lines.append(f"({chapter})")
 
-        lines.append(segment["source"])
+        lines.append(segment.get("source", ""))
         lines.append("")
 
         lines.append("[TRANSLATION]")
@@ -66,7 +67,7 @@ def render_bilingual_txt(
 
             lines.append(f"({chapter})")
 
-        lines.append(segment["target"])
+        lines.append(segment.get("target", ""))
         lines.append("")
 
         lines.append("-" * 40)

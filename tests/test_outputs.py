@@ -216,13 +216,17 @@ def test_translated_pdf_writer_pages_and_text():
         )
         document = fitz.open(stream=path.read_bytes(), filetype="pdf")
         try:
-            assert len(document) == len(SAMPLE)
+            # Flowing layout: short segments share pages, never one
+            # page per segment.
+            assert 1 <= len(document) <= len(SAMPLE)
             text = unicodedata.normalize(
                 "NFKC",
                 "".join(document[i].get_text() for i in range(len(document))),
             )
+            assert "Book" in text
             assert "The first translated sentence." in text
             assert "The second translated sentence." in text
+            assert document.metadata.get("title") == "Book"
         finally:
             document.close()
 
@@ -234,12 +238,161 @@ def test_bilingual_pdf_writer_shows_both_columns():
         )
         document = fitz.open(stream=path.read_bytes(), filetype="pdf")
         try:
+            assert 1 <= len(document) <= len(SAMPLE)
             text = unicodedata.normalize(
                 "NFKC",
                 "".join(document[i].get_text() for i in range(len(document))),
             )
+            assert "Book" in text
             assert "The first original sentence." in text
             assert "The first translated sentence." in text
+        finally:
+            document.close()
+
+
+def _long_segments(count, to_lang="FA"):
+    # NOTE: markers avoid ل (LAM) and ZWNJ on purpose. PyMuPDF 1.28
+    # extracts ل presentation forms as Latin click letters
+    # (U+01C1/U+01C2) and drops ZWNJ -- identically on the old
+    # one-page-per-segment path (verified side by side), so it is an
+    # upstream extraction quirk, not something this writer controls.
+    # The glyphs render correctly; only extraction is lossy.
+    return [
+        {
+            "id": f"chunk-{i}", "position": i,
+            "source": f"Original sentence number {i} with filler words.",
+            "target": f"متن پژوهش شماره {i} پایان.",
+            "format": "epub", "chapter": "ch1.xhtml",
+            "flagged": False, "notes": [],
+        }
+        for i in range(count)
+    ]
+
+
+def _pdf_text(document):
+    return unicodedata.normalize(
+        "NFKC",
+        "".join(document[i].get_text() for i in range(len(document))),
+    )
+
+
+def test_translated_pdf_flows_many_segments_onto_few_pages():
+    segments = _long_segments(60)
+    with TemporaryDirectory() as tmp:
+        path = pdf_module.write_translated_pdf(
+            segments, Path(tmp) / "long.pdf", title="Book", to_lang="FA",
+        )
+        document = fitz.open(stream=path.read_bytes(), filetype="pdf")
+        try:
+            assert 1 < len(document) < len(segments)
+            text = _pdf_text(document)
+            assert "Book" in text
+            for i in (0, 30, 59):
+                assert f"شماره {i}" in text
+            assert document.metadata.get("title") == "Book"
+            fonts = {font[3] for page in document for font in page.get_fonts()}
+            assert any("Naskh" in name for name in fonts)
+        finally:
+            document.close()
+
+
+def test_bilingual_pdf_flows_and_loses_no_pairs():
+    segments = _long_segments(40)
+    with TemporaryDirectory() as tmp:
+        path = pdf_module.write_bilingual_pdf(
+            segments, Path(tmp) / "long.bilingual.pdf", title="Book", to_lang="FA",
+        )
+        document = fitz.open(stream=path.read_bytes(), filetype="pdf")
+        try:
+            assert 1 <= len(document)
+            text = _pdf_text(document)
+            for i in (0, 20, 39):
+                assert f"number {i}" in text
+                assert f"شماره {i}" in text
+        finally:
+            document.close()
+
+
+def test_bilingual_pdf_keeps_long_pairs_without_clipping():
+    # Regression: a two-column table clipped oversized rows, losing
+    # 309 of 480 source paragraphs on an 8-pair book. Pairs are
+    # stacked so every paragraph must survive, including mid-text.
+    segments = []
+    for i in range(8):
+        source = " ".join(
+            f"Source paragraph {i}-{p} with filler words." for p in range(30)
+        )
+        segments.append(
+            {
+                "id": f"chunk-{i}", "position": i,
+                "source": source, "target": f"متن پژوهش شماره {i} پایان.",
+                "format": "epub", "chapter": "ch1.xhtml",
+                "flagged": False, "notes": [],
+            }
+        )
+    with TemporaryDirectory() as tmp:
+        path = pdf_module.write_bilingual_pdf(
+            segments, Path(tmp) / "clip.bilingual.pdf", title="Book", to_lang="FA",
+        )
+        document = fitz.open(stream=path.read_bytes(), filetype="pdf")
+        try:
+            assert len(document) > 1
+            text = _pdf_text(document)
+            for i in range(8):
+                for p in (0, 15, 29):
+                    assert f"Source paragraph {i}-{p}" in text, (i, p)
+                assert f"شماره {i}" in text
+        finally:
+            document.close()
+
+
+def test_pdf_leaves_no_temp_files_behind(tmp_path):
+    segments = _long_segments(3)
+    pdf_module.write_translated_pdf(
+        segments, tmp_path / "a.pdf", title="Book", to_lang="FA",
+    )
+    pdf_module.write_bilingual_pdf(
+        segments, tmp_path / "b.pdf", title="Book", to_lang="FA",
+    )
+    leftovers = [
+        p for p in tmp_path.iterdir()
+        if p.suffixes[-2:] == [".story", ".pdf"] or p.suffix == ".story.pdf"
+    ]
+    assert leftovers == []
+
+
+def test_pdf_direction_detected_per_paragraph():
+    assert pdf_module._direction("متن فارسی", "ltr") == "rtl"
+    assert pdf_module._direction("An English sentence.", "ltr") == "ltr"
+    assert pdf_module._direction("An English sentence.", "rtl") == "ltr"
+    assert pdf_module._direction("", "rtl") == "rtl"
+    assert pdf_module._direction("", "ltr") == "ltr"
+
+
+def test_translated_pdf_persian_stays_searchable():
+    # Guards extractable Persian: the text readers copy/search must
+    # round-trip through the embedded subset font. Markers avoid ل
+    # and ZWNJ (see _long_segments: upstream extraction quirk).
+    words = ["کتاب", "پژوهش", "ترجمه", "شماره"]
+    segments = [
+        {
+            "id": "chunk-0", "position": 0,
+            "source": "A book about research.",
+            "target": " ".join(words) + ".",
+            "format": "epub", "chapter": "ch1.xhtml",
+            "flagged": False, "notes": [],
+        }
+    ]
+    with TemporaryDirectory() as tmp:
+        path = pdf_module.write_translated_pdf(
+            segments, Path(tmp) / "fa.pdf", title="Book", to_lang="FA",
+        )
+        document = fitz.open(stream=path.read_bytes(), filetype="pdf")
+        try:
+            text = _pdf_text(document)
+            assert "Book" in text
+            for word in words:
+                assert word in text, word
         finally:
             document.close()
 

@@ -14,7 +14,7 @@ from app.core.paths import ensure_dir
 from app.core.config import read_config
 from app.translation.prompts import get_translation_prompt
 from app.output.formats import (
-    available_output_formats,
+    TRANSLATION_OUTPUTS,
     normalize_outputs,
 )
 
@@ -460,9 +460,9 @@ def main():
 
                 if str(args.outputs).strip().lower() == "all":
 
-                    output_formats = (
-                        available_output_formats()
-                    )
+                    # "all" means every extra output; the reassembled
+                    # EPUB is the job's primary output, never an extra.
+                    output_formats = sorted(TRANSLATION_OUTPUTS)
 
                 else:
 

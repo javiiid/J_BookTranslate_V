@@ -48,6 +48,44 @@ ALIASES = {
     "quality": "quality_report",
 }
 
+#: Extra outputs a translation job can produce via ``generate_outputs``.
+#: ``translated_epub`` is excluded: for EPUB sources the reassembled EPUB
+#: is the primary output of the job itself, never an extra format
+#: (``generate_outputs`` records it in ``skipped``).
+TRANSLATION_OUTPUTS = frozenset({
+    "json_segments",
+    "txt_bilingual",
+    "markdown",
+    "docx",
+    "translated_pdf",
+    "bilingual_pdf",
+    "srt",
+    "quality_report",
+})
+
+#: Outputs a calibration session accepts. ``srt`` and ``quality_report``
+#: are rejected by ``CalibrationService.create``: neither has a final
+#: text to write until the full run is done, so the workshop does not
+#: offer them (see ``WorkspacePage.OUTPUTS``).
+CALIBRATION_OUTPUTS = frozenset({
+    "json_segments",
+    "txt_bilingual",
+    "markdown",
+    "docx",
+    "translated_pdf",
+    "bilingual_pdf",
+})
+
+#: Outputs the no-LLM convert path can produce (``convert_file``).
+#: Mirrors ``CONVERSION_FORMATS`` in ``frontend/ui/src/lib/conversion.ts``.
+CONVERT_OUTPUTS = frozenset({
+    "json_segments",
+    "txt_bilingual",
+    "markdown",
+    "docx",
+    "translated_pdf",
+})
+
 SUFFIXES = {
     "json_segments": ".segments.json",
     "txt_bilingual": ".bilingual.txt",
@@ -142,6 +180,11 @@ def generate_outputs(
                 "flagged":   number of flagged segments,
                 "quality":   quality summary dict or None,
             }
+
+    Each format is isolated: a writer that raises is recorded in
+    ``skipped`` and the remaining formats still run. Partial files
+    from a failed writer are removed so ``generated`` never points
+    at a half-written or invalid file.
     """
 
     output_dir = Path(output_dir)
@@ -199,7 +242,11 @@ def generate_outputs(
                 validate_srt,
             )
 
-            blocks = segments_to_srt_blocks(segments)
+            try:
+                blocks = segments_to_srt_blocks(segments)
+            except Exception as exc:
+                skipped[name] = f"SRT build failed: {exc}"
+                continue
 
             if not blocks:
 
@@ -214,14 +261,22 @@ def generate_outputs(
                 / f"{base_name}{SUFFIXES[name]}"
             )
 
-            target.write_text(
-                serialize_srt(blocks),
-                encoding="utf-8",
-            )
+            try:
+                target.write_text(
+                    serialize_srt(blocks),
+                    encoding="utf-8",
+                )
 
-            issues = validate_srt(
-                target.read_text(encoding="utf-8")
-            )
+                issues = validate_srt(
+                    target.read_text(encoding="utf-8")
+                )
+            except Exception as exc:
+                skipped[name] = f"SRT write failed: {exc}"
+                try:
+                    target.unlink(missing_ok=True)
+                except OSError:
+                    pass
+                continue
 
             if issues:
 
@@ -229,6 +284,11 @@ def generate_outputs(
                     "SRT written but failed validation: "
                     + "; ".join(issues[:3])
                 )
+
+                try:
+                    target.unlink(missing_ok=True)
+                except OSError:
+                    pass
 
                 continue
 
@@ -241,90 +301,99 @@ def generate_outputs(
             / f"{base_name}{SUFFIXES[name]}"
         )
 
-        if name == "json_segments":
+        try:
+            if name == "json_segments":
 
-            json_segments.write_json_segments(
-                segments,
-                target,
-                title=title,
-                to_lang=to_lang,
-            )
-
-        elif name == "txt_bilingual":
-
-            txt.write_bilingual_txt(
-                segments,
-                target,
-                title=title,
-                filetype=filetype,
-                to_lang=to_lang,
-            )
-
-        elif name == "markdown":
-
-            markdown.write_markdown(
-                segments,
-                target,
-                title=title,
-                filetype=filetype,
-                to_lang=to_lang,
-            )
-
-        elif name == "docx":
-
-            docx.write_docx(
-                segments,
-                target,
-                title=title,
-                to_lang=to_lang,
-            )
-
-        elif name == "translated_pdf":
-
-            pdf.write_translated_pdf(
-                segments,
-                target,
-                title=title,
-                to_lang=to_lang,
-            )
-
-        elif name == "bilingual_pdf":
-
-            pdf.write_bilingual_pdf(
-                segments,
-                target,
-                title=title,
-                to_lang=to_lang,
-            )
-
-        elif name == "quality_report":
-
-            if not any(
-                segment.get("quality")
-                for segment in segments or []
-            ):
-
-                skipped[name] = (
-                    "quality scoring did not run "
-                    "(no scorer or no translated chunks)"
+                json_segments.write_json_segments(
+                    segments,
+                    target,
+                    title=title,
+                    to_lang=to_lang,
                 )
 
-                continue
+            elif name == "txt_bilingual":
 
-            quality_scorer.write_quality_report(
-                segments,
-                target,
-                title=title,
-                filetype=filetype,
-                to_lang=to_lang,
-            )
+                txt.write_bilingual_txt(
+                    segments,
+                    target,
+                    title=title,
+                    filetype=filetype,
+                    to_lang=to_lang,
+                )
+
+            elif name == "markdown":
+
+                markdown.write_markdown(
+                    segments,
+                    target,
+                    title=title,
+                    filetype=filetype,
+                    to_lang=to_lang,
+                )
+
+            elif name == "docx":
+
+                docx.write_docx(
+                    segments,
+                    target,
+                    title=title,
+                    to_lang=to_lang,
+                )
+
+            elif name == "translated_pdf":
+
+                pdf.write_translated_pdf(
+                    segments,
+                    target,
+                    title=title,
+                    to_lang=to_lang,
+                )
+
+            elif name == "bilingual_pdf":
+
+                pdf.write_bilingual_pdf(
+                    segments,
+                    target,
+                    title=title,
+                    to_lang=to_lang,
+                )
+
+            elif name == "quality_report":
+
+                if not any(
+                    (segment or {}).get("quality")
+                    for segment in segments or []
+                ):
+
+                    skipped[name] = (
+                        "quality scoring did not run "
+                        "(no scorer or no translated chunks)"
+                    )
+
+                    continue
+
+                quality_scorer.write_quality_report(
+                    segments,
+                    target,
+                    title=title,
+                    filetype=filetype,
+                    to_lang=to_lang,
+                )
+
+        except Exception as exc:
+            skipped[name] = f"{name} failed: {exc}"
+            try:
+                target.unlink(missing_ok=True)
+            except OSError:
+                pass
+            continue
 
         generated[name] = str(target)
 
     flagged_count = sum(
         1
         for segment in segments or []
-        if segment["flagged"]
+        if (segment or {}).get("flagged")
     )
 
     qa_report = None

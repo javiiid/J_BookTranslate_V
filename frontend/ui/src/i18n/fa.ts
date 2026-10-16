@@ -35,6 +35,13 @@ export const fa = {
   'shell.languageToEn': 'تغییر به انگلیسی',
   'shell.languageToFa': 'تغییر به فارسی',
 
+  // ---- provider status badge (ApiStatus renders by status, never the
+  // ---- server's human message, so both languages always have a string) ----
+  'api.status.ready': 'تنظیمات سرویس ترجمه آماده است',
+  'api.status.checking': 'در حال بررسی…',
+  'api.status.unreachable': 'ارتباط با سرور قطع است',
+  'api.status.error': 'خطا در سرویس ترجمه',
+
   // ---- dashboard ----
   'dashboard.checking': 'در حال سر زدن به کارها…',
   'dashboard.welcome': '{greeting}؛ به کالیما خوش آمدید',

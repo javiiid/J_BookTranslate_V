@@ -25,7 +25,10 @@ from app.output.markers import extract_markers
 
 HTML_TAG_RE = re.compile(r"<[^>]+>")
 
-WHITESPACE_RE = re.compile(r"[ \t\u200c]+")
+# NOTE: U+200C (ZWNJ, نیم‌فاصله) is NOT whitespace and must never be
+# collapsed. It joins Persian words (می‌کنم); folding it to a plain
+# space breaks joining. Only ASCII blanks/tabs collapse here.
+WHITESPACE_RE = re.compile(r"[ \t]+")
 
 SPACE_BEFORE_PUNCT_RE = re.compile(r"\s+([.!?,;:،؛»\"')…-])")
 
@@ -215,7 +218,7 @@ def build_qa_report(
     flagged = [
         segment
         for segment in segments
-        if segment["flagged"]
+        if (segment or {}).get("flagged")
     ]
 
     has_quality = any(
@@ -240,20 +243,25 @@ def build_qa_report(
 
     if has_quality:
 
-        composites = [
-            float(segment["quality"]["composite"])
-            for segment in quality_segments
-        ]
+        composites = []
+        for segment in quality_segments:
+            try:
+                composites.append(
+                    float((segment.get("quality") or {}).get("composite"))
+                )
+            except (TypeError, ValueError):
+                continue
         quality_flagged = sum(
             1
             for segment in quality_segments
-            if segment["quality"]["flag_reasons"]
+            if (segment.get("quality") or {}).get("flag_reasons")
         )
-        lines.append(
-            f"quality    : {len(quality_segments)} "
-            f"scored (avg {sum(composites)/len(composites):.2f}, "
-            f"{quality_flagged} flagged)"
-        )
+        if composites:
+            lines.append(
+                f"quality    : {len(quality_segments)} "
+                f"scored (avg {sum(composites)/len(composites):.2f}, "
+                f"{quality_flagged} flagged)"
+            )
 
     lines.append("")
 
@@ -275,34 +283,40 @@ def build_qa_report(
         quality = segment.get("quality") or {}
         quality_reasons = quality.get("flag_reasons") or []
 
-        if segment["notes"]:
-            markers = ", ".join(segment["notes"])
+        notes = segment.get("notes") or []
+        if notes:
+            markers = ", ".join(notes)
         elif quality_reasons:
             markers = ", ".join(quality_reasons)
         else:
             markers = "boundary"
 
         lines.append(
-            f"{index}. {segment['id']} "
-            f"({chapter_title(segment['chapter'])})"
+            f"{index}. {(segment.get('id') or '?')} "
+            f"({chapter_title(segment.get('chapter') or '')})"
         )
 
         lines.append(
             f"   marker : {markers}"
         )
 
+        composite = quality.get("composite")
+        try:
+            composite_text = f"{float(composite):.2f}"
+        except (TypeError, ValueError):
+            composite_text = "n/a"
         if quality:
             lines.append(
-                f"   quality: composite {quality['composite']:.2f} — "
+                f"   quality: composite {composite_text} — "
                 f"{', '.join(quality_reasons) or 'ok'}"
             )
 
         lines.append(
-            f"   source : {_snippet(segment['source'])}"
+            f"   source : {_snippet(segment.get('source'))}"
         )
 
         lines.append(
-            f"   target : {_snippet(segment['target'])}"
+            f"   target : {_snippet(segment.get('target'))}"
         )
 
         lines.append("")

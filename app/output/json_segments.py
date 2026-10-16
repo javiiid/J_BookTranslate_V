@@ -45,14 +45,14 @@ def segments_as_dict(
         "to_language": to_lang,
         "segments": [
             {
-                "id": segment["id"],
-                "source": segment["source"],
-                "target": segment["target"],
-                "format": segment["format"],
-                "chapter": segment["chapter"],
-                "flagged": bool(segment["flagged"]),
-                "notes": list(segment.get("notes", [])),
-                **({"quality": segment["quality"]} if segment.get("quality") else {}),
+                "id": (segment or {}).get("id", ""),
+                "source": (segment or {}).get("source", ""),
+                "target": (segment or {}).get("target", ""),
+                "format": (segment or {}).get("format", ""),
+                "chapter": (segment or {}).get("chapter", ""),
+                "flagged": bool((segment or {}).get("flagged")),
+                "notes": list((segment or {}).get("notes") or []),
+                **({"quality": segment["quality"]} if (segment or {}).get("quality") else {}),
             }
             for segment in (segments or [])
         ],

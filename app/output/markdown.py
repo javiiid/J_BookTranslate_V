@@ -23,9 +23,11 @@ def _target_lines(segment):
     as blockquotes so QA information survives the export.
     """
 
-    text = segment["target"]
+    segment = segment or {}
+    text = segment.get("target", "")
+    notes = segment.get("notes") or []
 
-    if not segment["notes"]:
+    if not notes:
 
         lines = [
             line.strip()
@@ -43,7 +45,7 @@ def _target_lines(segment):
 
     quoted = [
         f"> {note}"
-        for note in segment["notes"]
+        for note in notes
         if note and note not in note_marks
     ]
 
@@ -91,8 +93,9 @@ def render_markdown(
 
     for segment in segments:
 
+        segment = segment or {}
         heading = chapter_title(
-            segment["chapter"]
+            segment.get("chapter", "")
         )
 
         if heading != current_chapter:

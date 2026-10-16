@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
+import { useLanguage } from '@/i18n/useLanguage.ts'
 
 type Tone = 'pending' | 'ready' | 'error'
 
@@ -21,6 +22,7 @@ const TONE: Record<Tone, { dot: string; text: string; ring: string }> = {
  * the meaning, so the state is not communicated by colour alone.
  */
 export function ApiStatus() {
+  const { t } = useLanguage()
   const { data, isPending, isError } = useQuery({
     queryKey: ['health'],
     queryFn: api.health,
@@ -29,7 +31,16 @@ export function ApiStatus() {
   })
 
   const tone: Tone = isPending ? 'pending' : isError ? 'error' : data?.status === 'ready' ? 'ready' : 'error'
-  const message = isError ? 'ارتباط با سرور قطع است' : (data?.message ?? 'در حال بررسی…')
+  // Status-driven, never the server's human message: /api/health speaks
+  // Persian only, so rendering data.message verbatim leaked Persian into
+  // the English UI. The detail stays one click away on /account.
+  const message = isPending
+    ? t('api.status.checking')
+    : isError
+      ? t('api.status.unreachable')
+      : data?.status === 'ready'
+        ? t('api.status.ready')
+        : t('api.status.error')
   const palette = TONE[tone]
 
   return (

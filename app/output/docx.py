@@ -183,8 +183,9 @@ def _document_xml(segments, title, rtl):
 
     for segment in segments or []:
 
+        segment = segment or {}
         chapter = chapter_title(
-            segment["chapter"]
+            segment.get("chapter", "")
         )
 
         # An empty title means the source had no real chapter name -- a PDF's
@@ -201,9 +202,9 @@ def _document_xml(segments, title, rtl):
 
         body.append(
             _paragraph_xml(
-                segment["target"],
+                (segment or {}).get("target", ""),
                 rtl,
-                flagged=bool(segment.get("flagged")),
+                flagged=bool((segment or {}).get("flagged")),
             )
         )
 

@@ -30,6 +30,11 @@ export const en: Record<StringKey, string> = {
   'shell.languageToEn': 'Switch to English',
   'shell.languageToFa': 'Switch to Persian',
 
+  'api.status.ready': 'Translation service is configured',
+  'api.status.checking': 'Checking…',
+  'api.status.unreachable': 'Server unreachable',
+  'api.status.error': 'Translation service error',
+
   'dashboard.checking': 'Checking the jobs…',
   'dashboard.welcome': '{greeting}, welcome to KALIMA',
   'dashboard.attention': 'Needs attention',
